@@ -350,7 +350,9 @@ def test_youtube_analysis_uses_runtime_with_browser_login(
         ],
     }
 
-    def fake_extract(url: str, *, with_runtime: bool, use_session: bool, **kwargs: Any) -> dict:
+    def fake_extract(
+        url: str, *, with_runtime: bool, use_session: bool, **kwargs: Any
+    ) -> dict[str, Any]:
         calls.append((use_session, with_runtime))
         return good
 
@@ -369,7 +371,9 @@ def test_youtube_analysis_uses_runtime_with_browser_login(
     # cookies+runtime path from the first attempt).
     calls.clear()
 
-    def hard_error(url: str, *, with_runtime: bool, use_session: bool, **kwargs: Any) -> dict:
+    def hard_error(
+        url: str, *, with_runtime: bool, use_session: bool, **kwargs: Any
+    ) -> dict[str, Any]:
         calls.append((use_session, with_runtime))
         raise DownloadError("This video is private - its owner restricted access.")
 
