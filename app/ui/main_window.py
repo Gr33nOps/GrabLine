@@ -1109,12 +1109,16 @@ class MainWindow(QMainWindow):
             elif not quiet:
                 QMessageBox.information(self, "GrabLine", t("You have the latest version."))
 
-        def failed(_error: object) -> None:
+        def failed(error: object) -> None:
             guard.end(self._in_flight, "update")
             self.statusBar().showMessage(t("Ready"))
             if not quiet:
+                detail = str(error).strip() if error else ""
                 QMessageBox.information(
-                    self, "GrabLine", t("Could not check for updates right now.")
+                    self,
+                    "GrabLine",
+                    t("Could not check for updates right now.")
+                    + (f"\n\n{detail}" if detail else ""),
                 )
 
         self._run_file_op(partial(update.installer_update, proxy), done, failed)

@@ -113,45 +113,31 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           ARCH="${{ matrix.mac_arch }}"
           STAGE=dist/dmg
-          rm -rf "$STAGE"; mkdir -p "$STAGE/.background"
-          cp packaging/grabline-dmg-background.png "$STAGE/.background/background.png"
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          test -d dist/Grabline.app
           cp -R dist/Grabline.app "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
-          hdiutil create -volname Grabline -srcfolder "$STAGE" -ov -format UDRW dist/rw.dmg
-          MOUNT="$(hdiutil attach -readwrite -noverify -noautoopen dist/rw.dmg |
-                   grep -o '/Volumes/.*' | head -1)"
-          # Best effort: lay the window out with the drag-to-Applications
-          # backdrop. CI runners have no Finder session some of the time, and a
-          # plain disk image beats a failed build, so this never fails the job.
-          osascript <<'APPLESCRIPT' || echo "Finder layout unavailable; shipping the plain layout"
-          tell application "Finder"
-            tell disk "Grabline"
-              open
-              set current view of container window to icon view
-              set toolbar visible of container window to false
-              set statusbar visible of container window to false
-              set the bounds of container window to {200, 120, 820, 540}
-              set opts to the icon view options of container window
-              set arrangement of opts to not arranged
-              set icon size of opts to 96
-              set background picture of opts to file ".background:background.png"
-              set position of item "Grabline.app" of container window to {150, 190}
-              set position of item "Applications" of container window to {470, 190}
-              close
-              open
-              update without registering applications
-              delay 2
-            end tell
-          end tell
-          APPLESCRIPT
-          sync
-          hdiutil detach "$MOUNT" || true
-          hdiutil convert dist/rw.dmg -format UDZO -ov -o "dist/Grabline-$V-$ARCH.dmg"
-          rm -f dist/rw.dmg
-          echo "built dist/Grabline-$V-$ARCH.dmg"
+          OUT="dist/Grabline-$V-$ARCH.dmg"
+          rm -f "$OUT"
+          # Build the final compressed image in one shot. The old UDRW → attach
+          # → Finder layout → convert pipeline is what failed on macos-latest
+          # (Apple Silicon): attach/detach races leave the volume busy and the
+          # convert step exits 1 with no usable .dmg. A plain UDZO from the
+          # folder is what every other open-source mac app ships from CI, and
+          # users still drag Grabline.app onto Applications themselves.
+          hdiutil create \
+            -volname Grabline \
+            -srcfolder "$STAGE" \
+            -ov \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            "$OUT"
+          test -f "$OUT"
+          echo "built $OUT ($(du -h "$OUT" | awk '{print $1}'))"
 
       - name: Package Linux AppImage + tarball + .deb
         if: runner.os == 'Linux'

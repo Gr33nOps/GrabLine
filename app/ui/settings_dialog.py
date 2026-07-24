@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTime, QUrl, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QThread, QTime, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QKeySequenceEdit,
     QLabel,
+    QLayout,
+    QLayoutItem,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -33,6 +35,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QTimeEdit,
@@ -59,7 +62,87 @@ def _note(text: str) -> QLabel:
     ``_note(...)`` too (tools/i18n_extract.py)."""
     label = components.role_label(t(text), "muted")
     label.setWordWrap(True)
+    # Without this, a wrapping label in a scroll area grows to the full text
+    # width and the right edge of About (and any similar page) gets clipped
+    # when the window is narrow - every other Settings tab uses a form that
+    # already constrains field width, so only free-form pages need this.
+    label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+    label.setMinimumWidth(0)
     return label
+
+
+class _FlowLayout(QLayout):
+    """Left-to-right, wrap-to-next-row layout for a row of buttons.
+
+    QHBoxLayout never wraps, so six About buttons overflow a narrow Settings
+    pane and get clipped by the scroll area. This lays them out like a
+    paragraph of chips instead.
+    """
+
+    def __init__(self, parent: QWidget | None = None, *, spacing: int = 8) -> None:
+        super().__init__(parent)
+        self._items: list[QLayoutItem] = []
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(spacing)
+
+    def addItem(self, item: QLayoutItem) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int) -> QLayoutItem | None:
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int) -> QLayoutItem | None:
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self) -> Qt.Orientation:
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._do_layout(QRect(0, 0, width, 0), test=True)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._do_layout(rect, test=False)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect: QRect, *, test: bool) -> int:
+        margins = self.contentsMargins()
+        effective = rect.adjusted(
+            margins.left(), margins.top(), -margins.right(), -margins.bottom()
+        )
+        x = effective.x()
+        y = effective.y()
+        row_height = 0
+        space = self.spacing()
+        for item in self._items:
+            hint = item.sizeHint()
+            next_x = x + hint.width() + space
+            if next_x - space > effective.right() + 1 and row_height > 0:
+                x = effective.x()
+                y += row_height + space
+                next_x = x + hint.width() + space
+                row_height = 0
+            if not test:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x = next_x
+            row_height = max(row_height, hint.height())
+        return y + row_height - rect.y() + margins.bottom()
 
 
 def _inline_row() -> QHBoxLayout:
@@ -941,7 +1024,13 @@ class SettingsDialog(chrome.Dialog):
 
         # ---- About -------------------------------------------------------------
         about_tab = QWidget()
+        # Preferred/Minimum so the scroll area can shrink the page to its width
+        # (without this, word-wrap and the button flow never reflow - they force
+        # a horizontal clip instead, which is why only About looked cut off).
+        about_tab.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         about_layout = QVBoxLayout(about_tab)
+        about_layout.setContentsMargins(0, 0, 0, 0)
+        about_layout.setSpacing(12)
         head = QHBoxLayout()
         head.addWidget(components.app_logo(44))
         title_box = QVBoxLayout()
@@ -959,7 +1048,6 @@ class SettingsDialog(chrome.Dialog):
         head.addLayout(title_box)
         head.addStretch(1)
         about_layout.addLayout(head)
-        about_layout.addSpacing(6)
         about_layout.addWidget(
             _note(
                 "A free, open-source download manager under the AGPL-3.0 license. "
@@ -967,10 +1055,9 @@ class SettingsDialog(chrome.Dialog):
                 "a coffee keeps development going."
             )
         )
-        links_row = QHBoxLayout()
+        links_row = _FlowLayout(spacing=8)
         update_btn = QPushButton(t("Check for updates"))
         update_btn.clicked.connect(self._check_updates_now)
-        links_row.addWidget(update_btn)
         project_btn = QPushButton(t("Project page"))
         project_btn.clicked.connect(lambda: self._open_url(_PROJECT_URL))
         releases_btn = QPushButton(t("Changelog && releases"))
@@ -981,12 +1068,15 @@ class SettingsDialog(chrome.Dialog):
         support_btn.clicked.connect(lambda: self._open_url(_SUPPORT_URL))
         diag_btn = QPushButton(t("Copy diagnostics"))
         diag_btn.clicked.connect(self._copy_diagnostics)
-        links_row.addWidget(project_btn)
-        links_row.addWidget(releases_btn)
-        links_row.addWidget(report_btn)
-        links_row.addWidget(support_btn)
-        links_row.addWidget(diag_btn)
-        links_row.addStretch(1)
+        for btn in (
+            update_btn,
+            project_btn,
+            releases_btn,
+            report_btn,
+            support_btn,
+            diag_btn,
+        ):
+            links_row.addWidget(btn)
         about_layout.addLayout(links_row)
         about_layout.addWidget(
             _note(
