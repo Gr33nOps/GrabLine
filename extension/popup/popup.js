@@ -232,6 +232,8 @@ async function wireToggles(tab) {
 }
 
 (async () => {
+  const ver = document.getElementById("ext-version");
+  if (ver) ver.textContent = `v${api.runtime.getManifest().version}`;
   const tab = await activeTab();
   await renderStatus();
   await renderQuickActions(tab);

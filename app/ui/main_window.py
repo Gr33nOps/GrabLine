@@ -941,7 +941,17 @@ class MainWindow(QMainWindow):
             self._in_handoff = False
 
     def _drain_handoffs(self) -> None:
+        seen: set[str] = set()
         for handoff in self.manager.db.claim_handoffs():
+            # One browser click can deposit the same URL many times (extension
+            # retry / dual webRequest+onCreated). Claiming once still left a
+            # batch of identical rows - collapse them here so we only open one
+            # dialog and only queue one job.
+            if handoff.source not in ("focus", "gallery", "links", "torrent", "cloud"):
+                key = handoff.url.strip()
+                if key in seen:
+                    continue
+                seen.add(key)
             if handoff.source == "focus":
                 # "Open GrabLine" from the extension: raise the window, and jump
                 # to a named page (e.g. settings) when one was requested.
@@ -1221,6 +1231,20 @@ class MainWindow(QMainWindow):
         if not allow_duplicate:
             existing = self.manager.find_existing(url)
             if existing is not None:
+                # Browser takeover can re-send the same URL while the first job
+                # is still running. Asking "download again?" for every retry is
+                # how one click became 10-15 cancel clicks - just keep the one
+                # we already have.
+                if from_browser and existing.status in (
+                    JobStatus.QUEUED,
+                    JobStatus.DOWNLOADING,
+                    JobStatus.PAUSED,
+                    JobStatus.COMPLETED,
+                ):
+                    self.statusBar().showMessage(
+                        t("Already in the list: {name}", name=existing.filename), 4000
+                    )
+                    return
                 what = (
                     t("was already downloaded")
                     if existing.status is JobStatus.COMPLETED

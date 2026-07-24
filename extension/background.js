@@ -26,6 +26,35 @@ async function cookieHeaderFor(url) {
   }
 }
 
+// Takeover paths (webRequest cancel / downloads.onCreated) can fire dozens of
+// times for one user gesture when a page retries a cancelled response. A long
+// cooldown collapses that storm into one GrabLine job. Manual grabs
+// (right-click, hover button, popup) skip this on purpose - those are deliberate.
+const HANDOFF_COOLDOWN_MS = 60_000;
+const recentHandoffs = new Map(); // url -> timestamp
+const handledDownloadIds = new Set(); // browser download item ids already claimed
+
+function canonicalHandoffUrl(url) {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function takeoverAlreadyQueued(url) {
+  const key = canonicalHandoffUrl(url);
+  const now = Date.now();
+  for (const [seen, at] of recentHandoffs) {
+    if (now - at > HANDOFF_COOLDOWN_MS) recentHandoffs.delete(seen);
+  }
+  if (recentHandoffs.has(key)) return true;
+  recentHandoffs.set(key, now);
+  return false;
+}
+
 async function sendToGrabLine(
   url,
   tab,
@@ -37,6 +66,12 @@ async function sendToGrabLine(
     onlyIfRunning = false,
   } = {},
 ) {
+  if (onlyIfRunning && takeoverAlreadyQueued(url)) {
+    // Same URL was handed off moments ago - tell the caller it already landed
+    // so they still cancel the browser's duplicate attempt, without queuing
+    // another job.
+    return { type: "queued", appRunning: lastAppRunning, deduped: true };
+  }
   const message = {
     type: "download",
     url,
@@ -450,6 +485,14 @@ api.downloads.onCreated.addListener((item) => {
   // neither - a pause that lost the race throws, and anything short of the app
   // accepting the URL resumes the browser's own download.
   if (interceptEnabled === false || !shouldIntercept(item)) return;
+  // The same click can spawn several download items (browser retry, parallel
+  // Range probes promoted to downloads). Handle each item id once.
+  if (handledDownloadIds.has(item.id)) return;
+  handledDownloadIds.add(item.id);
+  if (handledDownloadIds.size > 200) {
+    const oldest = handledDownloadIds.values().next().value;
+    handledDownloadIds.delete(oldest);
+  }
   void (async () => {
     try {
       await api.downloads.pause(item.id);
@@ -495,16 +538,17 @@ const DOWNLOAD_CONTENT_TYPES =
   /^application\/(?:octet-stream|zip|gzip|x-gzip|x-tar|x-rar-compressed|vnd\.rar|x-7z-compressed|x-bzip2|x-xz|x-msdownload|x-msdos-program|vnd\.microsoft\.portable-executable|x-apple-diskimage|x-iso9660-image|x-bittorrent|x-debian-package|vnd\.android\.package-archive)/i;
 
 function isForcedDownload(details) {
-  // The unambiguous server signal first: Content-Disposition: attachment always
-  // means "download", and overrides any inline rendering.
+  // Only frame navigations reach this function (see the listener filter). A
+  // top-level / iframe navigation that the server marks as a download is the
+  // one case where cancelling before downloads.onCreated prevents the Firefox
+  // download panel flash. XHR/fetch/object traffic must never be cancelled
+  // here: sites stream attachment-disposition responses for APIs, fonts, and
+  // range probes, and cancelling them made every click queue dozens of
+  // GrabLine jobs as the page retried.
   const disposition = (headerValue(details.responseHeaders, "content-disposition") ?? "")
     .trim()
     .toLowerCase();
   if (disposition.startsWith("attachment")) return true;
-  // The MIME allowlist applies only to frame navigations. On xhr/fetch/object
-  // traffic, octet-stream and friends are routine (APIs, wasm, range probes),
-  // so anything short of an explicit attachment stays untouched there.
-  if (details.type !== "main_frame" && details.type !== "sub_frame") return false;
   const type = (headerValue(details.responseHeaders, "content-type") ?? "")
     .split(";")[0]
     .trim()
@@ -546,12 +590,12 @@ try {
     onDownloadHeaders,
     {
       urls: ["<all_urls>"],
-      // Frames catch download navigations; xhr/other/object catch forced
-      // attachment responses that never become a top-level document (those
-      // types only ever act on Content-Disposition: attachment, see above).
-      // Never listen on type "image" or "media" - that breaks inline photos
-      // and in-page players.
-      types: ["main_frame", "sub_frame", "object", "xmlhttprequest", "other"],
+      // Frames ONLY. XHR/fetch/object used to be listed so "forced" downloads
+      // never flashed in Firefox's panel - but cancelling those responses is
+      // what flooded GrabLine: pages retry attachment XHRs, and each retry
+      // became another job. Real button-triggered downloads still become
+      // chrome.downloads items and are taken over by onCreated above.
+      types: ["main_frame", "sub_frame"],
     },
     ["blocking", "responseHeaders"],
   );

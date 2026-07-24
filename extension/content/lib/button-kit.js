@@ -58,6 +58,10 @@
   // extra shadow content (the quality panel) itself.
   function createButton(size) {
     const host = document.createElement("div");
+    // Host must never eat page clicks: pointer-events none on the wrapper,
+    // auto only on the actual 34px button. Without this, a mis-sized host can
+    // sit over the page and feel like "every click starts a download".
+    host.style.cssText = "all: initial; position: fixed; z-index: 2147483647; pointer-events: none;";
     const shadow = host.attachShadow({ mode: "closed" });
     const button = document.createElement("button");
     button.replaceChildren(logoImg());
@@ -76,6 +80,7 @@
       "background: transparent",
       "color: #fff",
       "cursor: pointer",
+      "pointer-events: auto",
       "box-shadow: 0 2px 8px rgba(0,0,0,.4)",
     ].join(";");
     shadow.appendChild(button);
