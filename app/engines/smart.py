@@ -208,12 +208,7 @@ def _handoff_headers(raw: Any, *, has_cookie_source: bool) -> dict[str, str]:
 def _normalize_error_text(message: str) -> str:
     """Lowercase and flatten curly quotes so YouTube's `you're` still matches
     our ASCII markers (yt-dlp surfaces the site's typography unchanged)."""
-    return (
-        message.lower()
-        .replace("\u2019", "'")
-        .replace("\u2018", "'")
-        .replace("\u02bc", "'")
-    )
+    return message.lower().replace("\u2019", "'").replace("\u2018", "'").replace("\u02bc", "'")
 
 
 def _looks_like_auth_wall(message: str) -> bool:
@@ -1087,9 +1082,7 @@ class SmartDownload:
             # time-to-first-byte wait without hammering the CDN the way a huge
             # connection count would. YouTube gets a higher budget - its CDNs
             # tolerate it and the fragments are tiny.
-            "concurrent_fragment_downloads": (
-                16 if needs_js_runtime(self.job.url) else 8
-            ),
+            "concurrent_fragment_downloads": (16 if needs_js_runtime(self.job.url) else 8),
             # Larger HTTP chunks also help progressive (non-fragment) URLs
             # start transferring sooner and keep the socket busy.
             "http_chunk_size": 10 * 1024 * 1024,
@@ -1381,9 +1374,7 @@ class SmartDownload:
             browser = self._cookie_browser()
             # Non-YouTube (or no browser yet): escalate auth walls the old way.
             add_login = (
-                not youtube_login_first
-                and browser is not None
-                and _looks_like_auth_wall(message)
+                not youtube_login_first and browser is not None and _looks_like_auth_wall(message)
             )
             add_runtime = not want_runtime and _runtime_might_help(message)
             if not (add_login or add_runtime):

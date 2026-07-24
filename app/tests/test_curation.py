@@ -234,9 +234,7 @@ def test_inspect_youtube_uses_browser_login_automatically(
         }
 
     monkeypatch.setattr(engine, "_extract_info", fake_extract)
-    result = engine.inspect(
-        "https://youtu.be/x", use_session=False, session_browser="firefox"
-    )
+    result = engine.inspect("https://youtu.be/x", use_session=False, session_browser="firefox")
     assert isinstance(result, MediaInfo)
     assert result.title == "Signed in"
     assert calls == [(True, True)]

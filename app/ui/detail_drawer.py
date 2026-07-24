@@ -74,9 +74,7 @@ class _ConnLane:
     key: str = ""
 
 
-def _waterfall_lanes(
-    count: int, fraction: float, *, active_speed: float = 0.0
-) -> list[_ConnLane]:
+def _waterfall_lanes(count: int, fraction: float, *, active_speed: float = 0.0) -> list[_ConnLane]:
     """Split overall progress across ``count`` lanes (YouTube / torrent / HLS
     don't expose real byte-ranges, but the strip still reads as multi-lane)."""
     count = max(1, min(_MAX_CONN_BARS, count))
@@ -238,8 +236,10 @@ class _ConnectionBars(QWidget):
             )
         # If every segment is quiet but the job is moving, put the overall
         # speed on the first incomplete lane so the strip isn't blank.
-        if status is JobStatus.DOWNLOADING and overall_speed > 0 and not any(
-            lane.speed_bps > 0 for lane in lanes
+        if (
+            status is JobStatus.DOWNLOADING
+            and overall_speed > 0
+            and not any(lane.speed_bps > 0 for lane in lanes)
         ):
             for i, lane in enumerate(lanes):
                 if lane.fraction < 1.0:
@@ -871,10 +871,7 @@ class DetailDrawer(QFrame):
         color = design.status_color(palette, view.status.value)
         active_speed = speed_bps if view.status is JobStatus.DOWNLOADING else 0.0
         # Parked (paused) with bars already painted: segments won't move.
-        if (
-            view.status is JobStatus.PAUSED
-            and self._conn_bars.shows(view.id)
-        ):
+        if view.status is JobStatus.PAUSED and self._conn_bars.shows(view.id):
             return
         self._conn_bars.note_job(view.id)
 

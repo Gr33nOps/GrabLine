@@ -424,9 +424,7 @@ class SettingsDialog(chrome.Dialog):
         self.speed_spin.setSuffix(" KB/s")
         self.speed_spin.setSpecialValueText(t("Unlimited"))
         engine_form.addRow(t("Speed limit:"), self.speed_spin)
-        self.fair_speed_check = QCheckBox(
-            t("Share bandwidth evenly across simultaneous downloads")
-        )
+        self.fair_speed_check = QCheckBox(t("Share bandwidth evenly across simultaneous downloads"))
         engine_form.addRow(t("Fair speed:"), self.fair_speed_check)
         schedule_row = _inline_row()
         self.schedule_check = QCheckBox(t("Full speed between"))
@@ -526,9 +524,7 @@ class SettingsDialog(chrome.Dialog):
         ffmpeg_layout = QHBoxLayout(ffmpeg_group)
         self.ffmpeg_status = QLabel()
         self.ffmpeg_status.setWordWrap(True)
-        self.ffmpeg_status.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
-        )
+        self.ffmpeg_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.ffmpeg_status.setMinimumWidth(0)
         ffmpeg_layout.addWidget(self.ffmpeg_status, 1)
         self.ffmpeg_button = QPushButton()
@@ -548,8 +544,7 @@ class SettingsDialog(chrome.Dialog):
         video_layout.addWidget(self.hq_first_check)
         video_layout.addWidget(
             _note(
-                "Solves YouTube's JS challenge up front; can add minutes before "
-                "a download begins."
+                "Solves YouTube's JS challenge up front; can add minutes before a download begins."
             )
         )
         defaults_form = QFormLayout()

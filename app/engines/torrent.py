@@ -246,9 +246,7 @@ class TorrentSession:
             "enable_natpmp": settings.torrent_natpmp,
             # When fair-speed is on, per-torrent handle limits own the split so
             # a session-wide cap would fight the equal-share rebalance.
-            "download_rate_limit": (
-                0 if settings.fair_speed else settings.speed_limit_kbps * 1024
-            ),
+            "download_rate_limit": (0 if settings.fair_speed else settings.speed_limit_kbps * 1024),
             "upload_rate_limit": settings.torrent_upload_kbps * 1024,
             "dht_bootstrap_nodes": _DHT_ROUTERS,
             "user_agent": "GrabLine",

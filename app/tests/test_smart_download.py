@@ -159,9 +159,7 @@ def _no_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.core.jsruntime.detect_js_runtime", lambda *a, **k: None)
 
 
-def test_non_youtube_takes_the_fast_path(
-    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_non_youtube_takes_the_fast_path(db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch):
     # Sites that aren't bot-checking keep the cookie-free, jsless first attempt.
     _no_runtime(monkeypatch)
     job = _smart_job(db, "https://vimeo.com/x", dest, "v.mp4", session_browser="firefox")
@@ -182,9 +180,7 @@ def test_youtube_with_browser_starts_with_cookies_and_runtime(
 ):
     # YouTube bot-checks anonymous clients; with a browser configured, skip the
     # doomed jsless attempt so the transfer starts on the working path.
-    monkeypatch.setattr(
-        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno")
-    )
+    monkeypatch.setattr("app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno"))
     job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", session_browser="firefox")
     task = SmartDownload(db, job, ffmpeg_path=None)
     calls: list[tuple[bool, bool]] = []
@@ -203,12 +199,8 @@ def test_youtube_uses_detected_browser_without_settings(
 ):
     # No session_browser on the job: auto-detect still signs YouTube in so the
     # person never has to configure cookies.
-    monkeypatch.setattr(
-        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno")
-    )
-    monkeypatch.setattr(
-        "app.core.browser_setup.detect_cookie_browser", lambda *a, **k: "firefox"
-    )
+    monkeypatch.setattr("app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno"))
+    monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda *a, **k: "firefox")
     job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4")  # no session_browser
     task = SmartDownload(db, job, ffmpeg_path=None)
     calls: list[tuple[bool, bool]] = []
@@ -296,9 +288,7 @@ def test_cookie_db_failure_tries_another_browser(
 ):
     import yt_dlp
 
-    monkeypatch.setattr(
-        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno")
-    )
+    monkeypatch.setattr("app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno"))
     monkeypatch.setattr(
         "app.core.browser_setup.cookie_browser_candidates",
         lambda **k: ["chrome", "firefox"],
@@ -339,9 +329,7 @@ def test_no_login_escalation_when_no_browser_found(
 def test_unrelated_error_is_not_retried(db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch):
     import yt_dlp
 
-    monkeypatch.setattr(
-        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno")
-    )
+    monkeypatch.setattr("app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno"))
     job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", session_browser="firefox")
     task = SmartDownload(db, job, ffmpeg_path=None)
     calls: list[tuple[bool, bool]] = []

@@ -1543,9 +1543,7 @@ def test_detail_drawer_connection_bars_for_segmented_download(db: Database, tmp_
         assert len(visible) == 2
         # Labels are a fixed width so bars stay level across rows.
         widths = {
-            label.width()
-            for _row, label, _bar in drawer._conn_bars._rows
-            if _row.isVisible()
+            label.width() for _row, label, _bar in drawer._conn_bars._rows if _row.isVisible()
         }
         assert len(widths) == 1
         assert isinstance(drawer._security_btn, IconButton)
