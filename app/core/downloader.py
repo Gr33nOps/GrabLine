@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import shutil
 import threading
 from collections.abc import Callable
@@ -39,6 +40,13 @@ MIN_SEGMENT_SIZE = 256 * 1024
 DEFAULT_CONNECTIONS = 8
 DEFAULT_CHUNK_SIZE = 64 * 1024
 
+#: Statuses that mean "try this segment again" rather than "the job is dead":
+#: rate limits, transient server faults, and the auth-flavored ones a refreshed
+#: (re-signed) URL usually cures.
+_RETRYABLE_STATUS = frozenset({403, 408, 409, 425, 429, 500, 502, 503, 504})
+
+_CONTENT_RANGE_START = re.compile(r"\s*bytes\s+(\d+)-")
+
 
 class StopReason(Enum):
     NONE = "none"
@@ -49,6 +57,26 @@ class StopReason(Enum):
 
 class _Retry(Exception):
     """Internal: the current attempt failed but the segment may be retried."""
+
+
+def _reserve_space(handle: IO[bytes], total: int) -> bool:
+    """Ask the filesystem to set aside *total* bytes, up front, for this file.
+    Returns False when it won't - the caller then falls back to a sparse file.
+
+    ``os.fallocate``, deliberately, and not ``os.posix_fallocate``: the latter
+    emulates itself by writing zeros over the whole file when the filesystem
+    can't reserve space (exFAT, most network mounts), so a 20GB download would
+    sit at 0% for minutes before its first byte landed. The raw syscall just
+    reports that it can't.
+    """
+    reserve = getattr(os, "fallocate", None)  # Linux only
+    if reserve is None:
+        return False
+    try:
+        reserve(handle.fileno(), 0, 0, total)
+    except OSError:
+        return False
+    return True
 
 
 def plan_segments(total_size: int, connections: int) -> list[tuple[int, int | None]]:
@@ -89,11 +117,28 @@ class _Checkpointer:
     def flush(self) -> None:
         with self._lock:
             dirty, self._dirty = self._dirty, {}
-        self._db.update_segment_progress(dirty)
+        if not dirty:
+            return
+        try:
+            self._db.update_segment_progress(dirty)
+        except Exception:
+            # Put the progress back so the next flush retries it. Dropping it
+            # would silently stop checkpointing and turn a later crash into a
+            # restart from the last good offset, minutes or hours back.
+            with self._lock:
+                for segment_id, downloaded in dirty.items():
+                    self._dirty.setdefault(segment_id, downloaded)
+            raise
 
     def _loop(self) -> None:
         while not self._stop.wait(self._interval):
-            self.flush()
+            try:
+                self.flush()
+            except Exception:
+                # A failed write must not take the thread with it: without
+                # this, one busy-timeout ends checkpointing for the whole
+                # download and resume data quietly goes stale.
+                log.warning("checkpoint flush failed; will retry", exc_info=True)
 
     def close(self) -> None:
         self._stop.set()
@@ -163,7 +208,11 @@ class SegmentedDownload:
                 max_connections=connections + 2,
                 max_keepalive_connections=connections + 2,
             ),
-            headers=headers or None,
+            # identity so the bytes on the wire are the bytes of the file: with
+            # transparent gzip, httpx decompresses while Content-Length and the
+            # byte ranges still describe the compressed stream, which stitches
+            # segments at wrong offsets and trips the final size check.
+            headers={"Accept-Encoding": "identity", **(headers or {})},
         )
         self._checkpointer = _Checkpointer(db, checkpoint_interval)
         self._segments: list[Segment] = []
@@ -172,6 +221,9 @@ class SegmentedDownload:
         self._reason_lock = threading.Lock()
         self._steal_lock = threading.Lock()
         self._error: str | None = None
+        #: Cleared when the resolved URL stops working (expired signature), so
+        #: requests fall back to the original URL and its redirect chain.
+        self._final_url_ok = True
         # Worker pool: segment ids currently owned by a worker, the live worker
         # count, and the threads. The pool size tracks the connection target.
         self._claimed: set[int] = set()
@@ -316,13 +368,8 @@ class SegmentedDownload:
                     # fallocate never shrinks, so an oversized leftover part
                     # must be truncated or _finalize fails its size check.
                     handle.truncate(total)
-                elif current < total:
-                    # Prefer fallocate when the OS supports it so a multi-GB
-                    # download does not spend seconds zero-filling.
-                    try:
-                        os.posix_fallocate(handle.fileno(), 0, total)
-                    except (AttributeError, OSError):
-                        handle.truncate(total)
+                elif current < total and not _reserve_space(handle, total):
+                    handle.truncate(total)  # sparse, and instant
 
     # ------------------------------------------------------------ workers
 
@@ -417,11 +464,12 @@ class SegmentedDownload:
                 if segment.id not in self._claimed and not segment.is_complete:
                     self._claimed.add(segment.id)
                     return segment
-        stolen = self._steal_segment()
-        if stolen is not None:
-            with self._steal_lock:
-                self._claimed.add(stolen.id)
-        return stolen
+        # _steal_segment claims the tail it creates before releasing the lock.
+        # Claiming out here instead would leave the new segment visible and
+        # unclaimed for an instant, long enough for another worker's loop above
+        # to take it too - two workers sharing one Segment then race its
+        # `downloaded` counter and write their bytes at each other's offsets.
+        return self._steal_segment()
 
     def _has_claimable_work(self) -> bool:
         """Is there work a newly-spawned worker could pick up - an unclaimed
@@ -443,7 +491,11 @@ class SegmentedDownload:
         while not self._stop_event.is_set():
             downloaded_before = segment.downloaded
             try:
-                if self.job.resumable:
+                # An unsized segment can't be range-requested even on a server
+                # that honors ranges (a 206 with "bytes 0-0/*" reports resumable
+                # with no total). Streaming it whole is the only way it can ever
+                # finish; the alternative used to be an instant hard failure.
+                if self.job.resumable and segment.end is not None:
                     self._stream_range(handle, segment)
                 else:
                     self._stream_full(handle, segment)
@@ -452,6 +504,11 @@ class SegmentedDownload:
                 if segment.downloaded > downloaded_before:
                     attempts = 0  # forward progress earns fresh retries
                 attempts += 1
+                if attempts >= 2:
+                    # Repeated failures with nothing to show for them suggest
+                    # the resolved URL itself has gone bad (expired signature,
+                    # dead CDN node); the original URL will redirect afresh.
+                    self._distrust_final_url()
                 if attempts > self.max_retries:
                     raise DownloadError(
                         f"segment {segment.index}: giving up after "
@@ -492,8 +549,53 @@ class SegmentedDownload:
             new_index = max(seg.index for seg in self._segments) + 1
             new_segment = self.db.add_segment(self.job.id, new_index, mid, old_end)
             self._segments.append(new_segment)
+            self._claimed.add(new_segment.id)  # claimed before it becomes visible
             log.debug("job %s: split segment %s at %s", self.job.id, victim.index, mid)
             return new_segment
+
+    def _request_url(self) -> str:
+        """Where segment requests go.
+
+        The probe already followed the redirect chain and stored where it
+        landed, so asking for job.url again makes every connection - and every
+        retry, and every steal - re-pay that chain (a DNS + TCP + TLS + RTT per
+        hop) before its first payload byte. Signed CDN URLs do expire, though,
+        so a failure downgrades us to the original URL, which hands out a fresh
+        one.
+        """
+        if self._final_url_ok and self.job.final_url:
+            return self.job.final_url
+        return self.job.url
+
+    def _distrust_final_url(self) -> None:
+        if self._final_url_ok and self.job.final_url:
+            log.debug("job %s: falling back to the original URL", self.job.id)
+            self._final_url_ok = False
+
+    def _reject_status(self, status: int, segment: Segment) -> None:
+        """Never returns: raise the right kind of failure for a bad status.
+
+        Retryable statuses must not become a DownloadError - that stops every
+        other connection on the job, and any 4xx also matches the manager's
+        "permanent failure" marker, so one flaky CDN response would throw away
+        a nearly-complete download for good.
+        """
+        if status in _RETRYABLE_STATUS:
+            self._distrust_final_url()
+            raise _Retry(f"segment {segment.index}: HTTP {status}")
+        raise DownloadError(f"server responded with HTTP {status} for segment {segment.index}")
+
+    @staticmethod
+    def _check_range_start(response: httpx.Response, offset: int, segment: Segment) -> None:
+        """A 206 that answers a *different* range than we asked for would be
+        written at the requested offset, silently corrupting the file."""
+        match = _CONTENT_RANGE_START.match(response.headers.get("content-range", ""))
+        if match is None:
+            return  # no parsable header: trust the status, as before
+        if int(match.group(1)) != offset:
+            raise _Retry(
+                f"segment {segment.index}: server answered byte {match.group(1)}, expected {offset}"
+            )
 
     def _stream_range(self, handle: IO[bytes], segment: Segment) -> None:
         end = segment.end
@@ -503,12 +605,10 @@ class SegmentedDownload:
         if offset > end:
             return
         headers = {"Range": f"bytes={offset}-{end}"}
-        with self._client.stream("GET", self.job.url, headers=headers) as response:
+        with self._client.stream("GET", self._request_url(), headers=headers) as response:
             if response.status_code != 206:
-                raise DownloadError(
-                    f"server stopped honoring range requests "
-                    f"(HTTP {response.status_code} for segment {segment.index})"
-                )
+                self._reject_status(response.status_code, segment)
+            self._check_range_start(response, offset, segment)
             for chunk in response.iter_bytes(self.chunk_size):
                 if self._stop_event.is_set():
                     return
@@ -530,12 +630,11 @@ class SegmentedDownload:
             raise _Retry("server closed the connection early")
 
     def _throttle(self, amount: int) -> None:
-        if self.limiter is not None:
-            self.limiter.throttle(amount)
-        if self.job_limiter is not None:
-            self.job_limiter.throttle(amount)
-        if self.host_limiter is not None:
-            self.host_limiter.throttle(amount)
+        # Hand the stop event to each limiter: at a tight cap the sleep here
+        # dwarfs the transfer, and Pause has to land during it, not after.
+        for limiter in (self.limiter, self.job_limiter, self.host_limiter):
+            if limiter is not None:
+                limiter.throttle(amount, self._stop_event)
 
     def _stream_full(self, handle: IO[bytes], segment: Segment) -> None:
         """Single-connection fallback for servers without range support.
@@ -545,9 +644,9 @@ class SegmentedDownload:
         if segment.downloaded:
             segment.downloaded = 0
             self._checkpointer.report(segment.id, 0)
-        with self._client.stream("GET", self.job.url) as response:
+        with self._client.stream("GET", self._request_url()) as response:
             if response.status_code != 200:
-                raise DownloadError(f"server responded with HTTP {response.status_code}")
+                self._reject_status(response.status_code, segment)
             for chunk in response.iter_bytes(self.chunk_size):
                 if self._stop_event.is_set():
                     return
@@ -597,6 +696,12 @@ class SegmentedDownload:
         if dest.name != job.filename:
             job.filename = dest.name
             self.db.update_job_filename(job.id, dest.name)
+        # The job's own row keeps the final size, so its segment rows have
+        # nothing left to say. Dropping them keeps the per-poll
+        # all_segment_progress() summing over live downloads instead of over
+        # every segment of every file ever downloaded.
+        self.db.update_job_downloaded(job.id, job.total_size or actual_size)
+        self.db.clear_segments(job.id)
         self.db.set_job_status(job.id, JobStatus.COMPLETED)
         return JobStatus.COMPLETED
 

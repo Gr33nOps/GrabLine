@@ -10,13 +10,16 @@ QThread - the crash class fixed app-wide.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QThread, Signal
 
 from app.core.errors import DownloadError
-from app.core.resolver import Resolver
+from app.core.resolver import Resolution, Resolver
 from app.core.settings import Settings
+
+log = logging.getLogger(__name__)
 
 
 class ResolveThread(QThread):
@@ -47,13 +50,19 @@ class ResolveThread(QThread):
         self._proxy = settings.proxy
 
     def run(self) -> None:
-        resolution = self._resolver.resolve(
-            self._url,
-            use_session=self._use_session,
-            session_browser=self._browser,
-            proxy=self._proxy,
-            headers=self._headers or None,
-        )
+        try:
+            resolution = self._resolver.resolve(
+                self._url,
+                use_session=self._use_session,
+                session_browser=self._browser,
+                proxy=self._proxy,
+                headers=self._headers or None,
+            )
+        except Exception as exc:
+            # Any escape here would leave the window stuck on "Analyzing…"
+            # forever with no result and no error, so report it as one.
+            log.exception("resolving %s failed", self._url)
+            resolution = Resolution(url=self._url, kind=None, message=str(exc))
         self.resolved.emit(
             resolution, self._page_title, self._quality, self._fallbacks, self._headers
         )
@@ -73,11 +82,19 @@ class FileOpThread(QThread):
 
     def run(self) -> None:
         try:
-            self.done.emit(self._work(), None)
-        except (OSError, DownloadError, ValueError) as exc:
-            # The exception object itself, so handlers can distinguish
-            # PasswordRequired from a plain failure; str(error) still works.
+            result = self._work()
+        except Exception as exc:
+            # Every exception, not just the expected file ones: an unforeseen
+            # type escaping run() means `done` never fires, so the caller's
+            # completion handler never runs - the status-bar busy shimmer spins
+            # for the rest of the session and one-at-a-time guards (the update
+            # check) stay latched shut. The exception object itself is passed
+            # so handlers can still tell PasswordRequired from a plain failure.
+            if not isinstance(exc, OSError | DownloadError | ValueError):
+                log.exception("background file operation failed")
             self.done.emit(None, exc)
+        else:
+            self.done.emit(result, None)
 
 
 class ProgressRelay(QObject):

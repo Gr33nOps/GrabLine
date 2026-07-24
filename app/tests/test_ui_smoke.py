@@ -671,6 +671,10 @@ def test_quality_label_add_skips_analysis(db: Database, tmp_path: Path, monkeypa
         resolved: list[str] = []
         monkeypatch.setattr(window, "_on_resolved", lambda *a, **k: resolved.append("x"))
 
+        # A cold extractor list is built off-thread (it would freeze the GUI
+        # here); warm it first so the fast path runs inline, as it does in a
+        # running app once startup's warm-up has finished.
+        window.resolver.smart.warm_up()
         window._resolve_and_queue(
             "https://www.youtube.com/watch?v=abc", "Video page", "1080p", (), None
         )
@@ -1113,6 +1117,37 @@ def test_idle_widgets_hold_no_ticker_subscription(db: Database, tmp_path: Path):
 
     spark.deleteLater()
     graph.deleteLater()
+
+
+def test_rebuilding_rows_gives_the_ticker_back(db: Database, tmp_path: Path):
+    """Rows are rebuilt whenever the download list changes, and a bar thrown
+    away mid-shimmer (any magnet resolving its metadata) used to keep its 30fps
+    subscription forever - the whole app repainting for nobody. Qt runs no
+    Python slot for a widget it is destroying, so the rebuild must release it.
+    """
+    from app.ui import motion
+
+    _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    ticker = motion.ticker()
+    before = ticker._subs
+    try:
+        db.create_job("http://example.invalid/a.bin", str(tmp_path), "a.bin")
+        window = MainWindow(manager, settings)
+        window.show()
+        window.refresh()
+        for bar in window._progress_bars.values():
+            bar.set_indeterminate(True)  # as a resolving magnet would
+        assert ticker._subs > before
+
+        db.create_job("http://example.invalid/b.bin", str(tmp_path), "b.bin")
+        window.refresh()  # the row set changed -> rebuild
+        assert ticker._subs == before
+        assert ticker._timer.isActive() is (before > 0)
+    finally:
+        manager.shutdown()
 
 
 def test_hidden_window_skips_refresh(db: Database, tmp_path: Path):

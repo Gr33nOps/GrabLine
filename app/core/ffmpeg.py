@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import zipfile
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
@@ -76,6 +77,24 @@ def ensure_ffmpeg(
     any failure - most importantly on a checksum mismatch.
     """
     target_dir = bin_dir or paths.bin_dir()
+    # Serialized because the archive unpacks straight over the target: two
+    # videos queued together both find no FFmpeg, both fetch ~30 MB, and the
+    # second unpack rewrites the binary the first one is already running -
+    # which surfaces as a merge failing on a half-written executable.
+    with _install_lock:
+        return _install_ffmpeg(target_dir, pins, progress, verify_run, proxy)
+
+
+_install_lock = threading.Lock()
+
+
+def _install_ffmpeg(
+    target_dir: Path,
+    pins: dict[str, tuple[PinnedArchive, ...]] | None,
+    progress: Callable[[int, int | None], None] | None,
+    verify_run: bool,
+    proxy: str | None,
+) -> Path:
     key = platform_key()
     # `pins is None` check, not truthiness: an empty mapping must mean
     # "no pinned builds", never "fall back to the real ones".

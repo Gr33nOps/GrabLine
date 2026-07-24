@@ -111,6 +111,8 @@ class Animated:
         self._on_change = on_change
 
     def set(self, target: float, *, immediate: bool = False) -> None:
+        if target == self._target and target == self.value and not self._running:
+            return  # already settled here: repainting would change nothing
         self._target = target
         if immediate or abs(target - self.value) < self._epsilon:
             self.value = target
@@ -138,6 +140,17 @@ class Animated:
             self._running = False
             ticker().tick.disconnect(self._step)
             ticker().unsubscribe()
+
+    def release(self) -> None:
+        """Detach from the shared ticker because the owning widget is gone.
+
+        `_step` is a plain-Python slot, so Qt does not disconnect it for us the
+        way it would a QObject method: left connected it keeps ticking into a
+        deleted widget (a RuntimeError per frame) and holds the 30fps timer
+        subscription open forever.
+        """
+        self._on_change = None
+        self._stop()
 
 
 class SpeedSmoother:
@@ -241,8 +254,26 @@ class SmoothProgressBar(QWidget):
         self.update()
 
     def set_color(self, color: str | None) -> None:
-        self._color = QColor(color) if color else None
+        new = QColor(color) if color else None
+        if new == self._color:
+            return  # the poll re-sends the same color; don't repaint for it
+        self._color = new
         self.update()
+
+    def release(self) -> None:
+        """Give back every ticker subscription this bar holds.
+
+        Call this before dropping the bar. It cannot be done from ``destroyed``
+        because Qt does not run Python slots for an object it is destroying, so
+        a bar thrown away mid-glide (or mid-shimmer, which is any magnet
+        resolving its metadata) would hold the 30fps timer on for the rest of
+        the session - the whole app repainting forever over nothing.
+        """
+        self._fill.release()
+        if self._indeterminate:
+            self._indeterminate = False
+            ticker().tick.disconnect(self._advance_marquee)
+            ticker().unsubscribe()
 
     def _advance_marquee(self) -> None:
         self._marquee = (self._marquee + 0.012) % 1.0

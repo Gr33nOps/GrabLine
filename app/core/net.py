@@ -30,8 +30,12 @@ _SOCKS4 = ("socks4", "socks4a")
 _V6_PROBE_HOST = "www.youtube.com"
 _V6_PROBE_TIMEOUT = 1.5
 _V6_RECHECK = 600.0  # networks change (wifi roaming, VPN up/down)
+#: How long the very first caller will wait for a verdict. Later callers never
+#: wait at all - they use the cached answer while a refresh runs behind them.
+_V6_FIRST_WAIT = 2.0
 _v6_lock = threading.Lock()
 _v6_state: tuple[float, bool] | None = None  # (checked at, force IPv4?)
+_v6_probe_done: threading.Event | None = None  # set when an in-flight probe lands
 
 
 def _handshakes(host: str, family: socket.AddressFamily) -> bool:
@@ -46,6 +50,23 @@ def _handshakes(host: str, family: socket.AddressFamily) -> bool:
         return False
 
 
+def _run_v6_probe(done: threading.Event) -> None:
+    global _v6_state
+    try:
+        broken = not _handshakes(_V6_PROBE_HOST, socket.AF_INET6) and _handshakes(
+            _V6_PROBE_HOST, socket.AF_INET
+        )
+    except Exception:  # a probe must never take a thread down with it
+        log.debug("IPv6 probe failed", exc_info=True)
+        broken = False
+    else:
+        if broken:
+            log.info("IPv6 to %s is unusable - forcing IPv4 connections", _V6_PROBE_HOST)
+    with _v6_lock:
+        _v6_state = (time.monotonic(), broken)
+    done.set()
+
+
 def ipv6_broken() -> bool:
     """True when connections should be forced onto IPv4.
 
@@ -55,24 +76,40 @@ def ipv6_broken() -> bool:
     out per v6 address before reaching v4 - measured 62s for one YouTube page
     fetch on such a network, which is what "analysis is stuck" turns out to be.
 
-    One ~1.5s handshake probe answers it. Broken means: v6 to the probe host
-    fails while v4 to the same host succeeds - so a machine with no v6 at all
-    (v6 fails instantly, but so would any app; the OS skips it) still counts,
-    harmlessly, and a v6-only network (v4 fails too) is left alone. Cached;
-    never raises.
+    Broken means: v6 to the probe host fails while v4 to the same host
+    succeeds - so a machine with no v6 at all (v6 fails instantly, but so would
+    any app; the OS skips it) still counts, harmlessly, and a v6-only network
+    (v4 fails too) is left alone.
+
+    The probe runs on its own thread and this call never blocks on it beyond a
+    short first-call grace period. That matters because ``getaddrinfo`` has no
+    timeout of its own: on a network with a hung resolver the probe can sit for
+    the OS resolver's patience, and this function is on the path of every
+    client build - i.e. every download and every analysis. Callers get the last
+    known answer (or "not broken") instead of inheriting that stall.
     """
-    global _v6_state
     with _v6_lock:
-        now = time.monotonic()
-        if _v6_state is not None and now - _v6_state[0] < _V6_RECHECK:
-            return _v6_state[1]
-        broken = not _handshakes(_V6_PROBE_HOST, socket.AF_INET6) and _handshakes(
-            _V6_PROBE_HOST, socket.AF_INET
-        )
-        if broken:
-            log.info("IPv6 to %s is unusable - forcing IPv4 connections", _V6_PROBE_HOST)
-        _v6_state = (now, broken)
-        return broken
+        state = _v6_state
+        if state is not None and time.monotonic() - state[0] < _V6_RECHECK:
+            return state[1]
+        done = _start_v6_probe_locked()
+    if state is not None:
+        return state[1]  # stale but serviceable; the refresh lands behind us
+    done.wait(_V6_FIRST_WAIT)
+    with _v6_lock:
+        return _v6_state[1] if _v6_state is not None else False
+
+
+def _start_v6_probe_locked() -> threading.Event:
+    """Start a probe unless one is already in flight. Caller holds _v6_lock."""
+    global _v6_probe_done
+    done = _v6_probe_done
+    if done is not None and not done.is_set():
+        return done
+    done = threading.Event()
+    _v6_probe_done = done
+    threading.Thread(target=_run_v6_probe, args=(done,), name="gl-v6probe", daemon=True).start()
+    return done
 
 
 def validate_proxy(url: str) -> str | None:

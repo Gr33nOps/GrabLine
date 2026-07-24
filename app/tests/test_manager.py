@@ -398,6 +398,39 @@ def test_mirror_failover_downloads_from_the_next_url(server: MediaServer, db: Da
     assert sha256_file(dest / "m.bin") == sha256(data)
 
 
+def test_mirror_failover_from_a_url_that_probed_fine(server: MediaServer, db: Database, dest: Path):
+    """Switching mirrors must forget everything learned about the old URL.
+
+    A URL that probed successfully and only failed later left its final_url,
+    etag, size and resumable flag behind. The downloader treats a stored
+    final_url as a usable cached probe, so the mirror inherited the dead URL's
+    address and downloaded from it again - failover that could never work.
+    """
+    data = payload(300_000, 62)
+    stale = server.add("/stale.bin", payload(300_000, 63))
+    mirror = server.add("/fresh.bin", data)
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        job = manager.add_url(stale, dest, filename="f.bin", mirrors=[mirror])
+        # What a first run against the (then working) URL leaves behind.
+        job.final_url = stale
+        job.total_size = 300_000
+        job.resumable = True
+        job.etag = '"stale-etag"'
+        db.update_job_probe(job)
+
+        assert manager._try_mirror(job.id) is True
+        switched = db.get_job(job.id)
+        assert switched is not None
+        assert switched.url == mirror
+        assert switched.final_url is None
+        assert switched.etag is None
+        assert switched.total_size is None
+        assert switched.resumable is False
+    finally:
+        manager.shutdown()
+
+
 def test_pinned_connections_bypass_the_share_split(db: Database, dest: Path):
     from app.core.downloader import SegmentedDownload
 

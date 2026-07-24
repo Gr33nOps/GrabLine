@@ -35,16 +35,20 @@ def test_segmented_download_completes_with_checksum(server: MediaServer, db: Dat
     url = server.add("/big.bin", data)
     job = db.create_job(url, str(dest), "big.bin")
 
-    status = SegmentedDownload(db, job, connections=8).run()
+    download = SegmentedDownload(db, job, connections=8)
+    status = download.run()
 
     assert status is JobStatus.COMPLETED
     assert sha256_file(dest / "big.bin") == sha256(data)
     assert not (dest / "big.bin.gl-part").exists()
-    segments = db.segments_for(job.id)
     # >= 8: dynamic segmentation may split segments as fast workers steal work.
-    assert len(segments) >= 8
-    assert all(segment.is_complete for segment in segments)
+    assert len(download._segments) >= 8
+    assert all(segment.is_complete for segment in download._segments)
     assert server.request_count("/big.bin") >= 9  # probe + 8+ range requests
+    # Completion prunes the segment rows, so the job row must carry the total.
+    assert db.segments_for(job.id) == []
+    finished = db.get_job(job.id)
+    assert finished is not None and db.stored_progress(finished) == len(data)
 
 
 def test_downloader_uses_http1_for_real_parallel_connections(
@@ -125,11 +129,12 @@ def test_single_connection_fallback_when_no_ranges(server: MediaServer, db: Data
     url = server.add("/legacy.bin", data, supports_ranges=False)
     job = db.create_job(url, str(dest), "legacy.bin")
 
-    status = SegmentedDownload(db, job, connections=8).run()
+    download = SegmentedDownload(db, job, connections=8)
+    status = download.run()
 
     assert status is JobStatus.COMPLETED
     assert sha256_file(dest / "legacy.bin") == sha256(data)
-    assert len(db.segments_for(job.id)) == 1
+    assert len(download._segments) == 1  # one stream, not eight range requests
 
 
 def test_unknown_content_length(server: MediaServer, db: Database, dest: Path):
@@ -485,3 +490,87 @@ def test_fresh_job_reuses_resolve_probe_without_second_round_trip(
     assert status is JobStatus.COMPLETED
     assert calls == []
     assert sha256_file(dest / "reuse.bin") == sha256(data)
+
+
+def test_a_stolen_tail_is_never_handed_to_two_workers(
+    server: MediaServer, db: Database, dest: Path
+):
+    """The classic corruption: a split segment claimed by two workers at once.
+
+    Both would write into the same Segment and race its `downloaded` counter,
+    so each wrote its bytes at the other's offset and the finished file failed
+    its checksum - intermittently, on fast links with many connections.
+    """
+    url = server.add("/steal.bin", payload(6 * MB, 71))
+    job = db.create_job(url, str(dest), "steal.bin")
+    download = SegmentedDownload(db, job, connections=8)
+    download._segments = db.replace_segments(job.id, [(0, 6 * MB - 1)])
+
+    seen: list[int] = []
+    barrier = threading.Barrier(4, timeout=10)
+
+    def claim() -> None:
+        barrier.wait()
+        segment = download._next_work()
+        if segment is not None:
+            seen.append(segment.id)
+
+    workers = [threading.Thread(target=claim) for _ in range(4)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+
+    assert len(seen) == len(set(seen))  # no segment claimed twice
+
+
+def test_a_retryable_status_retries_instead_of_killing_the_job(
+    server: MediaServer, db: Database, dest: Path
+):
+    """One flaky 503 must not throw away the whole download.
+
+    It used to raise DownloadError, which stops every other connection - and
+    any "http 4xx/5xx" text also matches the manager's permanent-failure
+    markers, so the job would never even be retried.
+    """
+    data = payload(2 * MB, 73)
+    url = server.add("/flaky.bin", data, fail_status=503, fail_from=2, fail_until=3)
+    job = db.create_job(url, str(dest), "flaky.bin")
+
+    status = SegmentedDownload(db, job, connections=4, retry_backoff=0.01).run()
+
+    assert status is JobStatus.COMPLETED
+    assert sha256_file(dest / "flaky.bin") == sha256(data)
+
+
+def test_segments_are_requested_without_compression(server: MediaServer, db: Database, dest: Path):
+    """identity only: httpx would transparently decompress a gzipped response
+    while Content-Length and every byte offset still described the compressed
+    stream, so segments landed at the wrong offsets."""
+    data = payload(1 * MB, 74)
+    url = server.add("/plain.bin", data)
+    job = db.create_job(url, str(dest), "plain.bin")
+
+    assert SegmentedDownload(db, job, connections=4).run() is JobStatus.COMPLETED
+    assert server.received_headers("/plain.bin")["accept-encoding"] == "identity"
+
+
+def test_an_unsized_resumable_job_streams_instead_of_failing(
+    server: MediaServer, db: Database, dest: Path
+):
+    """A server can advertise ranges yet not say how big the file is. The
+    single unsized segment must be streamed whole - it used to fail instantly
+    with "segment 0 has no end offset"."""
+    data = payload(300_000, 75)
+    url = server.add("/nosize.bin", data, send_content_length=False)
+    job = db.create_job(url, str(dest), "nosize.bin")
+    job.resumable = True  # as a 206-without-total probe would have recorded it
+    job.final_url = url
+    db.update_job_probe(job)
+    reloaded = db.get_job(job.id)
+    assert reloaded is not None
+
+    status = SegmentedDownload(db, reloaded, connections=4).run()
+
+    assert status is JobStatus.COMPLETED
+    assert sha256_file(dest / "nosize.bin") == sha256(data)

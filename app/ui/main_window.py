@@ -19,6 +19,7 @@ from PySide6.QtCore import (
     QItemSelection,
     QItemSelectionModel,
     QPoint,
+    QSignalBlocker,
     QSize,
     Qt,
     QTimer,
@@ -87,7 +88,17 @@ from app.core.settings import MAX_CONNECTIONS, Settings
 from app.engines import cloud as cloud_engine
 from app.engines import torrent as torrent_engine
 from app.engines.smart import generic_quality_options, option_for_label
-from app.ui import chrome, components, design, guard, icons, motion, theme, work_threads
+from app.ui import (
+    chrome,
+    components,
+    design,
+    guard,
+    icons,
+    motion,
+    theme,
+    threads,
+    work_threads,
+)
 from app.ui.archive_dialog import ArchiveDialog
 from app.ui.batch_dialog import BatchImportDialog, BatchImportThread
 from app.ui.cloud_dialog import CloudFolderDialog, prompt_cloud_url
@@ -159,6 +170,14 @@ class MainWindow(QMainWindow):
         self._nav: dict[str, components.SidebarButton] = {}
         self._progress_bars: dict[int, motion.SmoothProgressBar] = {}
         self._pills: dict[int, components.StatusPill] = {}
+        #: job id -> the icon state each row currently shows, so the poll can
+        #: skip setIcon (which always repaints) when nothing changed.
+        self._row_icons: dict[int, tuple[str, str, bool, str]] = {}
+        #: What the visible-row filter was last computed from; see _apply_filter.
+        self._filter_signature: object = None
+        #: job id -> the view each row was last drawn from, so a settled row
+        #: can be skipped entirely on the next poll.
+        self._rendered: dict[int, JobView] = {}
         self._speed_smoothers: dict[int, motion.SpeedSmoother] = {}
         #: Per-download speed trail for the detail drawer's graph, so switching
         #: away and back restores the history instead of restarting it.
@@ -682,8 +701,7 @@ class MainWindow(QMainWindow):
         self._style_filter_buttons()
         # Rebuild rows so per-row widgets (pills, bars) repaint in the new theme.
         self._row_job_ids = []
-        self._progress_bars.clear()
-        self._pills.clear()
+        self._release_row_widgets()
         self.refresh()
 
     # -------------------------------------------------- keyboard shortcuts
@@ -1348,6 +1366,14 @@ class MainWindow(QMainWindow):
         same rich flow a pasted URL gets. A stream or a plain file takes the fast
         Download Info dialog with no analysis, unless that dialog is turned off.
         """
+        if not self.resolver.smart.warm:
+            # matches() below needs the extractor list, and building it costs
+            # the GUI thread a couple of seconds of yt-dlp import - which is
+            # exactly when a browser handoff tends to arrive, giving the "I
+            # clicked download and GrabLine froze" report. Build it off-thread
+            # and pick this up again after.
+            self._when_smart_ready(lambda: self._browser_add(url, page_title, fallbacks, headers))
+            return
         is_video = self.resolver.smart.matches(url)
         is_stream = urlsplit(url).path.lower().endswith((".m3u8", ".mpd"))
         if not is_video and not is_stream and fallbacks:
@@ -1447,6 +1473,25 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message, 5000)
         self.refresh()
 
+    def _when_smart_ready(self, then: Callable[[], None]) -> None:
+        """Build the yt-dlp extractor list off-thread, then run ``then``.
+
+        The list is ~1700 classes behind a yt-dlp import: seconds of work on
+        first use (worse on Windows behind antivirus). The startup warm-up
+        usually gets there first; this covers a URL arriving before it does.
+        """
+        self.statusBar().showMessage(t("Starting…"))
+        self._busy_begin()
+        thread = work_threads.FileOpThread(self.resolver.smart.warm_up)
+
+        def ready(_result: object, _error: object) -> None:
+            self._busy_end()
+            then()
+
+        thread.done.connect(ready)
+        threads.retain(thread)
+        thread.start()
+
     def _resolve_and_queue(
         self,
         url: str,
@@ -1460,6 +1505,14 @@ class MainWindow(QMainWindow):
         # at download time, the file is named from the real title). This is
         # what makes a hover-button YouTube add start as fast as any other
         # site: one extraction instead of two.
+        if quality and not self.resolver.smart.warm:
+            # Answering "is this a smart-engine URL?" needs the extractor list;
+            # building it on the GUI thread is a multi-second freeze. Warm it
+            # behind the window and come straight back here.
+            self._when_smart_ready(
+                lambda: self._resolve_and_queue(url, page_title, quality, fallbacks, headers)
+            )
+            return
         if quality and self.resolver.smart.matches(url):
             option = option_for_label(quality)
             if option is not None:
@@ -2659,7 +2712,14 @@ class MainWindow(QMainWindow):
             self._rebuild_rows(views)
             self._restore_selection()
         for row, view in enumerate(views):
+            # A settled row has nothing to redraw: its view is frozen and
+            # compares equal, and only a downloading row's speed and ETA move
+            # on their own. With a long history that skip is the difference
+            # between touching a handful of rows a tick and all of them.
+            if view.status is not JobStatus.DOWNLOADING and self._rendered.get(view.id) == view:
+                continue
             self._update_row(row, view)
+            self._rendered[view.id] = view
         self._update_filter_counts(views)
         self._update_status_info(views)
         self._apply_filter()
@@ -2789,6 +2849,21 @@ class MainWindow(QMainWindow):
     def _apply_filter(self) -> None:
         needle = self.search_box.text().strip().lower()
         statuses = _FILTER_STATUSES.get(self._filter, ())
+        # The poll calls this every 500ms, but what it decides only depends on
+        # the query, the tab, and each row's id/status. Re-running the string
+        # matching over every row when none of those moved is pure waste.
+        signature = (
+            needle,
+            self._filter,
+            tuple(
+                (job_id, self._last_views[job_id].status)
+                for job_id in self._row_job_ids
+                if job_id in self._last_views
+            ),
+        )
+        if signature == self._filter_signature:
+            return
+        self._filter_signature = signature
         for row in range(self.table.rowCount()):
             view = self._view_for_row(row)
             matches_search = not needle or (
@@ -2803,11 +2878,26 @@ class MainWindow(QMainWindow):
             matches_tab = not statuses or (view is not None and view.status in statuses)
             self.table.setRowHidden(row, not (matches_search and matches_tab))
 
-    def _rebuild_rows(self, views: list[JobView]) -> None:
-        self.table.setRowCount(len(views))
-        self._row_job_ids = [view.id for view in views]
+    def _release_row_widgets(self) -> None:
+        """Drop the old rows' per-cell widgets, giving back the shared ticker
+        first - a progress bar destroyed mid-animation cannot do it itself."""
+        for bar in self._progress_bars.values():
+            bar.release()
         self._progress_bars.clear()
         self._pills.clear()
+        self._row_icons.clear()
+        self._rendered.clear()  # new cells: everything must be drawn again
+
+    def _rebuild_rows(self, views: list[JobView]) -> None:
+        self._release_row_widgets()
+        # setRowCount can drop rows, and that emits selectionChanged while
+        # _row_job_ids still describes the old layout - the selection handler
+        # would then record ids for the wrong jobs (the toolbar acting on the
+        # wrong download) and hide the drawer. Map first, and stay quiet.
+        self._row_job_ids = [view.id for view in views]
+        blocker = QSignalBlocker(self.table.selectionModel())
+        self.table.setRowCount(len(views))
+        del blocker
         for row, view in enumerate(views):
             # icon
             icon_item = QTableWidgetItem()
@@ -2847,27 +2937,33 @@ class MainWindow(QMainWindow):
 
     def _update_row(self, row: int, view: JobView) -> None:
         p = theme.current()
-        # type icon
+        # type icon. QIcon has no equality operator, so setIcon always counts
+        # as a change and repaints the cell - twice a second, for every row,
+        # forever. Only touch it when the icon it would draw actually differs.
         ext = view.filename
         name = icons.type_icon_name(
             view.kind.value if view.kind.value in ("torrent", "cloud") else ext
         )
-        self._cell(row, _COL_ICON).setIcon(icons.svg_icon(name, self._type_color(view)))
+        color = self._type_color(view)
+        noted = bool(view.tags or view.notes)
+        icon_key = (name, color, noted, p.text3)
+        if self._row_icons.get(view.id) != icon_key:
+            self._row_icons[view.id] = icon_key
+            self._cell(row, _COL_ICON).setIcon(icons.svg_icon(name, color))
+            # A small note icon next to the name marks a download that carries
+            # tags or notes, so they're discoverable at a glance (not only on
+            # hover) - a tinted glyph, never an emoji.
+            note_icon = icons.svg_icon("note", p.text3) if noted else QIcon()
+            self._cell(row, _COL_NAME).setIcon(note_icon)
 
         name_item = self._cell(row, _COL_NAME)
         name_item.setText(view.display_name)
-        # A small note icon next to the name marks a download that carries tags
-        # or notes, so they're discoverable at a glance (not only on hover) -
-        # a tinted glyph, never an emoji. Hover still shows the detail.
-        if view.tags or view.notes:
-            name_item.setIcon(icons.svg_icon("note", p.text3))
-            name_item.setToolTip(
-                (t("Tags: {tags}\n", tags=view.tags) if view.tags else "")
-                + (t("Has notes") if view.notes else "")
-            )
-        else:
-            name_item.setIcon(QIcon())
-            name_item.setToolTip("")
+        name_item.setToolTip(
+            (t("Tags: {tags}\n", tags=view.tags) if view.tags else "")
+            + (t("Has notes") if view.notes else "")
+            if noted
+            else ""
+        )
 
         if view.total_size:
             self._cell(row, _COL_SIZE).setText(human_bytes(view.total_size))

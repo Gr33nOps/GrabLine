@@ -62,11 +62,19 @@ class StatusPill(QLabel):
     def __init__(self, status: str = "queued", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._rendered: tuple[str, str] | None = None
         self.set_status(status)
 
     def set_status(self, status: str) -> None:
         p = theme.current()
         color = design.status_color(p, status)
+        # setStyleSheet re-polishes the widget on every call, identical string
+        # or not. The download list re-sends each row's status twice a second,
+        # so skipping the unchanged ones is the difference between a quiet list
+        # and a full-table restyle at 2Hz.
+        if self._rendered == (status, color):
+            return
+        self._rendered = (status, color)
         label = t(_STATUS_LABEL.get(status, status.title()))
         self.setText(f"●  {label}")
         self.setStyleSheet(

@@ -42,7 +42,15 @@ def _filename_from_disposition(header: str | None) -> str | None:
 def probe(
     client: httpx.Client, url: str, extra_headers: dict[str, str] | None = None
 ) -> ProbeResult:
-    headers = {"Range": "bytes=0-0", **(extra_headers or {})}
+    # identity: a compressed response would report the *compressed* length here
+    # while httpx hands back decompressed bytes during the download, so the
+    # size check and every byte offset would be computed against the wrong
+    # number. Downloads want the file as stored, never a re-encoded copy.
+    headers = {
+        "Range": "bytes=0-0",
+        "Accept-Encoding": "identity",
+        **(extra_headers or {}),
+    }
     try:
         with client.stream("GET", url, headers=headers) as response:
             status = response.status_code

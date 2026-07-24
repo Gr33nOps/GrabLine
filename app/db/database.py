@@ -62,6 +62,11 @@ CREATE TABLE IF NOT EXISTS segments (
 
 CREATE INDEX IF NOT EXISTS idx_segments_job_id ON segments(job_id);
 
+-- The extension's progress pill looks a download up by URL on every poll
+-- (once a second, per tracked URL). Without this the lookup is a full scan of
+-- every job the user has ever had.
+CREATE INDEX IF NOT EXISTS idx_jobs_url ON jobs(url);
+
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -108,6 +113,10 @@ CREATE TABLE IF NOT EXISTS handoffs (
     claimed    INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- The running app polls for unclaimed rows on a timer, forever, while claimed
+-- ones accumulate for the life of the profile.
+CREATE INDEX IF NOT EXISTS idx_handoffs_unclaimed ON handoffs(claimed, id);
 """
 
 #: Columns added after Phase 0, applied to pre-existing databases on open.
@@ -208,6 +217,18 @@ class Database:
                 for column, statement in migrations.items():
                     if column not in existing:
                         self._conn.execute(statement)
+
+    @property
+    def revision(self) -> int:
+        """A token that changes whenever any row in the database changes.
+
+        Cheap validity check for caches built out of query results: an equal
+        revision means the rows behind them cannot have moved, so the cached
+        answer is still exactly right. (This is the only connection to the
+        file, so its change counter sees every write.)
+        """
+        with self._lock:
+            return self._conn.total_changes
 
     def close(self) -> None:
         with self._lock:
@@ -336,11 +357,19 @@ class Database:
             )
 
     def update_job_url(self, job_id: int, url: str) -> None:
-        """Point a job at a new URL (mirror failover). The size belongs to the
-        old URL, so it's cleared and re-probed on the next run."""
+        """Point a job at a new URL (mirror failover).
+
+        Every probed field belongs to the *old* URL, so all of them are cleared
+        and re-probed on the next run. Clearing final_url is what forces that
+        re-probe: the downloader treats a stored final_url as a usable cached
+        probe, so leaving it behind made the mirror inherit the dead URL's
+        resumable/etag/size and fail instantly instead of downloading.
+        """
         with self._lock, self._conn:
             self._conn.execute(
-                "UPDATE jobs SET url = ?, total_size = NULL WHERE id = ?", (url, job_id)
+                "UPDATE jobs SET url = ?, final_url = NULL, total_size = NULL, "
+                "resumable = 0, etag = NULL, last_modified = NULL WHERE id = ?",
+                (url, job_id),
             )
 
     def update_job_total(self, job_id: int, total_size: int) -> None:
@@ -563,7 +592,9 @@ class Database:
     def stored_progress(self, job: Job) -> int:
         """Bytes on record for a job that is not currently running."""
         if job.kind is JobKind.DIRECT:
-            return self.job_downloaded(job.id)
+            # A completed direct job has had its segment rows pruned (they had
+            # nothing left to say); the job row carries the final figure.
+            return self.job_downloaded(job.id) or job.downloaded
         return job.downloaded
 
     def mark_interrupted(self) -> int:
@@ -618,6 +649,12 @@ class Database:
                 self._conn.executemany(
                     "UPDATE handoffs SET claimed = 1 WHERE id = ?",
                     [(row["id"],) for row in rows],
+                )
+                # A claimed row has done its job. They were kept forever, so
+                # this table grew by one row per browser download for the life
+                # of the profile - and every poll scanned past all of them.
+                self._conn.execute(
+                    "DELETE FROM handoffs WHERE claimed = 1 AND id < ?", (rows[0]["id"],)
                 )
         return [
             Handoff(

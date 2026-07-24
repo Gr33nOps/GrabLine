@@ -149,6 +149,9 @@ class DownloadManager:
         self._connections_override = connections
         self.limiter = RateLimiter(self.settings.speed_limit_kbps * 1024)
         self._applied_rate: int | None = None
+        self._rate_lock = threading.Lock()
+        #: (validity token, views) for snapshot(); see there.
+        self._snapshot_cache: tuple[object, list[JobView]] | None = None
         # One reusable limiter per download that has its own cap; the running
         # task holds the very same instance, so a live change takes effect now.
         self._job_limiters: dict[int, RateLimiter] = {}
@@ -165,6 +168,7 @@ class DownloadManager:
         # wait-for-network probe state (assume online until proven otherwise).
         self._net_checked = 0.0
         self._net_ok = True
+        self._net_probe: threading.Thread | None = None
         self._cond = threading.Condition()
         self._active: dict[int, DownloadTask] = {}
         self._threads: dict[int, threading.Thread] = {}
@@ -241,10 +245,14 @@ class DownloadManager:
         return rate
 
     def _apply_global_rate(self) -> None:
-        rate = self._effective_global_rate()
-        if rate != self._applied_rate:
-            self.limiter.set_rate(rate)
-            self._applied_rate = rate
+        # Atomic read-compare-set: the scheduler and reload_settings both land
+        # here, and interleaving them let a pass that had already read the old
+        # limit overwrite a cap the user had just applied.
+        with self._rate_lock:
+            rate = self._effective_global_rate()
+            if rate != self._applied_rate:
+                self.limiter.set_rate(rate)
+                self._applied_rate = rate
 
     # -------------------------------------------------- timed download window
 
@@ -268,20 +276,41 @@ class DownloadManager:
         return not (self.settings.wait_for_network and not self._online())
 
     def _online(self) -> bool:
-        """Throttled connectivity probe (wait-for-network only). When the
-        internet comes back, failed jobs retry immediately instead of
-        sitting out the rest of their backoff."""
+        """Last known connectivity (wait-for-network only), refreshed off-thread.
+
+        The probe itself is two TCP handshakes worth up to 3s. This runs inside
+        the scheduler pass, which holds ``_cond`` - the same lock the UI's
+        twice-a-second snapshot, pause, cancel and add all need - so probing
+        inline froze the whole app every time it ran. The answer is only used to
+        decide whether to start something in the next half second, so a slightly
+        stale value costs nothing.
+        """
         now = time.monotonic()
-        if now - self._net_checked < _ONLINE_PROBE_SECONDS:
-            return self._net_ok
-        self._net_checked = now
-        was_online = self._net_ok
-        self._net_ok = connectivity.is_online()
-        if self._net_ok and not was_online:
-            for job_id in list(self._retry_at):
-                self._retry_at[job_id] = 0.0  # due now
-            log.info("internet is back - retrying failed downloads now")
+        if now - self._net_checked >= _ONLINE_PROBE_SECONDS:
+            self._net_checked = now
+            self._start_online_probe()
         return self._net_ok
+
+    def _start_online_probe(self) -> None:
+        if self._net_probe is not None and self._net_probe.is_alive():
+            return
+
+        def probe() -> None:
+            online = connectivity.is_online()
+            with self._cond:
+                was_online = self._net_ok
+                self._net_ok = online
+                if online and not was_online:
+                    for job_id in list(self._retry_at):
+                        self._retry_at[job_id] = 0.0  # due now
+                    log.info("internet is back - retrying failed downloads now")
+                self._cond.notify_all()
+
+        # Publish only once it is running: an observer that catches the thread
+        # between construction and start() cannot even join it.
+        thread = threading.Thread(target=probe, name="gl-netprobe", daemon=True)
+        thread.start()
+        self._net_probe = thread
 
     def _apply_download_schedule(self) -> None:
         """Pause active downloads when the window closes; resume them (and let
@@ -844,6 +873,17 @@ class DownloadManager:
     def snapshot(self) -> list[JobView]:
         with self._cond:
             active = dict(self._active)
+        # What comes out of here is a pure function of the stored rows and the
+        # live byte counters, so when neither has moved the previous answer is
+        # still exactly right. Worth caching: the UI polls this twice a second
+        # from two places, and rebuilding it re-reads every job row in history
+        # and re-parses each one's JSON options - the main reason a long
+        # download history made the whole app feel heavier.
+        live = tuple(sorted((job_id, task.bytes_downloaded) for job_id, task in active.items()))
+        token = (self.db.revision, live)
+        cached = self._snapshot_cache
+        if cached is not None and cached[0] == token:
+            return list(cached[1])
         # One query for all segment progress instead of one per direct job:
         # the UI polls snapshot() every 500ms, so this is a real hot path.
         segment_progress = self.db.all_segment_progress()
@@ -853,7 +893,9 @@ class DownloadManager:
             if task is not None:
                 downloaded = task.bytes_downloaded
             elif job.kind is JobKind.DIRECT:
-                downloaded = segment_progress.get(job.id, 0)
+                # No segment rows means they were pruned on completion; the
+                # job row kept the total.
+                downloaded = segment_progress.get(job.id) or job.downloaded
             else:
                 downloaded = job.downloaded
             views.append(
@@ -875,7 +917,8 @@ class DownloadManager:
                     queue_id=job.queue_id,
                 )
             )
-        return views
+        self._snapshot_cache = (token, views)
+        return list(views)
 
     def shutdown(self, timeout: float = 10.0) -> None:
         """Pause everything in flight so it resumes cleanly next launch."""
@@ -964,28 +1007,56 @@ class DownloadManager:
             self._cond.notify_all()
 
     def _loop(self) -> None:
+        # One bad pass must never end scheduling. Without this guard a single
+        # raise in here (a malformed imported proxy, a transient sqlite error)
+        # killed the scheduler thread for the rest of the session: the app kept
+        # looking alive while no queued job ever started again.
         while True:
-            with self._cond:
-                if not self._running:
+            try:
+                if not self._pass():
                     return
-                self._apply_global_rate()  # honor the nightly full-speed window
-                self._apply_download_schedule()  # start/stop within the timed window
-                self._promote_due_retries()  # re-queue failed jobs whose backoff elapsed
-                if self.downloads_allowed_now() and len(self._active) < self.max_concurrent:
-                    job = self._next_queued()
-                    if job is not None:
-                        task = self._create_task(job)
-                        thread = threading.Thread(
-                            target=self._run_job,
-                            args=(job, task),
-                            name=f"gl-job-{job.id}",
-                            daemon=True,
-                        )
-                        self._active[job.id] = task
-                        self._threads[job.id] = thread
-                        thread.start()
-                        continue
-                self._cond.wait(timeout=0.5)
+            except Exception:
+                log.exception("scheduler pass failed; continuing")
+                time.sleep(0.5)
+
+    def _pass(self) -> bool:
+        """One scheduler pass. False once the manager has stopped."""
+        with self._cond:
+            if not self._running:
+                return False
+            self._apply_global_rate()  # honor the nightly full-speed window
+            self._apply_download_schedule()  # start/stop within the timed window
+            self._promote_due_retries()  # re-queue failed jobs whose backoff elapsed
+            if self.downloads_allowed_now() and len(self._active) < self.max_concurrent:
+                job = self._next_queued()
+                if job is not None:
+                    self._start_job(job)
+                    return True
+            self._cond.wait(timeout=0.5)
+        return True
+
+    def _start_job(self, job: Job) -> None:
+        """Build the task and hand it a thread. Caller holds _cond.
+
+        A failure here (bad proxy, unbuildable client) belongs to the job, not
+        the scheduler: mark it failed and move on rather than letting the
+        exception escape into the loop.
+        """
+        try:
+            task = self._create_task(job)
+        except Exception as exc:
+            log.exception("job %s could not be started", job.id)
+            self.db.set_job_status(job.id, JobStatus.FAILED, f"could not start: {exc}")
+            return
+        thread = threading.Thread(
+            target=self._run_job,
+            args=(job, task),
+            name=f"gl-job-{job.id}",
+            daemon=True,
+        )
+        self._active[job.id] = task
+        self._threads[job.id] = thread
+        thread.start()
 
     def _next_queued(self) -> Job | None:
         """The next job allowed to start, honoring named queues: queue order

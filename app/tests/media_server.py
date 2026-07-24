@@ -49,6 +49,11 @@ class Resource:
     required_headers: dict[str, str] | None = None
     # Extra response headers (e.g. Server, Set-Cookie) for the inspector tests.
     extra_headers: tuple[tuple[str, str], ...] = ()
+    # Answer requests numbered fail_from..fail_until (1-based, per path, probe
+    # included) with this status instead of the body - a flaky CDN node.
+    fail_status: int | None = None
+    fail_from: int = 1
+    fail_until: int = 0
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -79,6 +84,13 @@ class _Handler(BaseHTTPRequestHandler):
             if missing:
                 self.send_error(403)
                 return
+
+        if (
+            resource.fail_status is not None
+            and resource.fail_from <= request_number <= resource.fail_until
+        ):
+            self.send_error(resource.fail_status)
+            return
 
         if resource.redirect_to is not None:
             self.send_response(302)

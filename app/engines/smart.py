@@ -14,8 +14,11 @@ yt-dlp is imported lazily so the CLI stays fast for plain direct downloads.
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import glob
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -31,6 +34,9 @@ from app.core.models import Job, JobStatus
 from app.db.database import Database
 
 log = logging.getLogger(__name__)
+
+#: yt-dlp's per-format filename tag, e.g. the `.f137` in `Clip.f137.mp4`.
+_FORMAT_SUFFIX = re.compile(r"\.f[0-9a-zA-Z_-]+$")
 
 #: The standard quality ladder shown in the panel, top first.
 QUALITY_TIERS = (2160, 1440, 1080, 720, 480, 360)
@@ -538,6 +544,22 @@ class SmartEngine:
                 self._extractors = [ie for ie in gen_extractor_classes() if ie.IE_NAME != "generic"]
             return self._extractors
 
+    def warm_up(self) -> None:
+        """Build the extractor list now. Call from a worker thread."""
+        self._extractor_classes()
+
+    @property
+    def warm(self) -> bool:
+        """True once the extractor list exists, i.e. matches() is instant.
+
+        Building that list imports yt-dlp and instantiates ~1700 extractor
+        classes - seconds of work, and it holds ``_lock`` while it happens.
+        The GUI thread must ask this before calling matches(), or a URL added
+        in the first seconds after launch freezes the window until the
+        background warm-up finishes.
+        """
+        return self._extractors is not None
+
     def matches(self, url: str) -> bool:
         """Offline check: does a real site extractor (not generic) claim this URL?"""
         return any(ie.suitable(url) for ie in self._extractor_classes())
@@ -759,6 +781,64 @@ class _LiveProgress:
     expected_total: int | None = None
 
 
+# ---------------------------------------------------- cancellable ffmpeg
+# yt-dlp gives no handle on the FFmpeg it spawns, and its postprocessor hook
+# only fires *between* steps - so cancelling during a 4K merge or an MP3
+# extraction left ffmpeg running to completion, pinning a core (and holding
+# the temp files) for minutes after the download vanished from the list.
+# Wrapping the Popen yt-dlp's ffmpeg postprocessor uses is the only handle
+# there is. Children are recorded against the thread that spawned them, so one
+# job's cancel can never reach into another's.
+
+_children_lock = threading.Lock()
+_children: dict[int, set[Any]] = {}
+_tracking_installed = False
+
+
+def _track_ffmpeg_children() -> None:
+    """Install the Popen wrapper once, on first use of the Smart engine."""
+    global _tracking_installed
+    with _children_lock:
+        if _tracking_installed:
+            return
+        _tracking_installed = True
+    try:
+        from yt_dlp.postprocessor import ffmpeg as ffmpeg_pp
+    except Exception:  # pragma: no cover - yt-dlp layout changed; cancel still
+        log.debug("could not install ffmpeg tracking", exc_info=True)
+        return
+    base = ffmpeg_pp.Popen
+
+    class _TrackedPopen(base):  # type: ignore[misc, valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            owner = threading.get_ident()
+            with _children_lock:
+                _children.setdefault(owner, set()).add(self)
+
+    ffmpeg_pp.Popen = _TrackedPopen
+
+
+def _kill_tracked_children(owner: int | None) -> None:
+    """Stop the FFmpeg processes started by ``owner``'s thread."""
+    if owner is None:
+        return
+    with _children_lock:
+        live = _children.get(owner, set())
+        _children[owner] = {child for child in live if child.poll() is None}
+        doomed = list(_children[owner])
+    for child in doomed:
+        with contextlib.suppress(Exception):
+            child.kill()
+
+
+def _forget_tracked_children(owner: int | None) -> None:
+    if owner is None:
+        return
+    with _children_lock:
+        _children.pop(owner, None)
+
+
 class _ProgressPersister:
     """Writes a SMART job's progress to SQLite on its own background thread,
     off yt-dlp's download thread.
@@ -857,16 +937,21 @@ class SmartDownload:
         self._known_files: set[str] = set()
         self._js_runtime: tuple[str, str] | None = None  # (yt-dlp name, path)
         self._title_adopted = False
+        #: Which thread is running this download, so pause/cancel can reach the
+        #: FFmpeg it spawned without touching another job's.
+        self._worker_thread: int | None = None
         self._persister = _ProgressPersister(db, job.id, persist_interval, self._progress_snapshot)
 
     # ------------------------------------------------------------ control
 
     def pause(self) -> None:
         self._stop_event.set()
+        _kill_tracked_children(self._worker_thread)
 
     def cancel(self) -> None:
         self._cancelled = True
         self._stop_event.set()
+        _kill_tracked_children(self._worker_thread)
 
     @property
     def bytes_downloaded(self) -> int:
@@ -875,10 +960,20 @@ class SmartDownload:
     # ---------------------------------------------------------------- run
 
     def run(self) -> JobStatus:
-        import yt_dlp
-
+        self._worker_thread = threading.get_ident()
+        _track_ffmpeg_children()
         self.db.set_job_status(self.job.id, JobStatus.DOWNLOADING)
         self._persister.start()
+        try:
+            return self._run_guarded()
+        finally:
+            # Thread ids get reused; leaving this job's children registered
+            # would let a later job's cancel go looking at stale handles.
+            _forget_tracked_children(self._worker_thread)
+
+    def _run_guarded(self) -> JobStatus:
+        import yt_dlp
+
         try:
             info = self._download_smart()
         except _StopRequested:
@@ -1370,11 +1465,37 @@ class SmartDownload:
         return JobStatus.PAUSED
 
     def _remove_partials(self) -> None:
+        """Delete everything this job left in the destination folder.
+
+        yt-dlp scatters more than the output file around: ``.part`` for the
+        partial download, ``.part-FragNNN`` for native HLS/DASH fragments,
+        ``.ytdl`` for resume state, and - when video and audio are merged - a
+        ``.temp.<ext>`` that ffmpeg is midway through writing when cancel kills
+        it. Only the first and the last were being removed, so a cancelled 4K
+        video could leave several gigabytes of scratch behind.
+        """
         dest = Path(self.job.dest_dir)
         stems = {Path(name).name for name in self._known_files if name}
         for stem in stems:
-            for suffix in ("", ".part", ".ytdl"):
-                (dest / f"{stem}{suffix}").unlink(missing_ok=True)
+            self._unlink(dest / stem, dest / f"{stem}.ytdl")
+            self._unlink(*dest.glob(f"{glob.escape(stem)}.part*"))
+        for base in self._output_bases(stems):
+            self._unlink(*dest.glob(f"{glob.escape(base)}.temp.*"))
+
+    def _output_bases(self, stems: set[str]) -> set[str]:
+        """The names ffmpeg merges into, i.e. the per-format files' stems with
+        yt-dlp's format-id suffix (``Clip.f137.mp4`` -> ``Clip``) dropped."""
+        bases = {Path(self.job.filename).stem}
+        bases |= {_FORMAT_SUFFIX.sub("", Path(stem).stem) for stem in stems}
+        return {base for base in bases if base}
+
+    @staticmethod
+    def _unlink(*paths: Path) -> None:
+        for path in paths:
+            # A just-killed ffmpeg can still hold its output open on Windows;
+            # one undeletable leftover must not fail the cancel.
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
 
     def _finish_failed(self, message: str) -> JobStatus:
         self._persister.stop()

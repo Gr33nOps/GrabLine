@@ -29,7 +29,13 @@ async function cookieHeaderFor(url) {
 async function sendToGrabLine(
   url,
   tab,
-  { quality = null, fallbackUrls = [], credentials = false, title = null } = {},
+  {
+    quality = null,
+    fallbackUrls = [],
+    credentials = false,
+    title = null,
+    onlyIfRunning = false,
+  } = {},
 ) {
   const message = {
     type: "download",
@@ -41,6 +47,9 @@ async function sendToGrabLine(
     fallbackUrls,
     referer: tab?.url ?? null,
     userAgent: navigator.userAgent,
+    // Set when we're about to cancel a browser download: the host must not
+    // record a handoff it cannot deliver, or the file arrives twice.
+    onlyIfRunning,
     // Cookies only for file downloads (interception / right-click a link),
     // never for media grabs - yt-dlp handles logins its own way there.
     cookie: credentials ? await cookieHeaderFor(url) : "",
@@ -361,16 +370,24 @@ function shouldIntercept(item) {
 // isn't running, so native browser downloads stay visible.
 let lastAppRunning = false;
 
-// Synchronous mirrors so downloads.onCreated / blocking webRequest can decide
-// without awaiting storage or a native ping (those awaits were the reason
-// images and media still flashed in the browser download UI).
-let interceptEnabled = true;
-void api.storage.local.get("intercept").then(({ intercept = true }) => {
-  interceptEnabled = intercept;
+// null until storage answers. An MV3 service worker is restarted constantly,
+// and each restart re-runs this file, so assuming "on" during that gap made a
+// user who had switched takeover OFF still lose their first download to it.
+let interceptEnabled = null;
+const interceptLoaded = api.storage.local.get("intercept").then(({ intercept = true }) => {
+  if (interceptEnabled === null) interceptEnabled = intercept;
+  void updateDownloadUi(); // the shelf was left visible while this was unknown
+  return interceptEnabled;
 });
 
+// The settled toggle. Callers that can afford to wait (all of them: the
+// download is paused or the response is held) get the real value.
+async function interceptionOn() {
+  return interceptEnabled === null ? interceptLoaded : interceptEnabled;
+}
+
 async function updateDownloadUi() {
-  const visible = !(interceptEnabled && lastAppRunning);
+  const visible = !(interceptEnabled === true && lastAppRunning);
   try {
     if (api.downloads.setUiOptions) await api.downloads.setUiOptions({ enabled: visible });
     else if (api.downloads.setShelfEnabled) api.downloads.setShelfEnabled(visible);
@@ -386,8 +403,9 @@ function noteAppRunning(running) {
   }
 }
 
-// Keep lastAppRunning fresh so a download that starts while the service
-// worker is cold can still be cancelled synchronously.
+// Keep lastAppRunning fresh so the browser's download shelf is already hidden
+// (or shown) by the time a download starts, rather than flashing first. The
+// takeover decision itself no longer reads it - it waits for a real answer.
 function warmAppStatus() {
   void pingGrabLine();
 }
@@ -416,30 +434,30 @@ async function handoffDownloadItem(item) {
   const url = item.finalUrl || item.url;
   const [active] = await api.tabs.query({ active: true, lastFocusedWindow: true });
   const chosenName = (item.filename || "").split(/[\\/]/).pop() || null;
-  await sendToGrabLine(
+  return sendToGrabLine(
     url,
     { url: item.referrer || active?.url || null, title: active?.title || chosenName },
-    { credentials: true },
+    { credentials: true, onlyIfRunning: true },
   );
 }
 
 api.downloads.onCreated.addListener((item) => {
-  // Pause synchronously (reversible), verify asynchronously, then commit.
-  // The old order - await storage + a native ping, THEN cancel - lost the
-  // race on small files, which kept finishing in the browser. And cancelling
-  // before the ping risked the opposite failure: the app is actually closed,
-  // the handoff goes nowhere, and the user's download simply vanishes.
-  // Pause-first has neither problem: too-late pauses throw and the browser
-  // keeps the file; a dead app resumes the pause.
-  if (!interceptEnabled || !shouldIntercept(item)) return;
+  // Pause synchronously (it is reversible), decide asynchronously, and only
+  // then take the download away. Two orderings were tried and both lost a
+  // file: awaiting storage/a ping before cancelling let small downloads finish
+  // in the browser, and cancelling before confirming the handoff meant a
+  // closed app made the download vanish from both places. Pausing first can do
+  // neither - a pause that lost the race throws, and anything short of the app
+  // accepting the URL resumes the browser's own download.
+  if (interceptEnabled === false || !shouldIntercept(item)) return;
   void (async () => {
     try {
       await api.downloads.pause(item.id);
     } catch {
       return; // already finished; leave it to the browser
     }
-    const pong = await pingGrabLine();
-    if (!pong || !pong.appRunning) {
+    const reply = (await interceptionOn()) ? await handoffDownloadItem(item) : null;
+    if (reply?.type !== "queued" || !reply.appRunning) {
       try {
         await api.downloads.resume(item.id);
       } catch {
@@ -451,9 +469,8 @@ api.downloads.onCreated.addListener((item) => {
       await api.downloads.cancel(item.id);
       await api.downloads.erase({ id: item.id });
     } catch {
-      return; // too late to take over; the browser finished it
+      /* the browser finished it anyway; GrabLine has it too - harmless */
     }
-    await handoffDownloadItem(item);
   })();
 });
 
@@ -496,27 +513,30 @@ function isForcedDownload(details) {
 }
 
 async function interceptResponse(details) {
-  // Only take a download away from the browser when the app is actually up to
-  // receive it - otherwise the file would just vanish. Forced downloads are
-  // rare, so this ping never touches ordinary browsing.
-  const pong = await pingGrabLine();
-  if (!pong || !pong.appRunning) return {};
+  // Cancel only once the app has actually accepted the URL. The response is
+  // held until this resolves, so there is no race to lose - and if the app is
+  // closed (or the toggle turns out to be off) we simply let the browser have
+  // its download instead of cancelling it into nowhere. One native message
+  // does both the check and the handoff; forced downloads are rare, so this
+  // never touches ordinary browsing.
+  if (!(await interceptionOn())) return {};
   const [active] = await api.tabs
     .query({ active: true, lastFocusedWindow: true })
     .catch(() => []);
   const referrer = details.originUrl || details.documentUrl || active?.url || null;
-  void sendToGrabLine(
+  const reply = await sendToGrabLine(
     details.url,
     { url: referrer, title: active?.title || null },
-    { credentials: true },
+    { credentials: true, onlyIfRunning: true },
   );
+  if (reply?.type !== "queued" || !reply.appRunning) return {};
   return { cancel: true };
 }
 
 // Stays synchronous for the common case (returns {} at once), so navigation is
-// never delayed; only an actual download awaits the ping/handoff.
+// never delayed; only an actual download awaits the handoff.
 function onDownloadHeaders(details) {
-  if (!interceptEnabled || details.tabId < 0) return {};
+  if (interceptEnabled === false || details.tabId < 0) return {};
   if (!isForcedDownload(details)) return {};
   return interceptResponse(details);
 }

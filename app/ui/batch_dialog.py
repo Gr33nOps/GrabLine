@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
@@ -118,7 +118,14 @@ class BatchImportDialog(chrome.Dialog):
         layout.addWidget(intro)
         self.text_edit = QPlainTextEdit()
         self.text_edit.setPlaceholderText("https://…\nhttps://…")
-        self.text_edit.textChanged.connect(self._update_count)
+        # Debounced: counting means running the URL regex over the whole box
+        # and expanding every range pattern in it. On a pasted list of a few
+        # thousand links, doing that per keystroke made typing unusable.
+        self._count_timer = QTimer(self)
+        self._count_timer.setSingleShot(True)
+        self._count_timer.setInterval(150)
+        self._count_timer.timeout.connect(self._update_count)
+        self.text_edit.textChanged.connect(self._count_timer.start)
         layout.addWidget(self.text_edit)
 
         row = QHBoxLayout()

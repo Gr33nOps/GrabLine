@@ -129,19 +129,38 @@ def test_battery_mode_gates_downloads(db: Database, monkeypatch: pytest.MonkeyPa
         manager.shutdown()
 
 
+def _await_net_probe(manager: DownloadManager, expected: bool) -> None:
+    """Kick the (asynchronous) connectivity probe and wait for its verdict.
+
+    The probe runs off-thread on purpose - inline it froze the UI for seconds,
+    since the scheduler holds the manager lock across a pass - so the answer
+    lands a moment after the call that triggers it.
+    """
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        manager._net_checked = 0.0  # due for a fresh probe
+        manager.downloads_allowed_now()
+        probe = manager._net_probe
+        if probe is not None:
+            probe.join(timeout=5.0)
+        if manager._net_ok is expected:
+            return
+    raise AssertionError(f"connectivity probe never reported online={expected}")
+
+
 def test_wait_for_network_gates_and_fast_retries(db: Database, monkeypatch: pytest.MonkeyPatch):
     manager = DownloadManager(db, max_concurrent=0)
     try:
         manager.settings.wait_for_network = True
         monkeypatch.setattr("app.core.manager.connectivity.is_online", lambda: False)
-        manager._net_checked = 0.0  # force a fresh probe
+        _await_net_probe(manager, expected=False)
         assert manager.downloads_allowed_now() is False
 
         # A failed job waiting out a long backoff...
         manager._retry_at[42] = time.monotonic() + 300
         # ...retries immediately once the internet returns.
         monkeypatch.setattr("app.core.manager.connectivity.is_online", lambda: True)
-        manager._net_checked = 0.0
+        _await_net_probe(manager, expected=True)
         assert manager.downloads_allowed_now() is True
         # The reconnect zeroes the backoff; the live scheduler thread may then
         # consume the (stale) entry at any moment - both outcomes mean "retry

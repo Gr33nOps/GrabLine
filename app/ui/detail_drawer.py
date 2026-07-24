@@ -45,7 +45,7 @@ from app.core.i18n import N_, t
 from app.core.manager import DownloadManager, JobView
 from app.core.mediainfo import MediaSummary, read_media_info
 from app.core.models import Job, JobKind, JobStatus, Segment
-from app.ui import components, design, motion, theme
+from app.ui import components, design, motion, theme, threads
 from app.ui.format import duration_text, human_bytes
 from app.ui.icons import svg_icon, type_icon_name
 from app.ui.work_threads import FileOpThread
@@ -239,6 +239,9 @@ class _ConnectionBars(QWidget):
         root.addWidget(self._title)
         self._rows: list[tuple[QWidget, QLabel, motion.SmoothProgressBar]] = []
         self._prev: dict[int, tuple[int, float]] = {}
+        #: Whose segments are on screen, so a parked download doesn't get
+        #: re-queried from the database twice a second for an unchanging answer.
+        self._job_id: int | None = None
         for _ in range(_MAX_CONN_BARS):
             row = QWidget()
             lay = QHBoxLayout(row)
@@ -256,8 +259,15 @@ class _ConnectionBars(QWidget):
             self._rows.append((row, label, bar))
         self.hide()
 
+    def shows(self, job_id: int) -> bool:
+        return self._job_id == job_id
+
+    def note_job(self, job_id: int) -> None:
+        self._job_id = job_id
+
     def clear(self) -> None:
         self._prev.clear()
+        self._job_id = None
         for row, _label, bar in self._rows:
             row.hide()
             bar.set_value(0.0, immediate=True)
@@ -340,8 +350,17 @@ class DetailDrawer(QFrame):
         self._view: JobView | None = None
         self._job: Job | None = None
         self._times: tuple[str | None, str | None] = (None, None)
-        #: This download's speed trail (for the live average and peak).
-        self._history: list[float] = []
+        #: (path, status) the action buttons were last decided from, and the
+        #: filesystem answer for it - see _update_actions.
+        self._actions_key: tuple[str, JobStatus] | None = None
+        self._file_present = False
+        #: This download's speed trail, as running totals rather than a list of
+        #: samples: the drawer ticks several times a second for as long as the
+        #: download lasts, so keeping every sample meant an ever-growing list
+        #: that was re-summed and re-scanned on every one of those ticks.
+        self._samples = 0
+        self._speed_total = 0.0
+        self._peak = 0.0
         #: Bumped every selection change; a late ffprobe result for an older
         #: selection is dropped rather than written to the wrong file's tab.
         self._probe_gen = 0
@@ -640,10 +659,13 @@ class DetailDrawer(QFrame):
     ) -> None:
         new = self._view is None or self._view.id != view.id
         if new:
-            self._spark.set_samples(history or ())
+            trail = list(history or ())
+            self._spark.set_samples(trail)
             self._conn_bars.clear()
+            self._samples = len(trail)
+            self._speed_total = sum(trail)
+            self._peak = max(trail, default=0.0)
         self._view = view
-        self._history = list(history or []) if new else self._history
         self._update(view, speed_bps, new)
         self.show()
 
@@ -746,6 +768,9 @@ class DetailDrawer(QFrame):
         ):
             self._conn_bars.clear()
             return
+        if view.status is not JobStatus.DOWNLOADING and self._conn_bars.shows(view.id):
+            return  # a parked download's segments can't move; don't re-query
+        self._conn_bars.note_job(view.id)
         segments = self.manager.db.segments_for(view.id)
         self._conn_bars.update_segments(
             segments,
@@ -759,9 +784,11 @@ class DetailDrawer(QFrame):
         self._spark_card.setVisible(downloading)
         if downloading and not new:
             self._spark.push(speed_bps)
-            self._history.append(speed_bps)
-        average = sum(self._history) / len(self._history) if self._history else 0.0
-        peak = max(self._history) if self._history else 0.0
+            self._samples += 1
+            self._speed_total += speed_bps
+            self._peak = max(self._peak, speed_bps)
+        average = self._speed_total / self._samples if self._samples else 0.0
+        peak = self._peak
 
         self._overview.clear()
         if downloading:
@@ -802,10 +829,16 @@ class DetailDrawer(QFrame):
         self._security_btn.setVisible(done and (Path(view.dest_dir) / view.filename).exists())
 
     def _update_actions(self, view: JobView) -> None:
+        # Cached per (file, status): this runs on every 500ms poll, and two
+        # filesystem stats a tick is real cost on a network share or a spun-down
+        # drive. Nothing here can change without the status or the name changing.
         path = Path(view.dest_dir) / view.filename
-        done = view.status is JobStatus.COMPLETED and path.exists()
-        self._act_btns["open"].setEnabled(done)
-        self._act_btns["rename"].setEnabled(path.exists())
+        key = (str(path), view.status)
+        if key != self._actions_key:
+            self._actions_key = key
+            self._file_present = path.exists()
+        self._act_btns["open"].setEnabled(view.status is JobStatus.COMPLETED and self._file_present)
+        self._act_btns["rename"].setEnabled(self._file_present)
 
     # ------------------------------------------------- third tab: media/peers
 
@@ -872,7 +905,11 @@ class DetailDrawer(QFrame):
         return True
 
     def _run(self, work: Callable[[], object], done: Callable[[object], None]) -> None:
-        thread = FileOpThread(work, self)
+        # Unparented and retained: an ffprobe/archive scan outlives the drawer
+        # that asked for it, and a QThread destroyed while still running aborts
+        # the process. threads.retain owns it until it genuinely stops, and
+        # threads.shutdown waits for it on quit.
+        thread = FileOpThread(work)
 
         def deliver(result: object, error: object) -> None:
             if error is None:
@@ -882,6 +919,7 @@ class DetailDrawer(QFrame):
                 self._media_status.setText("")
 
         thread.done.connect(deliver)
+        threads.retain(thread)
         thread.start()
 
     def _fill_media(self, result: object, gen: int) -> None:

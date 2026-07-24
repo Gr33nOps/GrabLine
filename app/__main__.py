@@ -382,10 +382,12 @@ def main() -> int:
             from app.core import net
 
             net.ipv6_broken()
-            import yt_dlp  # noqa: F401
-            from yt_dlp.extractor import gen_extractor_classes
-
-            gen_extractor_classes()
+            # Through the engine the app actually uses, so its cached extractor
+            # list is the one that gets built. Calling yt-dlp's
+            # gen_extractor_classes() directly did the same seconds of work but
+            # left the engine cold, so the first URL added paid for it again -
+            # on the GUI thread.
+            window.resolver.smart.warm_up()
             from app.core import jsruntime
 
             jsruntime.detect_js_runtime()

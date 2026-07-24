@@ -96,6 +96,23 @@ def test_download_creates_handoff(db: Database):
     assert handoff.source == "extension"
 
 
+def test_only_if_running_records_nothing_when_the_app_is_closed(db: Database):
+    """The extension sets this while deciding whether to cancel a browser
+    download. With no app to receive it, recording a handoff anyway meant the
+    browser finished the file and the app downloaded it all over again at the
+    next launch."""
+    reply = handle_message(
+        db,
+        {
+            "type": "download",
+            "url": "https://example.com/file.zip",
+            "onlyIfRunning": True,
+        },
+    )
+    assert reply == {"type": "notRunning", "appRunning": False}
+    assert db.claim_handoffs() == []
+
+
 # ----------------------------------------- cookie pass-through (headers)
 
 

@@ -128,6 +128,32 @@ def test_smart_download_cancel_removes_partials(server: MediaServer, db: Databas
     assert leftovers == []
 
 
+def test_cancel_sweeps_fragments_and_merge_temps(db: Database, dest: Path):
+    """A cancelled 4K video left gigabytes behind: only `.part` and `.ytdl`
+    were swept, while the native HLS/DASH downloader writes `.part-FragNNN`
+    per fragment and ffmpeg is midway through a `.temp.mp4` merge when the
+    cancel kills it. Nothing of ours may survive in the download folder."""
+    job = _smart_job(db, "https://x/v", dest, "clip.mp4")
+    task = SmartDownload(db, job, ffmpeg_path=None)
+    # What yt-dlp reports downloading: one file per selected format.
+    task._known_files = {str(dest / "clip.f137.mp4"), str(dest / "clip.f251.webm")}
+    scratch = [
+        "clip.f137.mp4",
+        "clip.f137.mp4.part",
+        "clip.f137.mp4.part-Frag17",
+        "clip.f137.mp4.ytdl",
+        "clip.f251.webm.part",
+        "clip.temp.mp4",  # the merge ffmpeg was writing
+    ]
+    keep = ["clip.f137.mp4.notes.txt", "holiday.mp4"]
+    for name in scratch + keep:
+        (dest / name).write_bytes(b"x")
+
+    task._remove_partials()
+
+    assert sorted(p.name for p in dest.iterdir()) == sorted(keep)
+
+
 def _no_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin 'no JS runtime installed' so tests don't depend on the machine."""
     monkeypatch.setattr("app.core.jsruntime.detect_js_runtime", lambda *a, **k: None)

@@ -100,6 +100,13 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
                 valid = _valid_url(item)
                 if valid is not None and valid != url:
                     fallbacks.append(valid)
+        running = instance.app_is_running()
+        if message.get("onlyIfRunning") and not running:
+            # The extension is deciding whether to take a download away from
+            # the browser. With no app to hand it to, say so and leave no row
+            # behind - otherwise the browser finishes the file AND the app
+            # downloads it again at next launch.
+            return {"type": "notRunning", "appRunning": False}
         handoff_id = db.add_handoff(
             url,
             page_url=_valid_url(message.get("pageUrl")),
@@ -109,11 +116,7 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
             payload=fallbacks,
             headers=_download_headers(message),
         )
-        return {
-            "type": "queued",
-            "handoffId": handoff_id,
-            "appRunning": instance.app_is_running(),
-        }
+        return {"type": "queued", "handoffId": handoff_id, "appRunning": running}
     if kind == "status":
         # F1.3 progress pill: latest job per URL, straight from the jobs table.
         raw = message.get("urls")

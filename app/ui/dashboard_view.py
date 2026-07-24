@@ -124,7 +124,7 @@ class DashboardView(QWidget):
         # Sample continuously, even while the dashboard isn't the visible page,
         # so the graphs keep a real rolling history instead of starting from
         # empty each time it's opened. Off screen the tick takes its cheap
-        # path - see _tick - and while the whole window is hidden it stops.
+        # path, and while the whole window is hidden it does nothing - see _tick.
         self._timer.start()
 
     def _tile_row(self, specs: list[tuple[str, str, bool]]) -> QHBoxLayout:
@@ -166,6 +166,12 @@ class DashboardView(QWidget):
         self._tick()  # an immediate refresh so the tiles aren't a beat stale
 
     def _tick(self) -> None:
+        # Hidden to the tray: nobody can see the graphs and showEvent refills
+        # them on the way back, so sampling here would only burn a full jobs
+        # query (and a psutil read) twice a second for no one.
+        window = self.window()
+        if window is not None and not window.isVisible():
+            return
         views = self.manager.snapshot()
         downloaded = sum(v.downloaded for v in views if v.status is JobStatus.DOWNLOADING)
         active = sum(1 for v in views if v.status is JobStatus.DOWNLOADING)
