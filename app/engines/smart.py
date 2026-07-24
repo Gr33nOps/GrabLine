@@ -63,9 +63,10 @@ _FRIENDLY_ERRORS: tuple[tuple[str, str], ...] = (
     (
         "confirm you're not a bot",
         N_(
-            "YouTube is temporarily blocking automated access from your connection "
-            "(a bot check). Wait a little and try again, or try a different "
-            "network."
+            "YouTube blocked this download. Sign in to YouTube in your browser "
+            "(the one listed under Settings → Browser Integration), then try "
+            "again. GrabLine uses that login automatically - you do not need a "
+            "cookies file."
         ),
     ),
     (
@@ -204,22 +205,51 @@ def _handoff_headers(raw: Any, *, has_cookie_source: bool) -> dict[str, str]:
     return headers
 
 
+def _normalize_error_text(message: str) -> str:
+    """Lowercase and flatten curly quotes so YouTube's `you're` still matches
+    our ASCII markers (yt-dlp surfaces the site's typography unchanged)."""
+    return (
+        message.lower()
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u02bc", "'")
+    )
+
+
 def _looks_like_auth_wall(message: str) -> bool:
     """True when a browser login could get past this failure (see _download_smart)."""
-    lowered = message.lower()
+    lowered = _normalize_error_text(message)
     return any(marker in lowered for marker in _AUTH_WALL_MARKERS)
+
+
+def _cookie_source_failed(message: str) -> bool:
+    """True when yt-dlp could not read the browser cookie store (locked DB,
+    missing profile, etc.) - worth trying another installed browser."""
+    lowered = _normalize_error_text(message)
+    return any(
+        marker in lowered
+        for marker in (
+            "cookie database",
+            "could not copy",
+            "could not find",
+            "unable to load cookies",
+            "cookiesfrombrowser",
+            "failed to decrypt",
+        )
+    )
 
 
 def _runtime_might_help(message: str) -> bool:
     """True when providing a JS runtime + EJS solver could cure this failure."""
-    lowered = message.lower()
+    lowered = _normalize_error_text(message)
     return any(marker in lowered for marker in _RUNTIME_MARKERS)
 
 
 def friendly_error(message: str) -> str:
     """Map a raw yt-dlp error onto a sentence a person can act on."""
+    normalized = _normalize_error_text(message)
     for marker, friendly in _FRIENDLY_ERRORS:
-        if marker.lower() in message.lower():
+        if marker.lower() in normalized:
             return t(friendly)
     first_line = message.strip().splitlines()[0] if message.strip() else t("download failed")
     return first_line.removeprefix("ERROR:").strip()
@@ -582,7 +612,16 @@ class SmartEngine:
         yes to the duplicate prompt, or the extension resending. The result
         only fills in the quality panel; the download re-extracts the URL when
         it runs, so nothing is ever fetched from a stale address.
+
+        YouTube is special: anonymous clients hit a bot check, so analysis
+        always reads the browser login automatically - the person never has to
+        find a cookies.txt or flip a setting.
         """
+        if needs_js_runtime(url):
+            use_session = True
+            from app.core.browser_setup import detect_cookie_browser
+
+            session_browser = session_browser or detect_cookie_browser() or "chrome"
         header_key = tuple(sorted((headers or {}).items()))
         key = (url, use_session, session_browser, proxy or "", force_generic, header_key)
         now = time.monotonic()
@@ -624,10 +663,11 @@ class SmartEngine:
         its challenge - measured ~4s JS-less vs 26-87s with the runtime, same
         options either way. The runtime matters for the *download* (unthrottled
         URLs), and SmartDownload provisions it there. Only when the JS-less
-        pass comes back degraded (a runtime-marker error, or a video with no
-        usable formats) does analysis retry once with the runtime. A browser
-        session is the exception: cookies push yt-dlp onto JS-dependent
-        clients, so a session analysis uses the runtime from the start.
+        pass comes back degraded (a runtime-marker error, an auth/bot wall, or
+        a video with no usable formats) does analysis retry once - with a JS
+        runtime and/or the browser login, matching SmartDownload's escalation.
+        A forced browser session uses the runtime from the start (cookies push
+        yt-dlp onto JS-dependent clients).
 
         ``force_generic`` runs yt-dlp's page-scraping generic extractor even
         when no site extractor claims the URL - the last-resort path for media
@@ -644,13 +684,24 @@ class SmartEngine:
                 headers=headers,
             )
         except DownloadError as exc:
-            if use_session or not _runtime_might_help(str(exc)):
+            # _extract_info already mapped to a friendly sentence; recover the
+            # raw yt-dlp text from __cause__ so marker checks still work.
+            raw = str(exc.__cause__ or exc)
+            want_login = not use_session and _looks_like_auth_wall(raw)
+            want_runtime = not use_session and _runtime_might_help(raw)
+            if not (want_login or want_runtime):
                 raise
-            log.info("jsless analysis of %s failed (%s); retrying with a runtime", url, exc)
+            log.info(
+                "jsless analysis of %s failed (%s); retrying with%s%s",
+                url,
+                exc,
+                " a JS runtime" if want_runtime or want_login else "",
+                f" + {session_browser} login" if want_login else "",
+            )
             info = self._extract_info(
                 url,
                 with_runtime=True,
-                use_session=use_session,
+                use_session=use_session or want_login,
                 session_browser=session_browser,
                 proxy=proxy,
                 force_generic=force_generic,
@@ -724,6 +775,8 @@ class SmartEngine:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
         except yt_dlp.utils.DownloadError as exc:
+            # Keep the raw message on __cause__ so callers can still match
+            # auth/runtime markers after we surface a friendly sentence.
             raise DownloadError(friendly_error(str(exc))) from exc
         if not isinstance(info, dict):
             raise DownloadError("No downloadable media was found at this address.")
@@ -923,6 +976,7 @@ class SmartDownload:
         ffmpeg_path: str | None = None,
         persist_interval: float = 0.3,
         ratelimit: int | None = None,
+        fair_limiter: Any = None,
         proxy: str | None = None,
     ) -> None:
         self.db = db
@@ -930,6 +984,9 @@ class SmartDownload:
         self.ffmpeg_path = ffmpeg_path
         self.persist_interval = persist_interval
         self.ratelimit = ratelimit
+        # Live equal-share cap from the manager; yt-dlp's ratelimit is fixed at
+        # start, so fair-speed sleeps here on each progress delta instead.
+        self.fair_limiter = fair_limiter
         self.proxy = proxy
         self._stop_event = threading.Event()
         self._cancelled = False
@@ -1026,10 +1083,13 @@ class SmartDownload:
             "fragment_retries": 5,
             "continuedl": True,
             # YouTube (and other DASH/HLS) ships many small fragments; one at a
-            # time leaves the pipe idle between requests. A modest parallel
-            # count cuts time-to-first-byte wait and overall wall time without
-            # hammering the CDN the way a huge connection count would.
-            "concurrent_fragment_downloads": 8,
+            # time leaves the pipe idle between requests. Parallelism cuts
+            # time-to-first-byte wait without hammering the CDN the way a huge
+            # connection count would. YouTube gets a higher budget - its CDNs
+            # tolerate it and the fragments are tiny.
+            "concurrent_fragment_downloads": (
+                16 if needs_js_runtime(self.job.url) else 8
+            ),
             # Larger HTTP chunks also help progressive (non-fragment) URLs
             # start transferring sooner and keep the socket busy.
             "http_chunk_size": 10 * 1024 * 1024,
@@ -1217,6 +1277,12 @@ class SmartDownload:
 
         return detect_cookie_browser()
 
+    def _cookie_browser_fallbacks(self, primary: str | None) -> list[str]:
+        """Other installed browsers to try when ``primary``'s cookie DB won't open."""
+        from app.core.browser_setup import cookie_browser_candidates
+
+        return [name for name in cookie_browser_candidates(primary=primary) if name != primary]
+
     def _download(self, *, with_cookies: bool, with_runtime: bool) -> dict[str, Any]:
         import yt_dlp
 
@@ -1248,18 +1314,16 @@ class SmartDownload:
         return info
 
     def _download_smart(self) -> dict[str, Any]:
-        """Fast path first, one escalation on failure.
+        """Start the transfer as soon as the site allows, escalate on failure.
 
-        The first attempt runs WITHOUT a JS runtime: yt-dlp's jsless clients
-        deliver working, unthrottled formats for the normal case, and skipping
-        the challenge solver is the difference between a download that starts
-        in seconds and one that spends minutes 'preparing' (measured 26-87s
-        per runtime extraction; a report of 2-3 minutes on Windows). Cookies
-        and the runtime are added only when the failure says they would help
-        (auth wall -> cookies, format collapse -> provision a runtime), or
-        when the user opted into quality-first in Settings - the jsless
-        clients can top out at 1080p, so 4K purists can trade startup time
-        for the full ladder."""
+        Non-YouTube sites still prefer a cookie-free, jsless first attempt
+        (seconds to first byte). YouTube currently bot-checks those anonymous
+        clients, so when a browser login is configured we skip the doomed
+        attempt and open with cookies + the JS runtime immediately - that is
+        what `--cookies-from-browser` on the CLI is doing, and it is the only
+        path that yields unthrottled formats today. Quality-first (Settings)
+        also pays for the runtime up front so the full 4K ladder is visible.
+        """
         import yt_dlp
 
         from app.core import jsruntime
@@ -1270,43 +1334,64 @@ class SmartDownload:
         if self._wants_ffmpeg():
             self._ensure_ffmpeg()
 
-        # Cookies and the JS runtime are NEVER used up front. The runtime costs
-        # 26-87s per extraction (and can fetch Deno), and cookies push yt-dlp
-        # onto JS-dependent clients that are slower and more failure-prone - so
-        # forcing them on every video (which is what enabling "browser session"
-        # used to do) made every YouTube download slow, and sometimes stall
-        # before it started. The first attempt is always plain jsless yt-dlp:
-        # it starts in seconds for virtually every public video. The runtime
-        # and cookies are added only when a specific video fails in a way they
-        # would fix. Quality-first (Settings) is the sole opt-in that pays for
-        # the runtime up front, to reach the full 4K ladder.
         runtime_first = bool(self.job.options.get("hq_first"))
-        if runtime_first:
+        # YouTube needs a browser login + JS runtime today (bot check). Start
+        # there automatically whenever any browser profile is available - no
+        # Settings toggle, no cookies.txt, no failed anonymous attempt first.
+        browser = self._cookie_browser()
+        youtube_login_first = needs_js_runtime(self.job.url) and browser is not None
+        want_runtime = runtime_first or youtube_login_first
+        if want_runtime:
             if self._js_runtime is None:
                 self._js_runtime = jsruntime.detect_js_runtime()
             if self._js_runtime is None:
                 self._ensure_js_runtime()  # may download Deno once; no-op off YouTube
         try:
             return self._download(
-                with_cookies=False,
-                with_runtime=runtime_first and self._js_runtime is not None,
+                with_cookies=youtube_login_first,
+                with_runtime=want_runtime and self._js_runtime is not None,
             )
         except yt_dlp.utils.DownloadError as exc:
             if self._stop_event.is_set():
                 raise
             message = str(exc)
+            # Cookie DB locked / wrong browser: try the next installed profile
+            # before surfacing anything about cookies to the person.
+            if youtube_login_first and _cookie_source_failed(message):
+                for alt in self._cookie_browser_fallbacks(browser):
+                    log.info(
+                        "job %s: cookie read from %s failed; trying %s",
+                        self.job.id,
+                        browser,
+                        alt,
+                    )
+                    self.job.options["session_browser"] = alt
+                    try:
+                        return self._download(
+                            with_cookies=True,
+                            with_runtime=self._js_runtime is not None,
+                        )
+                    except yt_dlp.utils.DownloadError as alt_exc:
+                        if self._stop_event.is_set():
+                            raise
+                        message = str(alt_exc)
+                        if not _cookie_source_failed(message):
+                            raise
+                        continue
             browser = self._cookie_browser()
-            # Age/members walls escalate to the browser login automatically -
-            # only for that video, and always with the runtime the signed-in
-            # client needs, so a login never slows or breaks a normal video.
-            add_login = browser is not None and _looks_like_auth_wall(message)
-            add_runtime = not runtime_first and _runtime_might_help(message)
+            # Non-YouTube (or no browser yet): escalate auth walls the old way.
+            add_login = (
+                not youtube_login_first
+                and browser is not None
+                and _looks_like_auth_wall(message)
+            )
+            add_runtime = not want_runtime and _runtime_might_help(message)
             if not (add_login or add_runtime):
                 raise  # unrecoverable (removed, geo-blocked, ...) - fail fast, no slow retry
             log.info(
                 "job %s: retrying with%s%s",
                 self.job.id,
-                " a JS runtime" if add_runtime else "",
+                " a JS runtime" if add_runtime or add_login else "",
                 f" + {browser} login" if add_login else "",
             )
             if self._js_runtime is None:
@@ -1314,7 +1399,7 @@ class SmartDownload:
             if self._js_runtime is None:
                 self._ensure_js_runtime()  # may download Deno once; no-op off YouTube
             return self._download(
-                with_cookies=add_login,
+                with_cookies=youtube_login_first or add_login,
                 with_runtime=self._js_runtime is not None,
             )
 
@@ -1371,7 +1456,9 @@ class SmartDownload:
         filename = event.get("tmpfilename") or event.get("filename") or ""
         if status == "downloading":
             self._known_files.add(filename)
-            self._live.per_file[filename] = int(event.get("downloaded_bytes") or 0)
+            downloaded = int(event.get("downloaded_bytes") or 0)
+            previous = self._live.per_file.get(filename, 0)
+            self._live.per_file[filename] = downloaded
             total = event.get("total_bytes") or event.get("total_bytes_estimate")
             if total:
                 self._live.totals[filename] = int(total)
@@ -1379,6 +1466,11 @@ class SmartDownload:
                 # Don't overwrite a known size with None if a later hook
                 # temporarily omits the field; only record "unknown" once.
                 self._live.totals[filename] = None
+            # Fair-speed (and pause) land here: yt-dlp's ratelimit is fixed at
+            # start, so we sleep on the delta while it waits for the hook.
+            delta = downloaded - previous
+            if delta > 0 and self.fair_limiter is not None:
+                self.fair_limiter.throttle(delta, self._stop_event)
             # In-memory only. yt-dlp calls this hook synchronously and won't
             # read the next chunk until it returns - a database write here
             # would make this job's throughput hostage to whatever else the

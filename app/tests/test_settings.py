@@ -21,6 +21,7 @@ def test_defaults(db: Database, monkeypatch: pytest.MonkeyPatch):
     assert settings.session_browser == "chrome"
     assert settings.max_concurrent == 3
     assert settings.connections == 8
+    assert settings.fair_speed is True
     assert settings.ffmpeg_path is None
 
 
@@ -84,6 +85,7 @@ def test_schedule_retry_theme_defaults(db: Database):
     assert settings.auto_retry is True
     assert settings.auto_retry_max == 5
     assert settings.theme == "system"
+    assert settings.fair_speed is True
 
 
 def test_schedule_retry_theme_roundtrip(db: Database):
@@ -94,6 +96,7 @@ def test_schedule_retry_theme_roundtrip(db: Database):
     settings.auto_retry = False
     settings.auto_retry_max = 250  # clamped to 99 (0 means retry forever)
     settings.theme = "dark"
+    settings.fair_speed = False
 
     fresh = Settings(db)
     assert fresh.speed_schedule_enabled is True
@@ -102,6 +105,7 @@ def test_schedule_retry_theme_roundtrip(db: Database):
     assert fresh.auto_retry is False
     assert fresh.auto_retry_max == 99
     assert fresh.theme == "dark"
+    assert fresh.fair_speed is False
 
 
 def test_bad_time_and_theme_fall_back(db: Database):

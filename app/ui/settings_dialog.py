@@ -71,6 +71,16 @@ def _note(text: str) -> QLabel:
     return label
 
 
+def _prepare_freeform_page(page: QWidget) -> None:
+    """Let a free-form Settings page shrink with the scroll pane and reflow.
+
+    Form tabs already constrain field width; VBox pages (Video, About, …) do
+    not, so without this the unwrapped size-hint forces a horizontal clip.
+    """
+    page.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+    page.setMinimumWidth(0)
+
+
 class _FlowLayout(QLayout):
     """Left-to-right, wrap-to-next-row layout for a row of buttons.
 
@@ -414,6 +424,10 @@ class SettingsDialog(chrome.Dialog):
         self.speed_spin.setSuffix(" KB/s")
         self.speed_spin.setSpecialValueText(t("Unlimited"))
         engine_form.addRow(t("Speed limit:"), self.speed_spin)
+        self.fair_speed_check = QCheckBox(
+            t("Share bandwidth evenly across simultaneous downloads")
+        )
+        engine_form.addRow(t("Fair speed:"), self.fair_speed_check)
         schedule_row = _inline_row()
         self.schedule_check = QCheckBox(t("Full speed between"))
         self.full_from = QTimeEdit()
@@ -450,6 +464,7 @@ class SettingsDialog(chrome.Dialog):
 
         # ---- Browser Integration ---------------------------------------------
         browser_tab = QWidget()
+        _prepare_freeform_page(browser_tab)
         browser_layout = QVBoxLayout(browser_tab)
         pairing = QGroupBox(t("Browser extension"))
         pairing_layout = QHBoxLayout(pairing)
@@ -460,6 +475,8 @@ class SettingsDialog(chrome.Dialog):
             )
         )
         pairing_label.setWordWrap(True)
+        pairing_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        pairing_label.setMinimumWidth(0)
         pairing_layout.addWidget(pairing_label, 1)
         pair_button = QPushButton(t("Pair browsers"))
         pair_button.clicked.connect(self._pair_browsers)
@@ -469,10 +486,10 @@ class SettingsDialog(chrome.Dialog):
         pairing_layout.addWidget(setup_button)
         browser_layout.addWidget(pairing)
 
-        session = QGroupBox(t("Browser login (advanced)"))
+        session = QGroupBox(t("YouTube sign-in"))
         session_layout = QVBoxLayout(session)
         browser_row = QHBoxLayout()
-        browser_row.addWidget(QLabel(t("Read login from:")))
+        browser_row.addWidget(QLabel(t("I use:")))
         self.browser_combo = QComboBox()
         for browser in SESSION_BROWSERS:
             self.browser_combo.addItem(browser.capitalize(), browser)
@@ -480,9 +497,9 @@ class SettingsDialog(chrome.Dialog):
         session_layout.addLayout(browser_row)
         session_layout.addWidget(
             _note(
-                "Age- or members-restricted videos need a login. GrabLine reads it from this "
-                "browser automatically, only for the video that asks, per download, kept in "
-                "memory, never stored. Normal videos never touch it, so downloads stay fast."
+                "GrabLine signs YouTube in for you using this browser - no cookies file, "
+                "no extra steps. Just stay signed in to YouTube there. Kept in memory per "
+                "download, never stored."
             )
         )
         browser_layout.addWidget(session)
@@ -501,10 +518,18 @@ class SettingsDialog(chrome.Dialog):
 
         # ---- Video Downloader ------------------------------------------------
         video_tab = QWidget()
+        _prepare_freeform_page(video_tab)
         video_layout = QVBoxLayout(video_tab)
+        video_layout.setContentsMargins(0, 0, 0, 0)
+        video_layout.setSpacing(12)
         ffmpeg_group = QGroupBox(t("FFmpeg (needed for MP3, merging, and streams)"))
         ffmpeg_layout = QHBoxLayout(ffmpeg_group)
         self.ffmpeg_status = QLabel()
+        self.ffmpeg_status.setWordWrap(True)
+        self.ffmpeg_status.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
+        )
+        self.ffmpeg_status.setMinimumWidth(0)
         ffmpeg_layout.addWidget(self.ffmpeg_status, 1)
         self.ffmpeg_button = QPushButton()
         self.ffmpeg_button.clicked.connect(self._install_ffmpeg)
@@ -512,18 +537,23 @@ class SettingsDialog(chrome.Dialog):
         self._refresh_ffmpeg_status()
         video_layout.addWidget(ffmpeg_group)
         playlist_form = QFormLayout()
+        playlist_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.playlist_cap_spin = QSpinBox()
         self.playlist_cap_spin.setRange(1, 500)
         playlist_form.addRow(t("Preselect playlist entries:"), self.playlist_cap_spin)
         video_layout.addLayout(playlist_form)
-        self.hq_first_check = QCheckBox(
-            t(
-                "Prefer highest quality over a fast start (solves YouTube's JS "
-                "challenge up front; can add minutes before a download begins)"
+        # QCheckBox cannot wrap; keep the control short and put the long
+        # explanation in a note so a narrow Settings pane does not clip it.
+        self.hq_first_check = QCheckBox(t("Prefer highest quality over a fast start"))
+        video_layout.addWidget(self.hq_first_check)
+        video_layout.addWidget(
+            _note(
+                "Solves YouTube's JS challenge up front; can add minutes before "
+                "a download begins."
             )
         )
-        video_layout.addWidget(self.hq_first_check)
         defaults_form = QFormLayout()
+        defaults_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.default_quality_combo = QComboBox()
         for label in ("Best", "2160p", "1440p", "1080p", "720p", "480p", "MP3", "M4A", "FLAC"):
             self.default_quality_combo.addItem(label)
@@ -534,18 +564,18 @@ class SettingsDialog(chrome.Dialog):
         defaults_form.addRow(t("MP3 bitrate:"), self.bitrate_combo)
         cookies_row = QHBoxLayout()
         self.cookies_edit = QLineEdit()
-        self.cookies_edit.setPlaceholderText(t("cookies.txt (Netscape format), blank = off"))
+        self.cookies_edit.setPlaceholderText(t("Optional fallback only"))
         cookies_browse = QPushButton(t("Browse…"))
         cookies_browse.clicked.connect(self._browse_cookies)
         cookies_row.addWidget(self.cookies_edit, 1)
         cookies_row.addWidget(cookies_browse)
-        defaults_form.addRow(t("Cookies file:"), cookies_row)
+        defaults_form.addRow(t("Cookies file (optional):"), cookies_row)
         video_layout.addLayout(defaults_form)
         video_layout.addWidget(
             _note(
-                "Quality, subtitles, trimming, chapters, SponsorBlock, and sidecar files are "
-                "chosen per download in the panel. Account login and custom filename templates "
-                "aren't offered."
+                "YouTube login is automatic from your browser (see Browser Integration). "
+                "A cookies.txt here is only a rare fallback. Quality, subtitles, trimming, "
+                "and SponsorBlock are chosen per download in the panel."
             )
         )
         video_layout.addWidget(_note(self._js_runtime_text()))
@@ -634,6 +664,7 @@ class SettingsDialog(chrome.Dialog):
 
         # ---- Cloud Downloads ---------------------------------------------------
         cloud_tab = QWidget()
+        _prepare_freeform_page(cloud_tab)
         cloud_layout = QVBoxLayout(cloud_tab)
         cloud_layout.addWidget(
             _note(
@@ -769,6 +800,7 @@ class SettingsDialog(chrome.Dialog):
 
         # ---- Network -----------------------------------------------------------
         net_tab = QWidget()
+        _prepare_freeform_page(net_tab)
         net_layout = QVBoxLayout(net_tab)
         proxy_form = QFormLayout()
         self.proxy_edit = QLineEdit()
@@ -904,8 +936,12 @@ class SettingsDialog(chrome.Dialog):
 
         # ---- Statistics --------------------------------------------------------
         stats_tab = QWidget()
+        _prepare_freeform_page(stats_tab)
         stats_layout = QVBoxLayout(stats_tab)
         self.stats_label = QLabel()
+        self.stats_label.setWordWrap(True)
+        self.stats_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self.stats_label.setMinimumWidth(0)
         self._refresh_stats_label()
         stats_layout.addWidget(self.stats_label)
         stats_layout.addWidget(
@@ -1027,7 +1063,7 @@ class SettingsDialog(chrome.Dialog):
         # Preferred/Minimum so the scroll area can shrink the page to its width
         # (without this, word-wrap and the button flow never reflow - they force
         # a horizontal clip instead, which is why only About looked cut off).
-        about_tab.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        _prepare_freeform_page(about_tab)
         about_layout = QVBoxLayout(about_tab)
         about_layout.setContentsMargins(0, 0, 0, 0)
         about_layout.setSpacing(12)
@@ -1452,6 +1488,7 @@ class SettingsDialog(chrome.Dialog):
         # Download engine.
         self.connections_spin.setValue(s.connections)
         self.speed_spin.setValue(s.speed_limit_kbps)
+        self.fair_speed_check.setChecked(s.fair_speed)
         self.schedule_check.setChecked(s.speed_schedule_enabled)
         self.full_from.setTime(QTime.fromString(s.speed_full_from, "HH:mm"))
         self.full_to.setTime(QTime.fromString(s.speed_full_to, "HH:mm"))
@@ -1599,6 +1636,7 @@ class SettingsDialog(chrome.Dialog):
         self.settings.max_concurrent = self.concurrent_spin.value()
         self.settings.connections = self.connections_spin.value()
         self.settings.speed_limit_kbps = self.speed_spin.value()
+        self.settings.fair_speed = self.fair_speed_check.isChecked()
         self.settings.speed_schedule_enabled = self.schedule_check.isChecked()
         self.settings.speed_full_from = self.full_from.time().toString("HH:mm")
         self.settings.speed_full_to = self.full_to.time().toString("HH:mm")

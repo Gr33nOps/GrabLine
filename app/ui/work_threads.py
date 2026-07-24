@@ -45,7 +45,11 @@ class ResolveThread(QThread):
         self._quality = quality
         self._fallbacks = fallbacks
         self._headers = headers or {}
-        self._use_session = settings.use_browser_session
+        # YouTube always uses the browser login automatically (bot check);
+        # the deprecated use_browser_session toggle is ignored there.
+        from app.engines.smart import needs_js_runtime
+
+        self._use_session = settings.use_browser_session or needs_js_runtime(url)
         self._browser = settings.session_browser
         self._proxy = settings.proxy
 

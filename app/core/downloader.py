@@ -163,6 +163,7 @@ class SegmentedDownload:
         limiter: RateLimiter | None = None,
         job_limiter: RateLimiter | None = None,
         host_limiter: RateLimiter | None = None,
+        fair_limiter: RateLimiter | None = None,
         connections_target: Callable[[], int] | None = None,
         shares_budget: bool = False,
         proxy: str | None = None,
@@ -186,9 +187,11 @@ class SegmentedDownload:
         self.shares_budget = shares_budget
         # Extra caps applied in series with the global one; the tightest wins,
         # which is exactly right. job_limiter = this download's own cap;
-        # host_limiter = shared across every download from the same server.
+        # host_limiter = shared across every download from the same server;
+        # fair_limiter = equal slice of the line when several downloads run.
         self.job_limiter = job_limiter
         self.host_limiter = host_limiter
+        self.fair_limiter = fair_limiter
         self._client = net.build_client(
             proxy=proxy,
             bypass_hosts=bypass_hosts,
@@ -632,7 +635,7 @@ class SegmentedDownload:
     def _throttle(self, amount: int) -> None:
         # Hand the stop event to each limiter: at a tight cap the sleep here
         # dwarfs the transfer, and Pause has to land during it, not after.
-        for limiter in (self.limiter, self.job_limiter, self.host_limiter):
+        for limiter in (self.limiter, self.job_limiter, self.host_limiter, self.fair_limiter):
             if limiter is not None:
                 limiter.throttle(amount, self._stop_event)
 

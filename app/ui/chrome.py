@@ -9,7 +9,7 @@ keeps the native OS title bar - only the main window uses custom chrome.
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
-from PySide6.QtGui import QRegion
+from PySide6.QtGui import QGuiApplication, QRegion
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -67,6 +67,13 @@ class TitleBar(QFrame):
         self._window = window
         self.setObjectName("TitleBar")
         self.setFixedHeight(_BAR_HEIGHT)
+        # Qt6 + FramelessWindowHint on Windows can leave isMaximized() false
+        # after a successful visual maximize. Without our own flag, the first
+        # Restore click takes the Maximize branch again and the user has to
+        # press twice. Track the chrome state ourselves and keep a geometry to
+        # put back.
+        self._filled_screen = False
+        self._restore_geometry: QRect | None = None
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 0, 6, 0)
         lay.setSpacing(8)
@@ -93,6 +100,7 @@ class TitleBar(QFrame):
         self._buttons.append(close)
         for btn in self._buttons:
             lay.addWidget(btn)
+        window.installEventFilter(self)
 
     def retint(self) -> None:
         for btn in self._buttons:
@@ -113,17 +121,92 @@ class TitleBar(QFrame):
             region = region.united(QRegion(QRect(top_left, btn.size())))
         return region
 
+    def fills_screen(self) -> bool:
+        """True while the caption chrome considers the window maximized."""
+        return self._filled_screen or self._window.isMaximized()
+
+    def _geometry_fills_screen(self) -> bool:
+        screen = self._window.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return False
+        available = screen.availableGeometry()
+        geo = self._window.geometry()
+        return (
+            abs(geo.width() - available.width()) <= 2
+            and abs(geo.height() - available.height()) <= 2
+            and abs(geo.x() - available.x()) <= 2
+            and abs(geo.y() - available.y()) <= 2
+        )
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is self._window and event.type() == QEvent.Type.WindowStateChange:
+            # Win+Up / taskbar maximize: adopt native state. Win+Down / restore:
+            # clear our flag so the button and edge resizer agree. Ignore the
+            # spurious "not maximized" Qt emits after a frameless showMaximized
+            # while the window still fills the screen.
+            if self._window.isMaximized():
+                if self._restore_geometry is None:
+                    self._restore_geometry = QRect(self._window.normalGeometry())
+                self._filled_screen = True
+            elif not self._window.isMinimized():
+                self._filled_screen = self._geometry_fills_screen()
+            self._sync_max_button()
+        return super().eventFilter(obj, event)
+
     def _toggle_maximized(self) -> None:
-        if self._window.isMaximized():
-            self._window.showNormal()
-            if self._max_btn:
-                self._max_btn.set_icon_name("maximize")
-                self._max_btn.setToolTip(t("Maximize"))
+        if self.fills_screen():
+            self._restore_window()
         else:
-            self._window.showMaximized()
-            if self._max_btn:
-                self._max_btn.set_icon_name("restore")
-                self._max_btn.setToolTip(t("Restore"))
+            self._maximize_window()
+
+    def _maximize_window(self) -> None:
+        win = self._window
+        self._restore_geometry = QRect(win.geometry())
+        self._filled_screen = True
+        win.showMaximized()
+        # Qt6 frameless on Windows: first showMaximized() can paint full-screen
+        # while leaving isMaximized() false. Fill available geometry ourselves
+        # so Restore has a real pre-maximize rect to put back in one click.
+        if not win.isMaximized():
+            screen = win.screen() or QGuiApplication.primaryScreen()
+            if screen is not None:
+                win.setGeometry(screen.availableGeometry())
+        # Re-assert after Qt's confused state events (see eventFilter).
+        self._filled_screen = True
+        self._sync_max_button()
+        # Edge resizer listens for WindowStateChange; nudge it for the
+        # pseudo-maximized (geometry-only) path too.
+        resizer = getattr(win, "_resizer", None)
+        if resizer is not None:
+            resizer._sync()
+
+    def _restore_window(self) -> None:
+        win = self._window
+        geo = self._restore_geometry
+        self._filled_screen = False
+        if win.isMaximized():
+            win.showNormal()
+        # Always re-apply the saved rect: when Qt lied about isMaximized(),
+        # showNormal() is a no-op and only setGeometry actually shrinks the
+        # window (the second click the user had to make before).
+        if geo is not None and geo.isValid():
+            win.setGeometry(geo)
+        self._restore_geometry = None
+        self._filled_screen = False
+        self._sync_max_button()
+        resizer = getattr(win, "_resizer", None)
+        if resizer is not None:
+            resizer._sync()
+
+    def _sync_max_button(self) -> None:
+        if self._max_btn is None:
+            return
+        if self.fills_screen():
+            self._max_btn.set_icon_name("restore")
+            self._max_btn.setToolTip(t("Restore"))
+        else:
+            self._max_btn.set_icon_name("maximize")
+            self._max_btn.setToolTip(t("Maximize"))
 
     def mousePressEvent(self, event: object) -> None:
         ev = event
@@ -189,7 +272,10 @@ class EdgeResizer(QWidget):
         """Match the window's size, and mask to a thin border frame plus a fat
         square at each corner - the only regions that grab the resize. Hidden
         while maximized/fullscreen, where there is nothing to resize."""
-        if self._window.isMaximized() or self._window.isFullScreen():
+        filled = self._window.isMaximized() or self._window.isFullScreen()
+        if not filled and self._title_bar is not None:
+            filled = self._title_bar.fills_screen()
+        if filled:
             self.hide()
             return
         self.setGeometry(self._window.rect())

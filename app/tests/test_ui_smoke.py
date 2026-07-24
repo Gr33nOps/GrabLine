@@ -140,6 +140,31 @@ def test_settings_sections_and_new_fields(db: Database, monkeypatch):
     assert settings.ffmpeg_path == "/opt/ffmpeg/bin/ffmpeg"
 
 
+def test_settings_video_page_reflows_when_narrow(db: Database):
+    """Video Downloader (free-form) must wrap like About, not clip on resize."""
+    from PySide6.QtCore import QSize
+    from PySide6.QtWidgets import QLabel, QSizePolicy
+
+    from app.ui.settings_view import SettingsView
+
+    _qapp()
+    view = SettingsView(Settings(db), lambda: None)
+    view.resize(720, 640)
+    # Pages are lifted out of the dialog tabs into the embedded stack.
+    view._list.setCurrentRow(view._titles.index("Video Downloader"))
+    page = view._dialog.hq_first_check.parentWidget()
+    assert page is not None
+    assert page.minimumWidth() == 0
+    assert page.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Preferred
+
+    notes = [w for w in page.findChildren(QLabel) if w.wordWrap()]
+    assert notes
+    narrow = 280
+    assert any(n.heightForWidth(narrow) > n.fontMetrics().height() * 2 for n in notes)
+    page.resize(QSize(narrow, 800))
+    assert page.width() <= narrow + 8
+
+
 def test_speed_smoother_is_steady_despite_checkpoint_aliasing():
     """A constant download must read as a constant speed.
 
@@ -888,6 +913,51 @@ def test_resize_overlay_masks_border_and_hit_tests_edges(db: Database, tmp_path:
         manager.shutdown()
 
 
+def test_caption_restore_works_when_qt_lies_about_maximized(db: Database, tmp_path: Path):
+    """Windows frameless Qt6 can leave isMaximized() false after maximize.
+
+    The first Restore click used to take the Maximize branch again; chrome must
+    restore the saved geometry in one toggle regardless.
+    """
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QGuiApplication
+
+    _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        window = MainWindow(manager, settings)
+        window.show()
+        normal = QRect(120, 80, 1000, 600)
+        window.setGeometry(normal)
+        QApplication.processEvents()
+        bar = window._title_bar
+        bar._maximize_window()
+        QApplication.processEvents()
+        # Simulate the Qt desync: visually filled, flag false.
+        if window.isMaximized():
+            window.showNormal()
+            QApplication.processEvents()
+        screen = window.screen() or QGuiApplication.primaryScreen()
+        assert screen is not None
+        window.setGeometry(screen.availableGeometry())
+        bar._filled_screen = True
+        bar._restore_geometry = QRect(normal)
+        bar._sync_max_button()
+        assert not window.isMaximized()
+        assert bar.fills_screen()
+        assert not window._resizer.isVisible()
+
+        bar._toggle_maximized()  # one Restore click
+        QApplication.processEvents()
+        assert not bar.fills_screen()
+        assert window.geometry() == normal
+        assert window._resizer.isVisible()
+    finally:
+        manager.shutdown()
+
+
 def test_toolbar_has_one_torrent_dropdown(db: Database, tmp_path: Path):
     from PySide6.QtWidgets import QMenu
 
@@ -1471,7 +1541,80 @@ def test_detail_drawer_connection_bars_for_segmented_download(db: Database, tmp_
         assert drawer._conn_bars.isVisible()
         visible = [row for row, _label, _bar in drawer._conn_bars._rows if row.isVisible()]
         assert len(visible) == 2
+        # Labels are a fixed width so bars stay level across rows.
+        widths = {
+            label.width()
+            for _row, label, _bar in drawer._conn_bars._rows
+            if _row.isVisible()
+        }
+        assert len(widths) == 1
         assert isinstance(drawer._security_btn, IconButton)
+    finally:
+        manager.shutdown()
+
+
+def test_detail_drawer_connection_bars_for_smart_and_completed(db: Database, tmp_path: Path):
+    """YouTube/Smart (and other non-segmented kinds) get waterfall lanes, and
+    the strip stays visible after the download finishes."""
+    from app.core.models import JobKind, JobStatus
+
+    _qapp()
+    settings = Settings(db)
+    manager = DownloadManager(db, settings=settings, max_concurrent=0, connections=4)
+    try:
+        job = db.create_job(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            str(tmp_path),
+            "clip.mp4",
+            kind=JobKind.SMART,
+        )
+        db.update_job_total(job.id, 10_000)
+        db.update_job_downloaded(job.id, 2_500)
+        db.set_job_status(job.id, JobStatus.DOWNLOADING)
+        view = next(v for v in manager.snapshot() if v.id == job.id)
+
+        drawer = _drawer(manager)
+        drawer.show_view(view, 1_200_000.0, [])
+        assert drawer._conn_bars.isVisible()
+        visible = [row for row, _label, _bar in drawer._conn_bars._rows if row.isVisible()]
+        assert len(visible) == 4
+
+        db.set_job_status(job.id, JobStatus.COMPLETED)
+        view = next(v for v in manager.snapshot() if v.id == job.id)
+        drawer.show_view(view, 0.0, [])
+        assert drawer._conn_bars.isVisible()
+        visible = [row for row, _label, _bar in drawer._conn_bars._rows if row.isVisible()]
+        assert len(visible) == 4
+        for _row, _label, bar in drawer._conn_bars._rows:
+            if _row.isVisible():
+                assert bar._fill.value >= 0.99
+    finally:
+        manager.shutdown()
+
+
+def test_detail_drawer_connection_bars_for_torrent(db: Database, tmp_path: Path):
+    from app.core.models import JobKind, JobStatus
+
+    _qapp()
+    settings = Settings(db)
+    manager = DownloadManager(db, settings=settings, max_concurrent=0, connections=6)
+    try:
+        job = db.create_job(
+            "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
+            str(tmp_path),
+            "ubuntu.iso",
+            kind=JobKind.TORRENT,
+        )
+        db.update_job_total(job.id, 1_000_000)
+        db.update_job_downloaded(job.id, 100_000)
+        db.set_job_status(job.id, JobStatus.DOWNLOADING)
+        view = next(v for v in manager.snapshot() if v.id == job.id)
+
+        drawer = _drawer(manager)
+        drawer.show_view(view, 500_000.0, [])
+        assert drawer._conn_bars.isVisible()
+        visible = [row for row, _label, _bar in drawer._conn_bars._rows if row.isVisible()]
+        assert len(visible) == 6
     finally:
         manager.shutdown()
 

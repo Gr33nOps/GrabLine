@@ -452,8 +452,13 @@ def test_fair_share_connections_splits_the_budget(db: Database):
             manager._active[4] = _Task(shares=True)
         assert manager._fair_share_connections() == 4  # four -> a quarter each
         with manager._cond:
-            manager._active[5] = _Task(shares=False)  # a pinned download
-        assert manager._fair_share_connections() == 4  # ...doesn't change the split
+            for job_id in range(5, 9):
+                manager._active[job_id] = _Task(shares=True)
+        # Eight sharers: 16 // 8 = 2 each. Never invent sockets above the budget.
+        assert manager._fair_share_connections() == 2
+        with manager._cond:
+            manager._active[99] = _Task(shares=False)  # a pinned download
+        assert manager._fair_share_connections() == 2  # ...doesn't change the split
     finally:
         with manager._cond:
             manager._active.clear()

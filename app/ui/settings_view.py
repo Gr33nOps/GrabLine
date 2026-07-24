@@ -94,6 +94,9 @@ class SettingsView(QWidget):
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.Shape.NoFrame)
             holder = QWidget()
+            # Let free-form pages (Video, About, …) shrink with the viewport so
+            # wrapping labels reflow instead of forcing a horizontal clip.
+            holder.setMinimumWidth(0)
             hl = QVBoxLayout(holder)
             hl.setContentsMargins(24, 8, 24, 20)
             # A page that manages its own scrolling (Shortcuts) fills the height

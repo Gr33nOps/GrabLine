@@ -159,12 +159,12 @@ def _no_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.core.jsruntime.detect_js_runtime", lambda *a, **k: None)
 
 
-def test_normal_video_takes_the_fast_path(
+def test_non_youtube_takes_the_fast_path(
     db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # No runtime installed anywhere: one jsless attempt, no cookies, no retry.
+    # Sites that aren't bot-checking keep the cookie-free, jsless first attempt.
     _no_runtime(monkeypatch)
-    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", session_browser="firefox")
+    job = _smart_job(db, "https://vimeo.com/x", dest, "v.mp4", session_browser="firefox")
     task = SmartDownload(db, job, ffmpeg_path=None)
     calls: list[tuple[bool, bool]] = []
 
@@ -174,18 +174,16 @@ def test_normal_video_takes_the_fast_path(
 
     monkeypatch.setattr(task, "_download", fake_download)
     assert task._download_smart() == {"title": "ok"}
-    assert calls == [(False, False)]  # no runtime, no cookies, no retry
+    assert calls == [(False, False)]
 
 
-def test_first_attempt_is_jsless_even_with_a_runtime_installed(
+def test_youtube_with_browser_starts_with_cookies_and_runtime(
     db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Fast starts: the challenge solver costs 26-87s per extraction (measured)
-    # while the jsless clients deliver working formats in seconds - so an
-    # installed runtime must NOT be used on attempt one. (Using it up front is
-    # exactly what produced the '2-3 minutes of Preparing' report.)
+    # YouTube bot-checks anonymous clients; with a browser configured, skip the
+    # doomed jsless attempt so the transfer starts on the working path.
     monkeypatch.setattr(
-        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("node", "/usr/bin/node")
+        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno")
     )
     job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", session_browser="firefox")
     task = SmartDownload(db, job, ffmpeg_path=None)
@@ -197,19 +195,61 @@ def test_first_attempt_is_jsless_even_with_a_runtime_installed(
 
     monkeypatch.setattr(task, "_download", fake_download)
     assert task._download_smart() == {"title": "ok"}
-    assert calls == [(False, False)]  # jsless, cookie-free, one attempt
+    assert calls == [(True, True)]
+
+
+def test_youtube_uses_detected_browser_without_settings(
+    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # No session_browser on the job: auto-detect still signs YouTube in so the
+    # person never has to configure cookies.
+    monkeypatch.setattr(
+        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno")
+    )
+    monkeypatch.setattr(
+        "app.core.browser_setup.detect_cookie_browser", lambda *a, **k: "firefox"
+    )
+    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4")  # no session_browser
+    task = SmartDownload(db, job, ffmpeg_path=None)
+    calls: list[tuple[bool, bool]] = []
+
+    def fake_download(*, with_cookies: bool, with_runtime: bool) -> dict[str, Any]:
+        calls.append((with_cookies, with_runtime))
+        return {"title": "ok"}
+
+    monkeypatch.setattr(task, "_download", fake_download)
+    assert task._download_smart() == {"title": "ok"}
+    assert calls == [(True, True)]
+
+
+def test_youtube_without_any_browser_tries_jsless_first(
+    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _no_runtime(monkeypatch)
+    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4")  # no session_browser
+    task = SmartDownload(db, job, ffmpeg_path=None)
+    monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda *a, **k: None)
+    calls: list[tuple[bool, bool]] = []
+
+    def fake_download(*, with_cookies: bool, with_runtime: bool) -> dict[str, Any]:
+        calls.append((with_cookies, with_runtime))
+        return {"title": "ok"}
+
+    monkeypatch.setattr(task, "_download", fake_download)
+    assert task._download_smart() == {"title": "ok"}
+    assert calls == [(False, False)]
 
 
 def test_quality_first_uses_the_runtime_up_front(
     db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
 ):
     # The Settings opt-in trades startup time for the full format ladder.
+    # No browser available: runtime only (no cookies to attach).
     monkeypatch.setattr(
         "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("node", "/usr/bin/node")
     )
-    job = _smart_job(
-        db, "https://youtu.be/x", dest, "v.mp4", session_browser="firefox", hq_first=True
-    )
+    monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda *a, **k: None)
+    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", hq_first=True)
     task = SmartDownload(db, job, ffmpeg_path=None)
     calls: list[tuple[bool, bool]] = []
 
@@ -222,34 +262,6 @@ def test_quality_first_uses_the_runtime_up_front(
     assert calls == [(False, True)]  # runtime on from the start
 
 
-def test_age_wall_escalates_to_runtime_and_login(
-    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
-):
-    # Age-restricted: the first try hits the wall, so retry with the browser
-    # login (and provision a runtime for the signed-in client) - no toggle.
-    import yt_dlp
-
-    _no_runtime(monkeypatch)
-    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", session_browser="firefox")
-    task = SmartDownload(db, job, ffmpeg_path=None)
-
-    def fake_ensure() -> None:  # a successful Deno provisioning
-        task._js_runtime = ("deno", "/x/deno")
-
-    monkeypatch.setattr(task, "_ensure_js_runtime", fake_ensure)
-    calls: list[tuple[bool, bool]] = []
-
-    def fake_download(*, with_cookies: bool, with_runtime: bool) -> dict[str, Any]:
-        calls.append((with_cookies, with_runtime))
-        if not with_cookies:
-            raise yt_dlp.utils.DownloadError("Sign in to confirm your age")
-        return {"title": "ok"}
-
-    monkeypatch.setattr(task, "_download", fake_download)
-    assert task._download_smart() == {"title": "ok"}
-    assert calls == [(False, False), (True, True)]  # fast, then runtime + login
-
-
 def test_format_error_escalates_to_runtime_without_login(
     db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -258,8 +270,9 @@ def test_format_error_escalates_to_runtime_without_login(
     import yt_dlp
 
     _no_runtime(monkeypatch)
-    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", session_browser="firefox")
+    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4")
     task = SmartDownload(db, job, ffmpeg_path=None)
+    monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda *a, **k: None)
 
     def fake_ensure() -> None:
         task._js_runtime = ("deno", "/x/deno")
@@ -276,6 +289,33 @@ def test_format_error_escalates_to_runtime_without_login(
     monkeypatch.setattr(task, "_download", fake_download)
     assert task._download_smart() == {"title": "ok"}
     assert calls == [(False, False), (False, True)]  # fast, then runtime, no cookies
+
+
+def test_cookie_db_failure_tries_another_browser(
+    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import yt_dlp
+
+    monkeypatch.setattr(
+        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno")
+    )
+    monkeypatch.setattr(
+        "app.core.browser_setup.cookie_browser_candidates",
+        lambda **k: ["chrome", "firefox"],
+    )
+    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", session_browser="chrome")
+    task = SmartDownload(db, job, ffmpeg_path=None)
+    browsers: list[str | None] = []
+
+    def fake_download(*, with_cookies: bool, with_runtime: bool) -> dict[str, Any]:
+        browsers.append(task.job.options.get("session_browser"))
+        if task.job.options.get("session_browser") == "chrome":
+            raise yt_dlp.utils.DownloadError("Could not copy Chrome cookie database")
+        return {"title": "ok"}
+
+    monkeypatch.setattr(task, "_download", fake_download)
+    assert task._download_smart() == {"title": "ok"}
+    assert browsers == ["chrome", "firefox"]
 
 
 def test_no_login_escalation_when_no_browser_found(
@@ -299,7 +339,9 @@ def test_no_login_escalation_when_no_browser_found(
 def test_unrelated_error_is_not_retried(db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch):
     import yt_dlp
 
-    _no_runtime(monkeypatch)
+    monkeypatch.setattr(
+        "app.core.jsruntime.detect_js_runtime", lambda *a, **k: ("deno", "/x/deno")
+    )
     job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", session_browser="firefox")
     task = SmartDownload(db, job, ffmpeg_path=None)
     calls: list[tuple[bool, bool]] = []
@@ -311,7 +353,7 @@ def test_unrelated_error_is_not_retried(db: Database, dest: Path, monkeypatch: p
     monkeypatch.setattr(task, "_download", fake_download)
     with pytest.raises(yt_dlp.utils.DownloadError):
         task._download_smart()  # a scheduled premiere isn't runtime- or login-fixable
-    assert calls == [(False, False)]  # tried once, no slow retry
+    assert calls == [(True, True)]  # YouTube+browser starts logged-in; no second try
 
 
 def test_build_options_includes_cookies_only_when_asked(db: Database, dest: Path):
@@ -651,6 +693,7 @@ def test_http_403_escalates_to_the_runtime_retry(db: Database, dest: Path, monke
     assert smart._runtime_might_help("Unable to download video data: HTTP Error 403: Forbidden")
 
     _no_runtime(monkeypatch)
+    monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda *a, **k: None)
     job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", format_spec="bv*+ba/b")
     task = SmartDownload(db, job, ffmpeg_path="/usr/bin/ffmpeg")
     monkeypatch.setattr(task, "_ensure_ffmpeg", lambda: None)
@@ -672,13 +715,14 @@ def test_http_403_escalates_to_the_runtime_retry(db: Database, dest: Path, monke
     assert calls == [(False, False), (False, True)]  # jsless first, runtime retry after 403
 
 
-def test_browser_session_does_not_force_the_slow_path(db: Database, dest: Path, monkeypatch):
-    # Enabling "browser session" must NOT push cookies + the JS runtime onto a
-    # normal video up front - that was what made every YouTube download slow.
-    # The first attempt stays plain jsless; it succeeds and there is no retry.
+def test_legacy_use_session_flag_does_not_change_non_youtube(
+    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # The deprecated use_session option must not push cookies/runtime onto a
+    # non-YouTube URL - those sites still get the fast jsless path.
     _no_runtime(monkeypatch)
     job = _smart_job(
-        db, "https://youtu.be/x", dest, "v.mp4", use_session=True, session_browser="firefox"
+        db, "https://vimeo.com/x", dest, "v.mp4", use_session=True, session_browser="firefox"
     )
     task = SmartDownload(db, job, ffmpeg_path=None)
     calls: list[tuple[bool, bool]] = []
@@ -689,7 +733,7 @@ def test_browser_session_does_not_force_the_slow_path(db: Database, dest: Path, 
 
     monkeypatch.setattr(task, "_download", fake_download)
     assert task._download_smart() == {"title": "ok"}
-    assert calls == [(False, False)]  # fast, cookie-free, no runtime, no retry
+    assert calls == [(False, False)]
 
 
 def test_hook_adopts_the_real_title_for_placeholder_jobs(db: Database, dest: Path):

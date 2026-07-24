@@ -26,6 +26,25 @@ async function cookieHeaderFor(url) {
   }
 }
 
+// YouTube (and friends) bot-check signed-in sessions. Media grabs used to
+// omit cookies and rely on the app reading the browser profile later; sending
+// the tab's Cookie up front lets analysis succeed the same way a logged-in
+// page load does.
+function needsMediaCookies(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return (
+      host === "youtube.com" ||
+      host === "youtu.be" ||
+      host === "music.youtube.com" ||
+      host === "m.youtube.com" ||
+      host.endsWith(".youtube.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Takeover paths (webRequest cancel / downloads.onCreated) can fire dozens of
 // times for one user gesture when a page retries a cancelled response. A long
 // cooldown collapses that storm into one GrabLine job. Manual grabs
@@ -85,9 +104,10 @@ async function sendToGrabLine(
     // Set when we're about to cancel a browser download: the host must not
     // record a handoff it cannot deliver, or the file arrives twice.
     onlyIfRunning,
-    // Cookies only for file downloads (interception / right-click a link),
-    // never for media grabs - yt-dlp handles logins its own way there.
-    cookie: credentials ? await cookieHeaderFor(url) : "",
+    // Cookies for file downloads (interception / right-click a link), and for
+    // YouTube/media URLs that bot-check anonymous yt-dlp clients.
+    cookie:
+      credentials || needsMediaCookies(url) ? await cookieHeaderFor(url) : "",
   };
   try {
     const reply = await api.runtime.sendNativeMessage(HOST_NAME, message);

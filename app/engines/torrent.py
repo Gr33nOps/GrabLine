@@ -14,6 +14,7 @@ opens it here instead of saving a file).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -243,7 +244,11 @@ class TorrentSession:
             "enable_lsd": True,  # local peer discovery
             "enable_upnp": settings.torrent_upnp,
             "enable_natpmp": settings.torrent_natpmp,
-            "download_rate_limit": settings.speed_limit_kbps * 1024,
+            # When fair-speed is on, per-torrent handle limits own the split so
+            # a session-wide cap would fight the equal-share rebalance.
+            "download_rate_limit": (
+                0 if settings.fair_speed else settings.speed_limit_kbps * 1024
+            ),
             "upload_rate_limit": settings.torrent_upload_kbps * 1024,
             "dht_bootstrap_nodes": _DHT_ROUTERS,
             "user_agent": "GrabLine",
@@ -410,6 +415,8 @@ class TorrentDownload:
         self._cancel_event = threading.Event()
         self._state = _State()
         self._named = False
+        self._handle: Any = None
+        self._download_limit = 0  # bytes/sec; 0 = unlimited
 
     # ------------------------------------------------------------- control
 
@@ -418,6 +425,14 @@ class TorrentDownload:
 
     def cancel(self) -> None:
         self._cancel_event.set()
+
+    def set_download_limit(self, bytes_per_sec: int) -> None:
+        """Live fair-speed / global cap for this torrent (0 = unlimited)."""
+        self._download_limit = max(0, int(bytes_per_sec))
+        handle = self._handle
+        if handle is not None:
+            with contextlib.suppress(Exception):
+                handle.set_download_limit(self._download_limit)
 
     @property
     def bytes_downloaded(self) -> int:
@@ -435,7 +450,11 @@ class TorrentDownload:
             self.db.set_job_status(self.job.id, JobStatus.FAILED, error=str(exc))
             return JobStatus.FAILED
         handle = SESSION.add(params)
+        self._handle = handle
         handle.resume()  # a re-added (resumed) torrent may still be paused
+        if self._download_limit:
+            with contextlib.suppress(Exception):
+                handle.set_download_limit(self._download_limit)
         self._persist_info_hash(handle)
         self._apply_options(lt, handle)
         for peer in self.job.options.get("peers") or ():

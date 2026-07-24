@@ -158,9 +158,16 @@ class DownloadManager:
         # One shared limiter per host, so several downloads from the same
         # server obey a single per-host cap between them.
         self._host_limiters: dict[str, RateLimiter] = {}
+        # Equal slice of the line when fair-speed is on; same instance is handed
+        # to the task at start so live rebalance reaches workers immediately.
+        self._fair_limiters: dict[int, RateLimiter] = {}
         # Automatic-throttle ('polite mode') sampling state.
         self._system_sampler = SystemSampler()
         self._rate_mark: tuple[float, int] | None = None
+        self._job_byte_mark: dict[int, int] = {}
+        self._last_download_rate = 0.0
+        self._peak_download_rate = 0.0
+        self._job_rates: dict[int, float] = {}
         # job id -> monotonic deadline at which an auto-retry becomes due.
         self._retry_at: dict[int, float] = {}
         # Jobs paused because the download window closed; resumed when it opens.
@@ -232,27 +239,44 @@ class DownloadManager:
         return self.settings.auto_throttle_kbps * 1024 if other > threshold else 0
 
     def _download_rate(self) -> float:
-        """GrabLine's own current download throughput (bytes/sec), from the
-        change in total downloaded bytes between scheduler passes."""
-        total = sum(task.bytes_downloaded for task in self._active.values())
+        """GrabLine's own current download throughput (bytes/sec)."""
+        return self._last_download_rate
+
+    def _sample_throughput(self) -> None:
+        """Refresh aggregate and per-job rates once per scheduler pass.
+
+        Must not take ``_cond``: the scheduler already holds it when this runs.
+        """
+        items = [(job_id, task.bytes_downloaded) for job_id, task in self._active.items()]
+        total = sum(size for _, size in items)
         now = time.monotonic()
-        rate = 0.0
         if self._rate_mark is not None:
             elapsed = now - self._rate_mark[0]
             if elapsed > 0:
-                rate = max(0.0, total - self._rate_mark[1]) / elapsed
+                self._last_download_rate = max(0.0, (total - self._rate_mark[1]) / elapsed)
+                # Slow decay so a brief lull doesn't collapse the fair-speed budget.
+                self._peak_download_rate = max(
+                    self._last_download_rate, self._peak_download_rate * 0.98
+                )
+                rates: dict[int, float] = {}
+                for job_id, size in items:
+                    prev = self._job_byte_mark.get(job_id)
+                    rates[job_id] = max(0.0, (size - prev) / elapsed) if prev is not None else 0.0
+                self._job_rates = rates
         self._rate_mark = (now, total)
-        return rate
+        self._job_byte_mark = {job_id: size for job_id, size in items}
 
     def _apply_global_rate(self) -> None:
         # Atomic read-compare-set: the scheduler and reload_settings both land
         # here, and interleaving them let a pass that had already read the old
         # limit overwrite a cap the user had just applied.
+        self._sample_throughput()
         with self._rate_lock:
             rate = self._effective_global_rate()
             if rate != self._applied_rate:
                 self.limiter.set_rate(rate)
                 self._applied_rate = rate
+        self._apply_fair_speed()
 
     # -------------------------------------------------- timed download window
 
@@ -342,6 +366,77 @@ class DownloadManager:
         else:
             limiter.set_rate(kbps * 1024)
         return limiter
+
+    def _fair_limiter_for(self, job_id: int) -> RateLimiter:
+        limiter = self._fair_limiters.get(job_id)
+        if limiter is None:
+            limiter = RateLimiter(0)
+            self._fair_limiters[job_id] = limiter
+        return limiter
+
+    def _fair_budget_bytes(self) -> int:
+        """Bytes/sec to split across active downloads. Prefer the configured
+        global cap; when unlimited, use the measured peak so equal shares still
+        bind once the line has been observed."""
+        global_rate = self._effective_global_rate()
+        if global_rate > 0:
+            return global_rate
+        peak = int(self._peak_download_rate)
+        # Ignore tiny samples (DNS / handshake chatter) so we don't clamp the
+        # whole session to a few KB/s after a slow start.
+        return peak if peak >= 64 * 1024 else 0
+
+    def _compute_fair_caps(self, job_ids: Sequence[int]) -> dict[int, int]:
+        """Per-job download caps in bytes/sec (0 = unlimited).
+
+        Equal shares of the budget, then unused capacity from jobs that are
+        clearly underusing their slice is handed to the jobs that are hungry -
+        so a dead torrent swarm does not permanently strand half the line.
+        """
+        if not job_ids:
+            return {}
+        budget = self._fair_budget_bytes()
+        if len(job_ids) == 1:
+            # Fair-speed owns per-torrent handle limits (session cap is cleared),
+            # so a lone job still needs the global speed limit applied here.
+            return {job_ids[0]: self._effective_global_rate()}
+        if budget <= 0:
+            return {job_id: 0 for job_id in job_ids}
+        equal = max(1024, budget // len(job_ids))
+        unused = 0.0
+        hungry: list[int] = []
+        for job_id in job_ids:
+            actual = self._job_rates.get(job_id, 0.0)
+            if actual < equal * 0.7:
+                unused += equal - actual
+            else:
+                hungry.append(job_id)
+        caps = {job_id: equal for job_id in job_ids}
+        if hungry and unused > 0:
+            bonus = int(unused) // len(hungry)
+            for job_id in hungry:
+                caps[job_id] = equal + bonus
+        return caps
+
+    def _apply_fair_speed(self) -> None:
+        """Push live per-job caps so simultaneous downloads share the line.
+
+        Must not take ``_cond``: the scheduler already holds it when this runs.
+        """
+        active = dict(self._active)
+        if not active:
+            return
+        if not self.settings.fair_speed:
+            caps = {job_id: 0 for job_id in active}
+        else:
+            caps = self._compute_fair_caps(list(active.keys()))
+        for job_id, task in active.items():
+            rate = max(0, int(caps.get(job_id, 0)))
+            self._fair_limiter_for(job_id).set_rate(rate)
+            apply = getattr(task, "set_download_limit", None)
+            if callable(apply):
+                with contextlib.suppress(Exception):
+                    apply(rate)
 
     def _host_limiter_for(self, job: Job) -> RateLimiter | None:
         """The shared limiter for a job's server host, if a per-host cap is
@@ -655,6 +750,16 @@ class DownloadManager:
         extension = option.audio_format if option.kind == "audio" else "mp4"
         base = naming.sanitize_filename(title)
         filename = naming.apply_rename_rules(f"{base}.{extension}", self.settings.rename_rules)
+        from app.engines.smart import needs_js_runtime
+
+        # YouTube: always attach a browser login automatically so the person
+        # never has to know about cookies or flip a session toggle.
+        if needs_js_runtime(url):
+            use_session = True
+            if not session_browser:
+                from app.core.browser_setup import detect_cookie_browser
+
+                session_browser = detect_cookie_browser() or "chrome"
         options: dict[str, Any] = {
             "format_spec": option.format_spec,
             "quality_label": option.label,
@@ -832,6 +937,7 @@ class DownloadManager:
             return
         self._retry_at.pop(job_id, None)
         self._job_limiters.pop(job_id, None)
+        self._fair_limiters.pop(job_id, None)
         job = self.db.get_job(job_id)
         if job is not None and job.status in (
             JobStatus.QUEUED,
@@ -852,6 +958,7 @@ class DownloadManager:
         """
         self._retry_at.pop(job_id, None)
         self._job_limiters.pop(job_id, None)
+        self._fair_limiters.pop(job_id, None)
         with self._cond:
             active = self._active.get(job_id)
             if active is not None and force:
@@ -942,14 +1049,17 @@ class DownloadManager:
     def _create_task(self, job: Job) -> DownloadTask:
         job_kbps = int(job.options.get("speed_limit_kbps") or 0)
         proxy = self.settings.proxy
+        fair_limiter = self._fair_limiter_for(job.id)
         if job.kind is JobKind.SMART:
             # yt-dlp takes one number: the tighter of the global and per-job cap.
+            # Fair-speed is applied live in the progress hook via fair_limiter.
             rates = [r for r in (self.limiter.rate, job_kbps * 1024) if r]
             return SmartDownload(
                 self.db,
                 job,
                 ffmpeg_path=find_ffmpeg(self.settings),
                 ratelimit=min(rates) if rates else None,
+                fair_limiter=fair_limiter,
                 proxy=proxy,
             )
         if job.kind is JobKind.HLS:
@@ -980,27 +1090,28 @@ class DownloadManager:
             limiter=self.limiter,
             job_limiter=self._job_limiter_for(job),
             host_limiter=self._host_limiter_for(job),
+            fair_limiter=fair_limiter,
             proxy=proxy,
             headers=job.options.get("http_headers") or None,
             bypass_hosts=self.settings.proxy_bypass,
             user_agent=self.settings.user_agent or None,
         )
 
-    #: A shared download never drops below this many connections, however many
-    #: run at once - enough to keep each one moving.
-    MIN_SHARED_CONNECTIONS = 4
-
     def _fair_share_connections(self) -> int:
         """One unpinned download's live, equal slice of the connection budget:
         ``budget // (number of unpinned downloads running now)``, floored so no
-        download starves and capped at the budget so a lone job gets it all."""
+        download starves and capped at the budget so a lone job gets it all.
+
+        Shares never exceed the budget in aggregate: a floor above ``budget // n``
+        would over-allocate sockets and recreate the hogging this exists to stop.
+        """
         with self._cond:
             sharers = sum(
                 1 for task in self._active.values() if getattr(task, "shares_budget", False)
             )
         budget = self.connections
         share = budget // max(1, sharers)
-        return max(1, min(budget, max(self.MIN_SHARED_CONNECTIONS, share)))
+        return max(1, min(budget, share))
 
     def _kick(self) -> None:
         with self._cond:
@@ -1273,6 +1384,7 @@ class DownloadManager:
                     self.db.set_retry_count(job.id, 0)
                     self._retry_at.pop(job.id, None)
                     self._job_limiters.pop(job.id, None)
+                    self._fair_limiters.pop(job.id, None)
                     self._record_completion(job.id)
                 elif status is JobStatus.FAILED:
                     if not self._schedule_retry(job.id):

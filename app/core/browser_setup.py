@@ -262,6 +262,27 @@ def detect_cookie_browser(platform: str | None = None, home: Path | None = None)
     return None
 
 
+def cookie_browser_candidates(
+    *, primary: str | None = None, platform: str | None = None, home: Path | None = None
+) -> list[str]:
+    """Installed browsers to try for cookie reads, ``primary`` first when set.
+
+    Used when the first profile's cookie database is locked or missing - try the
+    next one silently instead of asking the person about cookies.txt.
+    """
+    platform = platform or sys.platform
+    home = home or Path.home()
+    roots = _cookie_roots(platform, home)
+    ordered: list[str] = []
+    for key in ((primary,) if primary else ()) + _COOKIE_BROWSER_PREFERENCE:
+        if not key or key in ordered:
+            continue
+        root = roots.get(key)
+        if root is not None and root.exists():
+            ordered.append(key)
+    return ordered
+
+
 def detect_browsers(platform: str | None = None, home: Path | None = None) -> list[BrowserStep]:
     """The browsers to show in the wizard, with a best-effort 'installed' flag.
 

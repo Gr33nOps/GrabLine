@@ -172,6 +172,17 @@ class Settings:
         self._db.set_setting("speed_limit_kbps", str(max(0, value)))
 
     @property
+    def fair_speed(self) -> bool:
+        """Split bandwidth evenly across simultaneous downloads so one job
+        cannot starve the others. On by default; turn off to let the fastest
+        source take the whole line."""
+        return self._get_bool("fair_speed", True)
+
+    @fair_speed.setter
+    def fair_speed(self, value: bool) -> None:
+        self._set_bool("fair_speed", value)
+
+    @property
     def host_limits(self) -> dict[str, int]:
         """Per-host download caps in KB/s, keyed by hostname. Downloads from a
         listed host share that cap; 0 or absent means no per-host limit."""

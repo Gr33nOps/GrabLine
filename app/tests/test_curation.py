@@ -191,7 +191,10 @@ def test_friendly_errors():
     fmt = friendly_error("ERROR: [youtube] abc: Requested format is not available").lower()
     assert "turn it off" in fmt
     bot = friendly_error("ERROR: [youtube] abc: Sign in to confirm you're not a bot").lower()
-    assert "bot check" in bot
+    assert "browser" in bot or "cookie" in bot
+    # YouTube often uses a curly apostrophe; matching must not depend on ASCII.
+    curly = "ERROR: [youtube] abc: Sign in to confirm you\u2019re not a bot"
+    assert "browser" in friendly_error(curly).lower() or "cookie" in friendly_error(curly).lower()
     browse_404 = (
         "ERROR: [soundcloud:user] discover: Unable to download JSON metadata: "
         "HTTP Error 404: Not Found"
@@ -199,6 +202,44 @@ def test_friendly_errors():
     assert "browse" in friendly_error(browse_404)
     # unknown errors: first line, ERROR: prefix stripped, no traceback
     assert friendly_error("ERROR: something odd\nTraceback...") == "something odd"
+
+
+def test_inspect_youtube_uses_browser_login_automatically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YouTube analysis must open with the browser login on its own - callers
+    still pass use_session=False, but the person never sees a bot-check."""
+    engine = SmartEngine()
+    calls: list[tuple[bool, bool]] = []
+
+    def fake_extract(url: str, **kwargs: Any) -> dict[str, Any]:
+        use_session = bool(kwargs.get("use_session"))
+        with_runtime = bool(kwargs.get("with_runtime"))
+        calls.append((use_session, with_runtime))
+        assert use_session  # forced for YouTube even when the caller said False
+        return {
+            "id": "x",
+            "title": "Signed in",
+            "webpage_url": url,
+            "formats": [
+                {
+                    "format_id": "18",
+                    "ext": "mp4",
+                    "height": 360,
+                    "url": "https://example.com/v.mp4",
+                    "vcodec": "avc1",
+                    "acodec": "mp4a",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(engine, "_extract_info", fake_extract)
+    result = engine.inspect(
+        "https://youtu.be/x", use_session=False, session_browser="firefox"
+    )
+    assert isinstance(result, MediaInfo)
+    assert result.title == "Signed in"
+    assert calls == [(True, True)]
 
 
 def test_inspect_reuses_a_recent_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,15 +268,16 @@ def test_inspect_reuses_a_recent_analysis(monkeypatch: pytest.MonkeyPatch) -> No
     assert calls == ["https://youtu.be/abc"]  # analysed once, then reused
     assert second is first
 
-    # A different URL - and different options for the same URL - analyse afresh.
+    # A different URL analyses afresh. use_session=True is a no-op for YouTube
+    # (session is forced anyway), so the same URL still hits the cache.
     engine.inspect("https://youtu.be/xyz")
     engine.inspect("https://youtu.be/abc", use_session=True)
-    assert len(calls) == 3
+    assert len(calls) == 2
 
     # A stale entry is re-analysed rather than served forever.
     monkeypatch.setattr(SmartEngine, "INSPECT_TTL", -1.0)
     engine.inspect("https://youtu.be/abc")
-    assert len(calls) == 4
+    assert len(calls) == 3
 
 
 def test_needs_js_runtime_only_for_youtube_or_a_session() -> None:
@@ -286,14 +328,13 @@ def test_provisioning_failure_never_breaks_analysis(monkeypatch: pytest.MonkeyPa
     assert smart.provision_js_runtime("https://youtu.be/abc") is None
 
 
-def test_analysis_is_jsless_first_with_a_runtime_fallback(
+def test_youtube_analysis_uses_runtime_with_browser_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Analysis must not pay for the JS runtime (measured 4s jsless vs 26-87s
-    with it, identical format lists) - the runtime belongs to the download.
-    Only a degraded jsless answer retries with the runtime."""
+    """YouTube analysis always attaches the browser login (and the JS runtime
+    those clients need) so a bot-check never reaches the person."""
     engine = SmartEngine()
-    calls: list[bool] = []
+    calls: list[tuple[bool, bool]] = []
 
     good = {
         "id": "v",
@@ -310,51 +351,31 @@ def test_analysis_is_jsless_first_with_a_runtime_fallback(
             }
         ],
     }
-    degraded = {"id": "v", "title": "T", "formats": []}
 
-    def fake_extract(url: str, *, with_runtime: bool, **kwargs: Any) -> dict[str, Any]:
-        calls.append(with_runtime)
+    def fake_extract(url: str, *, with_runtime: bool, use_session: bool, **kwargs: Any) -> dict:
+        calls.append((use_session, with_runtime))
         return good
 
     monkeypatch.setattr(engine, "_extract_info", fake_extract)
-    info = engine.inspect("https://youtu.be/fast")
+    info = engine.inspect("https://youtu.be/fast", use_session=False)
     assert isinstance(info, MediaInfo) and info.options
-    assert calls == [False]  # jsless only - no runtime cost on the happy path
+    assert calls == [(True, True)]
 
-    # A degraded jsless answer (no formats) retries once WITH the runtime.
+    # Non-YouTube still stays jsless unless a session is requested.
     calls.clear()
-    results = iter((degraded, good))
+    info = engine.inspect("https://vimeo.com/clip", use_session=False)
+    assert isinstance(info, MediaInfo)
+    assert calls == [(False, False)]
 
-    def flaky_extract(url: str, *, with_runtime: bool, **kwargs: Any) -> dict[str, Any]:
-        calls.append(with_runtime)
-        return next(results)
-
-    monkeypatch.setattr(engine, "_extract_info", flaky_extract)
-    info = engine.inspect("https://youtu.be/degraded")
-    assert isinstance(info, MediaInfo) and info.options
-    assert calls == [False, True]
-
-    # A runtime-marker error does the same; other errors don't retry.
+    # A hard failure on YouTube is not endlessly retried (already on the
+    # cookies+runtime path from the first attempt).
     calls.clear()
 
-    def erroring_extract(url: str, *, with_runtime: bool, **kwargs: Any) -> dict[str, Any]:
-        calls.append(with_runtime)
-        if not with_runtime:
-            raise DownloadError("Requested format is not available")
-        return good
-
-    monkeypatch.setattr(engine, "_extract_info", erroring_extract)
-    info = engine.inspect("https://youtu.be/marker")
-    assert isinstance(info, MediaInfo) and info.options
-    assert calls == [False, True]
-
-    calls.clear()
-
-    def hard_error(url: str, *, with_runtime: bool, **kwargs: Any) -> dict[str, Any]:
-        calls.append(with_runtime)
+    def hard_error(url: str, *, with_runtime: bool, use_session: bool, **kwargs: Any) -> dict:
+        calls.append((use_session, with_runtime))
         raise DownloadError("This video is private - its owner restricted access.")
 
     monkeypatch.setattr(engine, "_extract_info", hard_error)
     with pytest.raises(DownloadError):
         engine.inspect("https://youtu.be/private")
-    assert calls == [False]  # no pointless runtime retry on a real failure
+    assert calls == [(True, True)]

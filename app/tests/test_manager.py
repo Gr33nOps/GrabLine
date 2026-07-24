@@ -557,3 +557,75 @@ def test_a_crashing_engine_marks_the_job_failed(db: Database, dest: Path):
         assert fresh is not None and "internal error" in (fresh.error or "")
     finally:
         manager.shutdown()
+
+
+def test_fair_speed_splits_budget_and_reclaims_unused(db: Database):
+    """Equal shares when both are hungry; unused slice from a slow job goes to
+    the one that can use it (torrent-starved + CDN hog case)."""
+    from app.core.settings import Settings
+
+    settings = Settings(db)
+    settings.fair_speed = True
+    settings.speed_limit_kbps = 2000  # 2 MB/s budget
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        manager._running = False
+        manager._kick()
+        manager._scheduler.join(timeout=5)
+
+        class _Task:
+            bytes_downloaded = 0
+
+            def run(self):
+                return JobStatus.COMPLETED
+
+            def pause(self):
+                pass
+
+            def cancel(self):
+                pass
+
+            def set_download_limit(self, rate: int) -> None:
+                self.limit = rate
+
+        slow = _Task()
+        fast = _Task()
+        manager._active[1] = slow
+        manager._active[2] = fast
+        # Both hungry → equal halves of 2000 KB/s.
+        manager._job_rates = {1: 900 * 1024, 2: 900 * 1024}
+        caps = manager._compute_fair_caps([1, 2])
+        assert caps[1] == 1000 * 1024
+        assert caps[2] == 1000 * 1024
+
+        # Slow job barely moves → its unused share boosts the hungry one.
+        manager._job_rates = {1: 5 * 1024, 2: 900 * 1024}
+        caps = manager._compute_fair_caps([1, 2])
+        assert caps[1] == 1000 * 1024
+        assert caps[2] == 2000 * 1024 - 5 * 1024  # equal + nearly all unused
+
+        manager._apply_fair_speed()
+        assert slow.limit == caps[1]
+        assert fast.limit == caps[2]
+        assert manager._fair_limiter_for(1).rate == caps[1]
+        assert manager._fair_limiter_for(2).rate == caps[2]
+
+        settings.fair_speed = False
+        manager._apply_fair_speed()
+        assert slow.limit == 0 and fast.limit == 0
+    finally:
+        manager._active.clear()
+        manager.shutdown()
+
+
+def test_fair_speed_lone_job_keeps_global_limit(db: Database):
+    from app.core.settings import Settings
+
+    settings = Settings(db)
+    settings.fair_speed = True
+    settings.speed_limit_kbps = 512
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        assert manager._compute_fair_caps([7]) == {7: 512 * 1024}
+    finally:
+        manager.shutdown()
