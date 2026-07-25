@@ -649,3 +649,51 @@ def test_fair_line_capacity_does_not_shrink_while_sharing(db: Database):
         assert manager._fair_budget_bytes() == 2_200_000
     finally:
         manager.shutdown()
+
+
+def test_fair_probe_defers_caps_when_multi_share_starts(db: Database):
+    """Two downloads starting together stay unlimited briefly so capacity is
+    learned at full speed - not from a handshake-low equal split."""
+    from app.core.settings import Settings
+
+    settings = Settings(db)
+    settings.fair_speed = True
+    settings.speed_limit_kbps = 0
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        manager._running = False
+        manager._kick()
+        manager._scheduler.join(timeout=5)
+        manager._line_capacity = 8_000_000  # would otherwise split immediately
+        manager._fair_sharing = False
+        manager._note_fair_share_state(2)
+        assert manager._in_fair_probe()
+        assert manager._compute_fair_caps([1, 2]) == {1: 0, 2: 0}
+
+        # After the probe window, equal caps of the measured budget apply.
+        manager._fair_probe_until = 0.0
+        assert manager._compute_fair_caps([1, 2]) == {1: 4_000_000, 2: 4_000_000}
+    finally:
+        manager.shutdown()
+
+
+def test_fair_saturation_boosts_underestimated_capacity(db: Database):
+    """When aggregate rate sits on our own fair budget, raise the estimate so
+    equal shares can climb toward the real line instead of locking low."""
+    from app.core.settings import Settings
+
+    settings = Settings(db)
+    settings.fair_speed = True
+    settings.speed_limit_kbps = 0
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        manager._line_capacity = 1_000_000
+        manager._fair_probe_until = 0.0
+        manager._update_line_capacity(950_000, n_active=2)  # saturating our cap
+        assert manager._line_capacity == int(1_000_000 * 1.20)
+        # Well below the budget: no boost (unused headroom, not saturation).
+        before = manager._line_capacity
+        manager._update_line_capacity(500_000, n_active=2)
+        assert manager._line_capacity == before
+    finally:
+        manager.shutdown()

@@ -214,7 +214,12 @@ class SidebarButton(QPushButton):
 class GraphCard(QFrame):
     """A titled area-chart card (dashboard). Feed samples with :meth:`push`;
     draws one or two series over a shared auto-scaled axis. Between pushes the
-    plot scrolls smoothly (60fps via the shared ticker) instead of stepping."""
+    plot scrolls smoothly (via the shared ticker) instead of stepping.
+
+    Scroll geometry matches the detail-drawer sparkline / TimeGraph: one extra
+    sample sits off the left edge so the curve slides out under the clip
+    instead of the left end flickering when a point leaves the window.
+    """
 
     def __init__(
         self,
@@ -230,10 +235,13 @@ class GraphCard(QFrame):
         self._colors = colors
         self._fmt = fmt
         self._fixed_max = fixed_max
-        self._series: list[deque[float]] = [deque(maxlen=_GRAPH_HISTORY) for _ in colors]
+        # +1 past the visible window so the oldest point always sits off the
+        # left edge (same trick as TimeGraph / Sparkline).
+        self._series: list[deque[float]] = [deque(maxlen=_GRAPH_HISTORY + 1) for _ in colors]
         self._last_push = 0.0
         self._push_interval = 0.5
         self._animating = False
+        self._scale_value = 0.0
         self.setProperty("card", "true")
         self.setMinimumHeight(118)
 
@@ -279,12 +287,18 @@ class GraphCard(QFrame):
                 motion.ticker().unsubscribe()
 
     def _scale(self) -> float:
+        from app.ui import motion
+
         if self._fixed_max is not None:
             return self._fixed_max
         peak = max((max(s, default=0.0) for s in self._series), default=0.0)
-        return peak or 1.0
+        # Ease down (peak scrolling out), snap up - same as the detail graph.
+        self._scale_value = motion.ease_scale(self._scale_value, peak)
+        return self._scale_value if self._scale_value > 0 else 1.0
 
     def paintEvent(self, _event: object) -> None:
+        from app.ui import motion
+
         p = theme.current()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -306,21 +320,21 @@ class GraphCard(QFrame):
             y = plot.bottom() - f * plot.height()
             painter.drawLine(plot.left(), int(y), plot.right(), int(y))
         scale = self._scale()
-        # Slide the whole plot leftward between pushes so the graph glides at
-        # the ticker's frame rate instead of jumping once per sample.
-        shift = (1.0 - self._scroll_frac()) * (plot.width() / (_GRAPH_HISTORY - 1))
+        step = plot.width() / (_GRAPH_HISTORY - 1)
+        # Anchored on the newest sample at the right; walk back so the oldest
+        # runs off the left under the clip (smooth exit, no left-edge blink).
+        newest_x = plot.left() + plot.width() + (1.0 - self._scroll_frac()) * step
         painter.setClipRect(plot)
         for serie, hexc in zip(self._series, self._colors, strict=False):
             if len(serie) < 2:
                 continue
             color = QColor(hexc)
-            step = plot.width() / (_GRAPH_HISTORY - 1)
-            off = _GRAPH_HISTORY - len(serie)
             base = plot.bottom()
+            last = len(serie) - 1
             pts = [
                 QPointF(
-                    plot.left() + (off + i) * step + shift,
-                    base - min(1.0, v / scale) * plot.height(),
+                    newest_x - (last - i) * step,
+                    base - min(1.0, v / scale) * plot.height() * motion.GRAPH_HEADROOM,
                 )
                 for i, v in enumerate(serie)
             ]

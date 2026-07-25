@@ -51,6 +51,16 @@ _RETRY_BASE_SECONDS = 5.0
 _RETRY_CAP_SECONDS = 300.0
 _ONLINE_PROBE_SECONDS = 10.0
 
+#: When several downloads start together with no global speed limit, leave them
+#: uncapped this long so the line-capacity estimate can form at full speed.
+#: Locking fair caps from the first handshake sample was trapping everyone at
+#: a low equal share of a too-small budget.
+_FAIR_PROBE_SECONDS = 1.5
+#: If measured aggregate stays near our own fair budget, the estimate is the
+#: bottleneck - raise it so equal shares can climb toward the real line rate.
+_FAIR_SATURATION_RATIO = 0.90
+_FAIR_SATURATION_BOOST = 1.20
+
 #: Failures worth an automatic retry are everything EXCEPT these permanent
 #: ones (DRM, private, 404s, disk-full ...). Unknown errors are retried, which
 #: matches how IDM-style managers reconnect through flaky networks.
@@ -171,6 +181,9 @@ class DownloadManager:
         # only ratchets up - shrinking it from our own throttled samples is what
         # made speeds bounce between downloads.
         self._line_capacity = 0.0
+        # Multi-share without a global cap: briefly probe unlimited, then split.
+        self._fair_sharing = False
+        self._fair_probe_until = 0.0
         # Last fair cap pushed to each job (so torrent/handle updates are quiet).
         self._fair_applied: dict[int, int] = {}
         # job id -> monotonic deadline at which an auto-retry becomes due.
@@ -272,6 +285,10 @@ class DownloadManager:
         quieter period can settle. Two or more under fair-speed: only raise the
         estimate - our equal caps would otherwise lower the measured total and
         then shrink every share, which is the bounce the user saw.
+
+        When the aggregate sits on our own fair budget (saturation), bump the
+        estimate up so a handshake-low lock-in can climb to the real line rate.
+        Overshoot is harmless: equal caps above the line just stop binding.
         """
         if measured <= 0:
             if n_active == 0:
@@ -285,6 +302,26 @@ class DownloadManager:
             return
         if measured > self._line_capacity:
             self._line_capacity = measured
+            return
+        if (
+            self._line_capacity >= 64 * 1024
+            and not self._in_fair_probe()
+            and self._effective_global_rate() <= 0
+            and measured >= self._line_capacity * _FAIR_SATURATION_RATIO
+        ):
+            self._line_capacity *= _FAIR_SATURATION_BOOST
+
+    def _note_fair_share_state(self, n_active: int) -> None:
+        """Start a short unlimited probe when multi-share begins without a cap."""
+        sharing = n_active >= 2 and self.settings.fair_speed and self._effective_global_rate() <= 0
+        if sharing and not self._fair_sharing:
+            self._fair_probe_until = time.monotonic() + _FAIR_PROBE_SECONDS
+        if not sharing:
+            self._fair_probe_until = 0.0
+        self._fair_sharing = sharing
+
+    def _in_fair_probe(self) -> bool:
+        return self._fair_probe_until > 0.0 and time.monotonic() < self._fair_probe_until
 
     def _apply_global_rate(self) -> None:
         # Atomic read-compare-set: the scheduler and reload_settings both land
@@ -296,6 +333,7 @@ class DownloadManager:
             if rate != self._applied_rate:
                 self.limiter.set_rate(rate)
                 self._applied_rate = rate
+        self._note_fair_share_state(len(self._active))
         self._apply_fair_speed()
 
     # -------------------------------------------------- timed download window
@@ -421,9 +459,9 @@ class DownloadManager:
             # so a lone job still needs the global speed limit applied here.
             return {job_ids[0]: self._effective_global_rate()}
         budget = self._fair_budget_bytes()
-        if budget <= 0:
-            # Line not measured yet: leave everyone unlimited until capacity is
-            # known, then the next pass locks in equal shares.
+        if budget <= 0 or self._in_fair_probe():
+            # Line not measured yet, or still in the post-start probe window:
+            # leave everyone unlimited so capacity can form at full speed.
             return {job_id: 0 for job_id in job_ids}
         equal = max(1024, budget // len(job_ids))
         return {job_id: equal for job_id in job_ids}

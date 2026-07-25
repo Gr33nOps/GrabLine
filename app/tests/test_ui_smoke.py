@@ -1132,6 +1132,31 @@ def test_graph_curve_always_spans_its_plot(db: Database):
         assert last_x >= left + width, f"gap on the right at frac={frac:.2f}"
 
 
+def test_dashboard_graph_card_scrolls_off_left_without_a_gap(db: Database):
+    """Dashboard GraphCards used to pad from the left and drop the oldest
+    sample on-screen, so the left edge blinked as points left. Match the
+    detail sparkline: one off-screen sample + right-anchored scroll."""
+    from app.ui import components
+
+    _qapp()
+    card = components.GraphCard("Download", ["#3d8dfd"], lambda v: f"{v:.0f}")
+    history = components._GRAPH_HISTORY
+    for i in range(history * 2):
+        card.push([float(i % 17)])
+
+    assert len(card._series[0]) == history + 1
+
+    left, width = 12.0, 300.0
+    step = width / (history - 1)
+    last = len(card._series[0]) - 1
+    for k in range(41):
+        frac = k / 40
+        newest = left + width + (1.0 - frac) * step
+        first_x, last_x = newest - last * step, newest
+        assert first_x <= left, f"gap on the left at frac={frac:.2f} ({first_x:.2f} > {left})"
+        assert last_x >= left + width, f"gap on the right at frac={frac:.2f}"
+
+
 def test_graph_scale_eases_down_but_snaps_up():
     """A peak scrolling out of the window must not rescale the whole curve in
     one frame; a peak arriving must be on screen the frame it lands."""
