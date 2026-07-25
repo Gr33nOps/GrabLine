@@ -35,8 +35,15 @@ class RateLimiter:
             return self._rate
 
     def set_rate(self, rate: int) -> None:
+        rate = max(0, rate)
         with self._lock:
-            self._rate = max(0, rate)
+            # No-op when unchanged: the fair-speed scheduler calls this every
+            # pass, and resetting ``_updated`` / clamping tokens each time
+            # made concurrent downloads see-saw instead of holding a steady
+            # equal share.
+            if rate == self._rate:
+                return
+            self._rate = rate
             self._tokens = min(self._tokens, float(self._rate))
             self._updated = time.monotonic()
 

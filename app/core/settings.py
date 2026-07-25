@@ -173,9 +173,8 @@ class Settings:
 
     @property
     def fair_speed(self) -> bool:
-        """Split bandwidth evenly across simultaneous downloads so one job
-        cannot starve the others. On by default; turn off to let the fastest
-        source take the whole line."""
+        """Split bandwidth evenly across simultaneous downloads (budget ÷ N).
+        On by default; turn off to let the fastest source take the whole line."""
         return self._get_bool("fair_speed", True)
 
     @fair_speed.setter

@@ -33,6 +33,17 @@ def test_set_rate_zero_lifts_the_cap():
     assert time.monotonic() - started < 0.2
 
 
+def test_set_rate_same_value_is_a_noop():
+    """Re-applying the same cap must not reset the token clock (fair-speed)."""
+    limiter = RateLimiter(1_000_000)
+    limiter.throttle(500_000)  # half the burst spent
+    before = limiter._tokens
+    updated = limiter._updated
+    limiter.set_rate(1_000_000)
+    assert limiter._tokens == before
+    assert limiter._updated == updated
+
+
 def test_negative_amounts_ignored():
     limiter = RateLimiter(1000)
     limiter.throttle(0)

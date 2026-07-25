@@ -426,6 +426,13 @@ class SettingsDialog(chrome.Dialog):
         engine_form.addRow(t("Speed limit:"), self.speed_spin)
         self.fair_speed_check = QCheckBox(t("Share bandwidth evenly across simultaneous downloads"))
         engine_form.addRow(t("Fair speed:"), self.fair_speed_check)
+        engine_form.addRow(
+            _note(
+                "Splits your speed limit (or measured line speed) equally: "
+                "2 downloads → half each, 4 → a quarter each. Steadiest with a "
+                "Speed limit set above."
+            )
+        )
         schedule_row = _inline_row()
         self.schedule_check = QCheckBox(t("Full speed between"))
         self.full_from = QTimeEdit()

@@ -166,8 +166,13 @@ class DownloadManager:
         self._rate_mark: tuple[float, int] | None = None
         self._job_byte_mark: dict[int, int] = {}
         self._last_download_rate = 0.0
-        self._peak_download_rate = 0.0
-        self._job_rates: dict[int, float] = {}
+        # Sticky estimate of line capacity (bytes/sec) used when fair-speed is
+        # on and there is no global speed limit. While several jobs share, this
+        # only ratchets up - shrinking it from our own throttled samples is what
+        # made speeds bounce between downloads.
+        self._line_capacity = 0.0
+        # Last fair cap pushed to each job (so torrent/handle updates are quiet).
+        self._fair_applied: dict[int, int] = {}
         # job id -> monotonic deadline at which an auto-retry becomes due.
         self._retry_at: dict[int, float] = {}
         # Jobs paused because the download window closed; resumed when it opens.
@@ -243,28 +248,43 @@ class DownloadManager:
         return self._last_download_rate
 
     def _sample_throughput(self) -> None:
-        """Refresh aggregate and per-job rates once per scheduler pass.
+        """Refresh aggregate rate and the sticky line-capacity estimate.
 
         Must not take ``_cond``: the scheduler already holds it when this runs.
         """
         items = [(job_id, task.bytes_downloaded) for job_id, task in self._active.items()]
         total = sum(size for _, size in items)
+        n_active = len(items)
         now = time.monotonic()
         if self._rate_mark is not None:
             elapsed = now - self._rate_mark[0]
             if elapsed > 0:
-                self._last_download_rate = max(0.0, (total - self._rate_mark[1]) / elapsed)
-                # Slow decay so a brief lull doesn't collapse the fair-speed budget.
-                self._peak_download_rate = max(
-                    self._last_download_rate, self._peak_download_rate * 0.98
-                )
-                rates: dict[int, float] = {}
-                for job_id, size in items:
-                    prev = self._job_byte_mark.get(job_id)
-                    rates[job_id] = max(0.0, (size - prev) / elapsed) if prev is not None else 0.0
-                self._job_rates = rates
+                measured = max(0.0, (total - self._rate_mark[1]) / elapsed)
+                self._last_download_rate = measured
+                self._update_line_capacity(measured, n_active)
         self._rate_mark = (now, total)
         self._job_byte_mark = {job_id: size for job_id, size in items}
+
+    def _update_line_capacity(self, measured: float, n_active: int) -> None:
+        """Learn how fast the line is without letting fair-speed choke itself.
+
+        One (or zero) active download: track the peak with a mild decay so a
+        quieter period can settle. Two or more under fair-speed: only raise the
+        estimate - our equal caps would otherwise lower the measured total and
+        then shrink every share, which is the bounce the user saw.
+        """
+        if measured <= 0:
+            if n_active == 0:
+                self._line_capacity *= 0.99
+            return
+        if n_active <= 1 or not self.settings.fair_speed:
+            if measured > self._line_capacity:
+                self._line_capacity = measured
+            elif n_active == 1:
+                self._line_capacity = max(measured, self._line_capacity * 0.995)
+            return
+        if measured > self._line_capacity:
+            self._line_capacity = measured
 
     def _apply_global_rate(self) -> None:
         # Atomic read-compare-set: the scheduler and reload_settings both land
@@ -375,48 +395,38 @@ class DownloadManager:
         return limiter
 
     def _fair_budget_bytes(self) -> int:
-        """Bytes/sec to split across active downloads. Prefer the configured
-        global cap; when unlimited, use the measured peak so equal shares still
-        bind once the line has been observed."""
+        """Bytes/sec to split evenly across active downloads.
+
+        Prefer the configured global cap (that is the usual download-manager
+        model: known ceiling ÷ N). When unlimited, use the sticky line-capacity
+        estimate once it is large enough to be real traffic, not handshake noise.
+        """
         global_rate = self._effective_global_rate()
         if global_rate > 0:
             return global_rate
-        peak = int(self._peak_download_rate)
-        # Ignore tiny samples (DNS / handshake chatter) so we don't clamp the
-        # whole session to a few KB/s after a slow start.
-        return peak if peak >= 64 * 1024 else 0
+        capacity = int(self._line_capacity)
+        return capacity if capacity >= 64 * 1024 else 0
 
     def _compute_fair_caps(self, job_ids: Sequence[int]) -> dict[int, int]:
         """Per-job download caps in bytes/sec (0 = unlimited).
 
-        Equal shares of the budget, then unused capacity from jobs that are
-        clearly underusing their slice is handed to the jobs that are hungry -
-        so a dead torrent swarm does not permanently strand half the line.
+        Strict equal split of the budget - the same model IDM-style managers
+        use. No reclaim of "unused" share: redistributing from short-term rate
+        samples made one download surge while another starved, every half second.
         """
         if not job_ids:
             return {}
-        budget = self._fair_budget_bytes()
         if len(job_ids) == 1:
             # Fair-speed owns per-torrent handle limits (session cap is cleared),
             # so a lone job still needs the global speed limit applied here.
             return {job_ids[0]: self._effective_global_rate()}
+        budget = self._fair_budget_bytes()
         if budget <= 0:
+            # Line not measured yet: leave everyone unlimited until capacity is
+            # known, then the next pass locks in equal shares.
             return {job_id: 0 for job_id in job_ids}
         equal = max(1024, budget // len(job_ids))
-        unused = 0.0
-        hungry: list[int] = []
-        for job_id in job_ids:
-            actual = self._job_rates.get(job_id, 0.0)
-            if actual < equal * 0.7:
-                unused += equal - actual
-            else:
-                hungry.append(job_id)
-        caps = {job_id: equal for job_id in job_ids}
-        if hungry and unused > 0:
-            bonus = int(unused) // len(hungry)
-            for job_id in hungry:
-                caps[job_id] = equal + bonus
-        return caps
+        return {job_id: equal for job_id in job_ids}
 
     def _apply_fair_speed(self) -> None:
         """Push live per-job caps so simultaneous downloads share the line.
@@ -425,13 +435,20 @@ class DownloadManager:
         """
         active = dict(self._active)
         if not active:
+            self._fair_applied.clear()
             return
         if not self.settings.fair_speed:
             caps = {job_id: 0 for job_id in active}
         else:
             caps = self._compute_fair_caps(list(active.keys()))
+        stale = [job_id for job_id in self._fair_applied if job_id not in active]
+        for job_id in stale:
+            self._fair_applied.pop(job_id, None)
         for job_id, task in active.items():
             rate = max(0, int(caps.get(job_id, 0)))
+            if self._fair_applied.get(job_id) == rate:
+                continue
+            self._fair_applied[job_id] = rate
             self._fair_limiter_for(job_id).set_rate(rate)
             apply = getattr(task, "set_download_limit", None)
             if callable(apply):
@@ -938,6 +955,7 @@ class DownloadManager:
         self._retry_at.pop(job_id, None)
         self._job_limiters.pop(job_id, None)
         self._fair_limiters.pop(job_id, None)
+        self._fair_applied.pop(job_id, None)
         job = self.db.get_job(job_id)
         if job is not None and job.status in (
             JobStatus.QUEUED,
@@ -959,6 +977,7 @@ class DownloadManager:
         self._retry_at.pop(job_id, None)
         self._job_limiters.pop(job_id, None)
         self._fair_limiters.pop(job_id, None)
+        self._fair_applied.pop(job_id, None)
         with self._cond:
             active = self._active.get(job_id)
             if active is not None and force:
@@ -1385,6 +1404,7 @@ class DownloadManager:
                     self._retry_at.pop(job.id, None)
                     self._job_limiters.pop(job.id, None)
                     self._fair_limiters.pop(job.id, None)
+                    self._fair_applied.pop(job.id, None)
                     self._record_completion(job.id)
                 elif status is JobStatus.FAILED:
                     if not self._schedule_retry(job.id):

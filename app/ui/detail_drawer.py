@@ -1,8 +1,7 @@
 """The Downloads detail drawer: a 324px "download inspector" beside the table
 when a single download is selected.
 
-It is a persistent header (icon, name, status, progress, and a compact
-per-connection bar strip for every download kind) over a tab strip -
+It is a persistent header (icon, name, status, progress) over a tab strip -
 Overview / Details / Media (or Contents / Peers) - and a compact action bar.
 Tabs that don't apply to the selection are hidden, so a PDF shows two and a
 video shows three. Widgets are built once; only their text and visibility change
@@ -20,15 +19,12 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -37,7 +33,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -47,206 +42,13 @@ from app.core import archive
 from app.core.i18n import N_, t
 from app.core.manager import DownloadManager, JobView
 from app.core.mediainfo import MediaSummary, read_media_info
-from app.core.models import Job, JobKind, JobStatus, Segment
+from app.core.models import Job, JobKind, JobStatus
 from app.ui import components, design, motion, theme, threads
 from app.ui.format import duration_text, human_bytes
 from app.ui.icons import svg_icon, type_icon_name
 from app.ui.work_threads import FileOpThread
 
 log = logging.getLogger(__name__)
-
-#: How many per-connection bars the header shows. More than this gets noisy in
-#: a 324px drawer; extras still run, they just aren't listed individually.
-_MAX_CONN_BARS = 8
-
-#: Fixed label column so every bar ends on the same vertical line - a growing
-#: "Conn 1 · 256.0 KB/s" used to shove its neighbours and clip the drawer edge.
-_CONN_LABEL_WIDTH = 100
-
-
-@dataclass(frozen=True)
-class _ConnLane:
-    """One row in the connection strip: fill 0..1, optional live speed."""
-
-    index: int
-    fraction: float
-    speed_bps: float = 0.0
-    key: str = ""
-
-
-def _waterfall_lanes(count: int, fraction: float, *, active_speed: float = 0.0) -> list[_ConnLane]:
-    """Split overall progress across ``count`` lanes (YouTube / torrent / HLS
-    don't expose real byte-ranges, but the strip still reads as multi-lane)."""
-    count = max(1, min(_MAX_CONN_BARS, count))
-    fraction = max(0.0, min(1.0, fraction))
-    slot = 1.0 / count
-    lanes: list[_ConnLane] = []
-    for i in range(count):
-        start = i * slot
-        end = start + slot
-        if fraction >= end - 1e-9:
-            fill, speed = 1.0, 0.0
-        elif fraction <= start:
-            fill, speed = 0.0, 0.0
-        else:
-            fill = (fraction - start) / slot
-            speed = active_speed
-        lanes.append(_ConnLane(index=i + 1, fraction=fill, speed_bps=speed, key=f"w{i}"))
-    return lanes
-
-
-class _ConnectionBars(QWidget):
-    """Thin per-connection progress rows under the main bar (IDM-style).
-
-    Built once with a fixed row budget; each refresh only updates fill + label
-    text so the header never rebuilds widgets mid-download. Labels are a fixed
-    width so bars stay level; long speed text is elided instead of overflowing.
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 2, 0, 0)
-        root.setSpacing(3)
-        self._title = components.role_label(
-            t("Connections").upper(), "caption", size=design.FONT["caption"]
-        )
-        root.addWidget(self._title)
-        self._rows: list[tuple[QWidget, QLabel, motion.SmoothProgressBar]] = []
-        self._prev: dict[str, tuple[float, float]] = {}
-        #: Whose lanes are on screen, so a parked download doesn't get
-        #: re-queried twice a second for an unchanging answer.
-        self._job_id: int | None = None
-        self._lane_count = 0
-        for _ in range(_MAX_CONN_BARS):
-            row = QWidget()
-            row.setFixedHeight(12)
-            lay = QHBoxLayout(row)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.setSpacing(6)
-            bar = motion.SmoothProgressBar()
-            bar.setFixedHeight(3)
-            bar.setMinimumWidth(24)
-            bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            label = components.role_label("", "muted", size=design.FONT["caption"])
-            label.setFixedWidth(_CONN_LABEL_WIDTH)
-            label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
-            lay.addWidget(bar, 1)
-            lay.addWidget(label, 0)
-            root.addWidget(row)
-            row.hide()
-            self._rows.append((row, label, bar))
-        self.hide()
-
-    def shows(self, job_id: int) -> bool:
-        return self._job_id == job_id and self._lane_count > 0
-
-    def note_job(self, job_id: int) -> None:
-        self._job_id = job_id
-
-    def clear(self) -> None:
-        self._prev.clear()
-        self._job_id = None
-        self._lane_count = 0
-        for row, label, bar in self._rows:
-            row.hide()
-            label.setText("")
-            bar.set_value(0.0, immediate=True)
-        self.hide()
-
-    def update_lanes(
-        self,
-        lanes: Sequence[_ConnLane],
-        *,
-        status: JobStatus,
-        color: str | None,
-    ) -> None:
-        if not lanes:
-            self.clear()
-            return
-        shown = list(lanes)[:_MAX_CONN_BARS]
-        self._lane_count = len(shown)
-        live_keys = {lane.key or str(lane.index) for lane in shown}
-        for key in list(self._prev):
-            if key not in live_keys:
-                del self._prev[key]
-
-        metrics = QFontMetrics(self._rows[0][1].font())
-        for index, (row, label, bar) in enumerate(self._rows):
-            if index >= len(shown):
-                row.hide()
-                continue
-            lane = shown[index]
-            bar.set_color(color)
-            bar.set_value(
-                max(0.0, min(1.0, lane.fraction)),
-                immediate=(status is not JobStatus.DOWNLOADING),
-            )
-            # Speeds come from the caller (segment byte deltas or overall
-            # waterfall rate). Don't write _prev here - update_segments owns
-            # those keys as byte counters.
-            speed_text = ""
-            if status is JobStatus.DOWNLOADING and lane.speed_bps > 0:
-                speed_text = f" · {motion.fmt_speed(lane.speed_bps)}"
-            text = t("Conn {n}{speed}", n=lane.index, speed=speed_text)
-            label.setText(metrics.elidedText(text, Qt.TextElideMode.ElideRight, _CONN_LABEL_WIDTH))
-            row.show()
-        self.show()
-
-    def update_segments(
-        self,
-        segments: Sequence[Segment],
-        *,
-        status: JobStatus,
-        color: str | None,
-        overall_speed: float = 0.0,
-    ) -> None:
-        """Map real byte-range segments onto lanes (direct downloads)."""
-        if not segments:
-            self.clear()
-            return
-        ordered = list(segments)
-        if status is JobStatus.DOWNLOADING:
-            ordered.sort(key=lambda s: (s.is_complete, s.index))
-        shown = ordered[:_MAX_CONN_BARS]
-        now = time.monotonic()
-        lanes: list[_ConnLane] = []
-        for seg in shown:
-            size = (seg.end - seg.start + 1) if seg.end is not None else None
-            if status is JobStatus.COMPLETED and size:
-                fraction = 1.0
-            elif size and size > 0:
-                fraction = min(1.0, seg.downloaded / size)
-            else:
-                fraction = 0.0
-            speed = 0.0
-            key = f"s{seg.id}"
-            if status is JobStatus.DOWNLOADING:
-                prev = self._prev.get(key)
-                self._prev[key] = (float(seg.downloaded), now)
-                if prev is not None:
-                    prev_bytes, prev_at = prev
-                    dt = now - prev_at
-                    if dt > 0.05:
-                        speed = max(0.0, (seg.downloaded - prev_bytes) / dt)
-            lanes.append(
-                _ConnLane(index=seg.index + 1, fraction=fraction, speed_bps=speed, key=key)
-            )
-        # If every segment is quiet but the job is moving, put the overall
-        # speed on the first incomplete lane so the strip isn't blank.
-        if (
-            status is JobStatus.DOWNLOADING
-            and overall_speed > 0
-            and not any(lane.speed_bps > 0 for lane in lanes)
-        ):
-            for i, lane in enumerate(lanes):
-                if lane.fraction < 1.0:
-                    lanes[i] = _ConnLane(lane.index, lane.fraction, overall_speed, lane.key)
-                    break
-        self.update_lanes(lanes, status=status, color=color)
-
 
 #: Long URLs and paths have no spaces, so a word-wrapping label can't break
 #: them - it demands its full width and pushes the panel past the edge. Insert
@@ -518,8 +320,6 @@ class DetailDrawer(QFrame):
 
         self._size = components.role_label("", "muted", size=design.FONT["small"])
         outer.addWidget(self._size)
-        self._conn_bars = _ConnectionBars()
-        outer.addWidget(self._conn_bars)
         return header
 
     def _build_tabstrip(self) -> QWidget:
@@ -744,7 +544,6 @@ class DetailDrawer(QFrame):
         if new:
             trail = list(history or ())
             self._spark.set_samples(trail)
-            self._conn_bars.clear()
             self._samples = len(trail)
             self._speed_total = sum(trail)
             self._peak = max(trail, default=0.0)
@@ -771,7 +570,6 @@ class DetailDrawer(QFrame):
         self._pill.set_status(view.status.value)
         self._progress.set_color(design.status_color(palette, view.status.value))
         self._update_progress(view)
-        self._update_connections(view, palette, speed_bps)
         self._update_overview(view, speed_bps, new)
         # A torrent's swarm changes constantly, so refresh the Peers tab live
         # (the initial fill + visibility decision happened in _start_probe).
@@ -841,61 +639,6 @@ class DetailDrawer(QFrame):
             self._progress.set_value(1.0 if view.status is JobStatus.COMPLETED else 0.0)
             self._percent.setText("")
             self._size.setText("")
-
-    def _connection_lane_count(self, view: JobView) -> int:
-        """How many synthetic connection rows to show for non-segmented kinds."""
-        if view.kind is JobKind.TORRENT:
-            stats = self.manager.torrent_stats(view.id)
-            if stats is not None:
-                swarm = max(stats.seeds, 0) + max(stats.peers, 0)
-                if swarm > 0:
-                    return max(2, min(_MAX_CONN_BARS, swarm))
-        pinned = 0
-        if self._job is not None and self._job.id == view.id:
-            pinned = int(self._job.options.get("connections") or 0)
-        n = pinned or self.manager.connections
-        return max(1, min(_MAX_CONN_BARS, n))
-
-    def _update_connections(
-        self, view: JobView, palette: design.Palette, speed_bps: float = 0.0
-    ) -> None:
-        """Per-connection bars under the main progress for every download kind.
-
-        Direct jobs use real byte-range segments when present; Smart / HLS /
-        torrent / cloud use a waterfall split of overall progress. Bars stay
-        visible after the download finishes (full fill, no speeds).
-        """
-        if view.status in (JobStatus.QUEUED, JobStatus.CANCELLED, JobStatus.FAILED):
-            self._conn_bars.clear()
-            return
-        color = design.status_color(palette, view.status.value)
-        active_speed = speed_bps if view.status is JobStatus.DOWNLOADING else 0.0
-        # Parked (paused) with bars already painted: segments won't move.
-        if view.status is JobStatus.PAUSED and self._conn_bars.shows(view.id):
-            return
-        self._conn_bars.note_job(view.id)
-
-        if view.kind is JobKind.DIRECT:
-            segments = self.manager.db.segments_for(view.id)
-            if segments:
-                self._conn_bars.update_segments(
-                    segments,
-                    status=view.status,
-                    color=color,
-                    overall_speed=active_speed,
-                )
-                return
-
-        if view.status is JobStatus.COMPLETED:
-            fraction = 1.0
-        elif view.total_size and view.total_size > 0:
-            fraction = min(1.0, view.downloaded / view.total_size)
-        else:
-            fraction = 0.0
-        lanes = _waterfall_lanes(
-            self._connection_lane_count(view), fraction, active_speed=active_speed
-        )
-        self._conn_bars.update_lanes(lanes, status=view.status, color=color)
 
     def _update_overview(self, view: JobView, speed_bps: float, new: bool) -> None:
         downloading = view.status is JobStatus.DOWNLOADING

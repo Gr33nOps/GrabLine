@@ -559,9 +559,8 @@ def test_a_crashing_engine_marks_the_job_failed(db: Database, dest: Path):
         manager.shutdown()
 
 
-def test_fair_speed_splits_budget_and_reclaims_unused(db: Database):
-    """Equal shares when both are hungry; unused slice from a slow job goes to
-    the one that can use it (torrent-starved + CDN hog case)."""
+def test_fair_speed_splits_budget_evenly_and_stays_stable(db: Database):
+    """N downloads each get budget÷N - no reclaim that would bounce speeds."""
     from app.core.settings import Settings
 
     settings = Settings(db)
@@ -588,31 +587,33 @@ def test_fair_speed_splits_budget_and_reclaims_unused(db: Database):
             def set_download_limit(self, rate: int) -> None:
                 self.limit = rate
 
-        slow = _Task()
-        fast = _Task()
-        manager._active[1] = slow
-        manager._active[2] = fast
-        # Both hungry → equal halves of 2000 KB/s.
-        manager._job_rates = {1: 900 * 1024, 2: 900 * 1024}
+        a = _Task()
+        b = _Task()
+        manager._active[1] = a
+        manager._active[2] = b
         caps = manager._compute_fair_caps([1, 2])
-        assert caps[1] == 1000 * 1024
-        assert caps[2] == 1000 * 1024
+        assert caps == {1: 1000 * 1024, 2: 1000 * 1024}
 
-        # Slow job barely moves → its unused share boosts the hungry one.
-        manager._job_rates = {1: 5 * 1024, 2: 900 * 1024}
+        # A slow job must NOT steal share from its sibling (that caused the
+        # up/down see-saw). Equal caps stay equal.
         caps = manager._compute_fair_caps([1, 2])
-        assert caps[1] == 1000 * 1024
-        assert caps[2] == 2000 * 1024 - 5 * 1024  # equal + nearly all unused
+        assert caps[1] == caps[2] == 1000 * 1024
+
+        manager._active[3] = _Task()
+        manager._active[4] = _Task()
+        caps = manager._compute_fair_caps([1, 2, 3, 4])
+        assert caps == {i: 500 * 1024 for i in (1, 2, 3, 4)}
 
         manager._apply_fair_speed()
-        assert slow.limit == caps[1]
-        assert fast.limit == caps[2]
-        assert manager._fair_limiter_for(1).rate == caps[1]
-        assert manager._fair_limiter_for(2).rate == caps[2]
+        assert a.limit == 500 * 1024
+        # Second apply with the same caps must not re-push (torrent/handle thrash).
+        a.limit = -1
+        manager._apply_fair_speed()
+        assert a.limit == -1
 
         settings.fair_speed = False
         manager._apply_fair_speed()
-        assert slow.limit == 0 and fast.limit == 0
+        assert a.limit == 0
     finally:
         manager._active.clear()
         manager.shutdown()
@@ -627,5 +628,24 @@ def test_fair_speed_lone_job_keeps_global_limit(db: Database):
     manager = DownloadManager(db, settings=settings, max_concurrent=0)
     try:
         assert manager._compute_fair_caps([7]) == {7: 512 * 1024}
+    finally:
+        manager.shutdown()
+
+
+def test_fair_line_capacity_does_not_shrink_while_sharing(db: Database):
+    """Under fair-speed, throttled samples must not collapse the budget."""
+    from app.core.settings import Settings
+
+    settings = Settings(db)
+    settings.fair_speed = True
+    settings.speed_limit_kbps = 0  # unlimited → capacity estimate
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        manager._line_capacity = 2_000_000
+        manager._update_line_capacity(900_000, n_active=2)  # throttled aggregate
+        assert manager._line_capacity == 2_000_000  # sticky
+        manager._update_line_capacity(2_200_000, n_active=2)
+        assert manager._line_capacity == 2_200_000  # ratchet up only
+        assert manager._fair_budget_bytes() == 2_200_000
     finally:
         manager.shutdown()
