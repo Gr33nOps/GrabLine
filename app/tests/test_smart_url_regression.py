@@ -29,6 +29,7 @@ pytestmark = [
     ),
 ]
 
+
 def _assert_inspect(entry: SuiteUrl) -> MediaInfo | PlaylistInfo:
     engine = SmartEngine()
     engine.warm_up()
@@ -68,9 +69,7 @@ def test_youtube_prefetch_lands_before_long_wait() -> None:
     prefetch_download_ready(entry.url)
     ready = take_download_ready(entry.url, wait=90.0)
     prefetch_s = time.perf_counter() - t1
-    assert ready is not None and ready.get("formats"), (
-        f"prefetch failed after {prefetch_s:.1f}s"
-    )
+    assert ready is not None and ready.get("formats"), f"prefetch failed after {prefetch_s:.1f}s"
     # Prefetch is the slow cookies+runtime pass; it must still finish in a
     # single extract's time, not two stacked ones.
     assert prefetch_s < 120.0, f"prefetch took {prefetch_s:.1f}s"

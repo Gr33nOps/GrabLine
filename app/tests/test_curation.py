@@ -268,7 +268,6 @@ def test_inspect_reuses_a_recent_analysis(monkeypatch: pytest.MonkeyPatch) -> No
     engine.inspect("https://youtu.be/abc", use_session=True)
     assert len(calls) == 3
 
-
     # A stale entry is re-analysed rather than served forever.
     monkeypatch.setattr(SmartEngine, "INSPECT_TTL", -1.0)
     engine.inspect("https://youtu.be/abc")
