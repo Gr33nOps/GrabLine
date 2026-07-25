@@ -816,24 +816,52 @@ class SmartEngine:
             raw = str(exc.__cause__ or exc)
             want_login = not use_session and _looks_like_auth_wall(raw)
             want_runtime = not use_session and _runtime_might_help(raw)
-            if not (want_login or want_runtime):
+            # Session already on but the chosen profile's cookies are missing/
+            # locked: try the next installed browser before giving up.
+            if use_session and _cookie_source_failed(raw):
+                info = self._extract_info_session_fallbacks(
+                    url,
+                    primary=session_browser,
+                    with_runtime=True,
+                    proxy=proxy,
+                    force_generic=force_generic,
+                    headers=headers,
+                    previous=exc,
+                )
+            elif not (want_login or want_runtime):
                 raise
-            log.info(
-                "jsless analysis of %s failed (%s); retrying with%s%s",
-                url,
-                exc,
-                " a JS runtime" if want_runtime or want_login else "",
-                f" + {session_browser} login" if want_login else "",
-            )
-            info = self._extract_info(
-                url,
-                with_runtime=True,
-                use_session=use_session or want_login,
-                session_browser=session_browser,
-                proxy=proxy,
-                force_generic=force_generic,
-                headers=headers,
-            )
+            else:
+                log.info(
+                    "jsless analysis of %s failed (%s); retrying with%s%s",
+                    url,
+                    exc,
+                    " a JS runtime" if want_runtime or want_login else "",
+                    f" + {session_browser} login" if want_login else "",
+                )
+                try:
+                    info = self._extract_info(
+                        url,
+                        with_runtime=True,
+                        use_session=use_session or want_login,
+                        session_browser=session_browser,
+                        proxy=proxy,
+                        force_generic=force_generic,
+                        headers=headers,
+                    )
+                except DownloadError as retry_exc:
+                    raw_retry = str(retry_exc.__cause__ or retry_exc)
+                    if (use_session or want_login) and _cookie_source_failed(raw_retry):
+                        info = self._extract_info_session_fallbacks(
+                            url,
+                            primary=session_browser,
+                            with_runtime=True,
+                            proxy=proxy,
+                            force_generic=force_generic,
+                            headers=headers,
+                            previous=retry_exc,
+                        )
+                    else:
+                        raise
         result = self._parse_inspected(
             url, info, use_session=use_session, session_browser=session_browser, proxy=proxy
         )
@@ -854,6 +882,46 @@ class SmartEngine:
                 url, info, use_session=use_session, session_browser=session_browser, proxy=proxy
             )
         return result
+
+    def _extract_info_session_fallbacks(
+        self,
+        url: str,
+        *,
+        primary: str,
+        with_runtime: bool,
+        proxy: str | None,
+        force_generic: bool,
+        headers: dict[str, str] | None,
+        previous: DownloadError,
+    ) -> dict[str, Any]:
+        """Retry analysis with other installed browser cookie stores."""
+        from app.core.browser_setup import cookie_browser_candidates
+
+        last = previous
+        for browser in cookie_browser_candidates(primary=primary):
+            if browser == primary:
+                continue
+            log.info(
+                "cookie store for %s failed on %s; trying %s",
+                primary,
+                url,
+                browser,
+            )
+            try:
+                return self._extract_info(
+                    url,
+                    with_runtime=with_runtime,
+                    use_session=True,
+                    session_browser=browser,
+                    proxy=proxy,
+                    force_generic=force_generic,
+                    headers=headers,
+                )
+            except DownloadError as exc:
+                last = exc
+                if not _cookie_source_failed(str(exc.__cause__ or exc)):
+                    raise
+        raise last
 
     def _extract_info(
         self,

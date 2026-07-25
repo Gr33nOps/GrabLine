@@ -33,6 +33,16 @@
       videos: /^$/, // never - the x.js module handles every tweet video
       images: false,
     },
+    {
+      hosts: /(^|\.)reddit\.com$/,
+      videos: /^$/, // never - reddit.js hands the post permalink (not blob/gif)
+      images: true,
+    },
+    {
+      hosts: /(^|\.)(geo\.)?dailymotion\.com$/,
+      videos: /^$/, // never - dailymotion.js hands the /video/<id> URL
+      images: true,
+    },
   ];
 
   function siteRule() {
@@ -399,10 +409,18 @@
   // elementsFromPoint returns the whole stack at that spot, including elements
   // sitting *behind* others. That's what makes the button appear on media the
   // page covers, which plain event.target matching misses.
+  //
+  // Also walk open Shadow DOM: Reddit's shreddit-player (and similar hosts)
+  // keep the real <video> inside a shadow root, and elementsFromPoint only
+  // returns the host - without this the hover button never appears there.
   function mediaUnderPointer(x, y) {
     for (const el of document.elementsFromPoint(x, y)) {
       if (el === host) continue;
       if (el instanceof HTMLMediaElement) return el;
+      if (el.shadowRoot) {
+        const nested = kit.mediaInOpenShadow(el.shadowRoot);
+        if (nested) return nested;
+      }
     }
     return null;
   }

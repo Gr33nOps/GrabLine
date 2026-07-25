@@ -135,6 +135,45 @@
     return () => corner;
   }
 
+  // Like Element.closest, but walks out of open Shadow DOM hosts. Reddit's
+  // shreddit-player (and similar custom players) keep <video> inside a
+  // shadow root; a plain closest() from that video never reaches the post.
+  function closestDeep(start, selector) {
+    let node = start instanceof Element ? start : null;
+    while (node) {
+      if (node.matches?.(selector)) return node;
+      if (node.assignedSlot) {
+        node = node.assignedSlot;
+        continue;
+      }
+      if (node.parentElement) {
+        node = node.parentElement;
+        continue;
+      }
+      const root = node.getRootNode?.();
+      if (root instanceof ShadowRoot) {
+        node = root.host;
+        continue;
+      }
+      break;
+    }
+    return null;
+  }
+
+  // First <video>/<audio> under an open shadow tree (nested hosts included).
+  function mediaInOpenShadow(root, depth = 0) {
+    if (!root || depth > 8) return null;
+    const direct = root.querySelector?.("video, audio");
+    if (direct instanceof HTMLMediaElement) return direct;
+    for (const el of root.querySelectorAll?.("*") ?? []) {
+      if (el.shadowRoot) {
+        const hit = mediaInOpenShadow(el.shadowRoot, depth + 1);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+
   globalThis.grablineButtonKit = {
     ICON,
     COLORS,
@@ -145,5 +184,7 @@
     placeInCorner,
     showFeedback,
     watchCorner,
+    closestDeep,
+    mediaInOpenShadow,
   };
 })();

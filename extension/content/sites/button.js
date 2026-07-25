@@ -58,7 +58,10 @@
     let showTimer = 0;
 
     function attachHost() {
-      if (document.body && !host.isConnected) document.body.appendChild(host);
+      // Prefer <html> over <body>: many sites (Reddit, reels feeds) transform
+      // <body>, which breaks position:fixed against the viewport.
+      const root = document.documentElement || document.body;
+      if (root && !host.isConnected) root.appendChild(host);
     }
 
     function clearPending() {
@@ -111,10 +114,17 @@
     document.addEventListener(
       "mouseover",
       (event) => {
-        if (!enabled || !hoverGlobal || !(event.target instanceof Element)) return;
+        if (!enabled || !hoverGlobal) return;
+        // Walk the composed path so a <video> inside an open shadow root
+        // (Reddit shreddit-player, etc.) still reaches the site matcher.
+        const path = typeof event.composedPath === "function" ? event.composedPath() : [event.target];
         let hit = null;
         try {
-          hit = resolve(event.target);
+          for (const node of path) {
+            if (!(node instanceof Element)) continue;
+            hit = resolve(node);
+            if (hit) break;
+          }
         } catch {
           hit = null; // a matcher must never break the page
         }

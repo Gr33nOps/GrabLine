@@ -97,13 +97,24 @@ logic - lives once in `content/sites/button.js`.
   the watch URL to the app, which opens its Download Info dialog. Also covers
   **YouTube Music** (song links and the bottom player bar - MP3 is one hover
   and one click away). The generic overlay stands back on YouTube entirely.
-- **vimeo.js** - hover the button on links to `vimeo.com/<id>` videos.
+- **vimeo.js** - hover the button on links to `vimeo.com/<id>` videos (also
+  player.vimeo.com embeds via `all_frames`).
 - **x.js** - hover the button on videos inside tweets; sends the tweet's
   permalink (timeline videos are blob-backed, so the permalink is the only
   URL worth handing over).
 - **soundcloud.js** - hover the button on the bottom play bar (whatever is
   playing now) and on track titles in lists; sends the track's permalink,
   never the browse page you happen to be on.
+- **reddit.js** - hover the button on shreddit-player / post media (including
+  Shadow DOM video and YouTube link-post thumbnails); sends the post
+  permalink so yt-dlp can resolve the real file.
+- **dailymotion.js** - hover on `/video/<id>` links and inside the
+  geo.dailymotion.com player iframe (`all_frames`); sends the canonical
+  watch URL.
+
+The generic overlay also runs in every frame (`all_frames`) and walks open
+Shadow DOM so HTML5 players that hide `<video>` in web components still get
+a button on sites without a dedicated module.
 
 Every selector lives at the top of its module; when a site's DOM churns,
 that one file is the whole blast radius, and right-click + paste keep

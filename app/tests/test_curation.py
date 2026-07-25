@@ -391,3 +391,65 @@ def test_youtube_analysis_escalates_only_on_auth_wall(
     with pytest.raises(DownloadError):
         engine.inspect("https://youtu.be/private")
     assert calls == [(False, False)]
+
+
+def test_inspect_tries_next_browser_when_cookie_store_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wrong Settings browser (Chrome DB missing, Firefox signed in) must not
+    strand analysis - try the next installed profile like the download path."""
+    engine = SmartEngine()
+    tried: list[str] = []
+    good = {
+        "id": "v",
+        "title": "T",
+        "formats": [
+            {
+                "format_id": "18",
+                "vcodec": "avc1",
+                "acodec": "mp4a",
+                "height": 360,
+                "tbr": 700,
+                "filesize": MB,
+                "ext": "mp4",
+            }
+        ],
+    }
+
+    def fake_extract(
+        url: str, *, with_runtime: bool, use_session: bool, session_browser: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        tried.append(session_browser)
+        if session_browser == "chrome":
+            raise DownloadError(
+                'could not find chrome cookies database in "/home/x/.config/google-chrome"'
+            )
+        return good
+
+    monkeypatch.setattr(engine, "_extract_info", fake_extract)
+    monkeypatch.setattr(
+        "app.core.browser_setup.cookie_browser_candidates",
+        lambda primary=None, **kwargs: ["chrome", "firefox"],
+    )
+    info = engine.inspect("https://youtu.be/age", use_session=True, session_browser="chrome")
+    assert isinstance(info, MediaInfo) and info.options
+    assert tried == ["chrome", "firefox"]
+
+
+def test_resolve_thread_does_not_force_youtube_session() -> None:
+    """Hover/paste analysis must not force cookies+runtime for every YouTube URL
+    - that was making the quality dialog take tens of seconds."""
+    from types import SimpleNamespace
+
+    from app.ui.work_threads import ResolveThread
+
+    settings = SimpleNamespace(
+        use_browser_session=False, session_browser="firefox", proxy=None
+    )
+    thread = ResolveThread(
+        resolver=object(),  # type: ignore[arg-type]
+        url="https://www.youtube.com/watch?v=1La4QzGeaaQ",
+        settings=settings,  # type: ignore[arg-type]
+        page_title=None,
+    )
+    assert thread._use_session is False

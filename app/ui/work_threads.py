@@ -45,11 +45,13 @@ class ResolveThread(QThread):
         self._quality = quality
         self._fallbacks = fallbacks
         self._headers = headers or {}
-        # YouTube always uses the browser login automatically (bot check);
-        # the deprecated use_browser_session toggle is ignored there.
-        from app.engines.smart import needs_js_runtime
-
-        self._use_session = settings.use_browser_session or needs_js_runtime(url)
+        # Analysis must stay on the fast JS-less path. Forcing cookies+runtime
+        # for every YouTube URL made "Analyzing…" take tens of seconds (or fail
+        # on a missing Chrome cookie DB) before the quality panel appeared.
+        # SmartEngine.inspect already escalates to a browser login only when
+        # the video hits an auth/bot wall. Download still attaches cookies
+        # separately via manager.add_smart_entry / prefetch_download_ready.
+        self._use_session = settings.use_browser_session
         self._browser = settings.session_browser
         self._proxy = settings.proxy
 
