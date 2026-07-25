@@ -105,3 +105,4 @@ class ProgressRelay(QObject):
     """Marshals worker-thread progress onto the GUI thread via a signal."""
 
     tick = Signal(int)
+    status = Signal(str)  # optional label text (e.g. "12 MB / 146 MB")

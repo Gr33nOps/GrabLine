@@ -1087,7 +1087,7 @@ class MainWindow(QMainWindow):
             guard.end(self._in_flight, "update")
             self.statusBar().showMessage(t("Ready"))  # never leave "Checking…" stuck
             if result is not None:
-                tag, name, url = cast("tuple[str, str, str]", result)
+                tag, name, url, size = cast("tuple[str, str, str, int]", result)
                 box = QMessageBox(self)
                 box.setWindowTitle("GrabLine")
                 box.setText(
@@ -1103,7 +1103,7 @@ class MainWindow(QMainWindow):
                 box.addButton(QMessageBox.StandardButton.Cancel)
                 box.exec()
                 if box.clickedButton() is update_btn:
-                    self._download_and_run_installer(name, url)
+                    self._download_and_run_installer(name, url, size)
                 elif box.clickedButton() is site_btn:
                     QDesktopServices.openUrl(QUrl(update.WEBSITE_DOWNLOAD_URL))
             elif not quiet:
@@ -1123,16 +1123,16 @@ class MainWindow(QMainWindow):
 
         self._run_file_op(partial(update.installer_update, proxy), done, failed)
 
-    def _download_and_run_installer(self, name: str, url: str) -> None:
+    def _download_and_run_installer(self, name: str, url: str, size: int = 0) -> None:
         """Fetch the new installer to the download folder and open it - the
         closest we get to auto-update without a signed self-updater."""
         from PySide6.QtWidgets import QProgressBar, QProgressDialog
 
-        progress = QProgressDialog(t("Downloading {name}…", name=name), t("Cancel"), 0, 100, self)
+        progress = QProgressDialog(t("Downloading {name}…", name=name), t("Cancel"), 0, 1000, self)
         progress.setWindowTitle(t("GrabLine update"))
         progress.setMinimumDuration(0)
         bar = QProgressBar(progress)
-        bar.setRange(0, 100)
+        bar.setRange(0, 1000)
         bar.setTextVisible(False)  # the themed 5px bar has no room for "42%"
         progress.setBar(bar)
         proxy = self.settings.proxy
@@ -1149,12 +1149,41 @@ class MainWindow(QMainWindow):
 
         relay = work_threads.ProgressRelay(self)
         relay.tick.connect(progress.setValue)
+        relay.status.connect(progress.setLabelText)
+        if size > 0:
+            progress.setLabelText(
+                t(
+                    "Downloading {name}… {done} / {total}",
+                    name=name,
+                    done=human_bytes(0),
+                    total=human_bytes(size),
+                )
+            )
 
         def report(received: int, total: object) -> None:
             # Called on the worker thread: emitting a signal is thread-safe
             # (queued to the GUI thread); starting a QTimer here is not.
-            if isinstance(total, int) and total > 0:
-                relay.tick.emit(int(received / total * 100))
+            # Use 0..1000 so a 150MB AppImage moves the bar every ~150KB
+            # instead of sitting on "0%" until a full percent (~1.5MB).
+            known = total if isinstance(total, int) and total > 0 else (size if size > 0 else None)
+            if known is not None:
+                relay.tick.emit(min(1000, int(received * 1000 / known)))
+                relay.status.emit(
+                    t(
+                        "Downloading {name}… {done} / {total}",
+                        name=name,
+                        done=human_bytes(received),
+                        total=human_bytes(known),
+                    )
+                )
+            else:
+                relay.status.emit(
+                    t(
+                        "Downloading {name}… {done}",
+                        name=name,
+                        done=human_bytes(received),
+                    )
+                )
 
         def done(result: object) -> None:
             self._op_cancels.discard(cancel_event)
@@ -1183,7 +1212,13 @@ class MainWindow(QMainWindow):
 
         self._run_file_op(
             lambda: update.download_installer(
-                url, dest, name, proxy=proxy, progress=report, cancel=cancel_event
+                url,
+                dest,
+                name,
+                proxy=proxy,
+                progress=report,
+                cancel=cancel_event,
+                expected_size=size or None,
             ),
             done,
             failed,

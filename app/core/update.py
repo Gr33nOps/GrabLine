@@ -9,7 +9,10 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from typing import Any
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Any, BinaryIO
 
 import httpx
 
@@ -45,6 +48,17 @@ _API_TIMEOUT = httpx.Timeout(connect=5.0, read=12.0, write=12.0, pool=5.0)
 #: Installer downloads are tens of MB; allow the body to trickle without
 #: treating a brief stall as death, but fail a dead connect quickly.
 _DOWNLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)
+
+#: Parallel Range fetch for the big AppImage / Setup / DMG assets. One
+#: connection on a 150MB AppImage felt "stuck at 0%" for a long time; eight
+#: connections cut wall time sharply on typical links.
+_PARALLEL_CONNECTIONS = 8
+_PARALLEL_MIN_BYTES = 4 * 1024 * 1024
+_CHUNK = 256 * 1024
+_PROGRESS_EVERY = 256 * 1024  # emit at most once per this many new bytes
+
+
+ProgressCallback = Callable[[int, int | None], None]
 
 
 def _parts(version: str) -> tuple[int, ...]:
@@ -112,7 +126,11 @@ WEBSITE_DOWNLOAD_URL = "https://gr33nops.github.io/GrabLine/#download"
 def _asset_matches(name: str, platform: str) -> bool:
     lowered = name.lower()
     if platform.startswith("win"):
-        return lowered.endswith(".exe") and "setup" in lowered
+        # Prefer the Inno Setup installer; also accept the portable zip when
+        # a release ships only that (or Setup failed to build).
+        return (lowered.endswith(".exe") and "setup" in lowered) or (
+            "windows" in lowered and lowered.endswith(".zip")
+        )
     if platform == "darwin":
         return lowered.endswith(".dmg")
     # Prefer the AppImage; fall back to the .deb so a Linux user still gets an
@@ -122,14 +140,29 @@ def _asset_matches(name: str, platform: str) -> bool:
     )
 
 
+def _asset_rank(name: str, platform: str) -> int:
+    """Lower is better. Prefer the primary installer over fallback packages."""
+    lowered = name.lower()
+    if platform.startswith("win"):
+        if lowered.endswith(".exe") and "setup" in lowered:
+            return 0
+        return 1
+    if platform == "darwin":
+        return 0
+    if lowered.endswith(".appimage"):
+        return 0
+    return 1
+
+
 def installer_update(
     proxy: str | None = None, platform: str | None = None
-) -> tuple[str, str, str] | None:
-    """(tag, asset name, download URL) of this platform's installer for a
+) -> tuple[str, str, str, int] | None:
+    """(tag, asset name, download URL, size) of this platform's installer for a
     newer release, or None when already up to date / no matching asset.
 
-    Network failures raise :class:`DownloadError` so the UI's failed handler
-    runs (instead of the 'you have the latest version' notice)."""
+    ``size`` is the GitHub asset byte length (0 when unknown). Network failures
+    raise :class:`DownloadError` so the UI's failed handler runs (instead of
+    the 'you have the latest version' notice)."""
     import sys
 
     platform = platform or sys.platform
@@ -138,19 +171,165 @@ def installer_update(
     if not tag or not is_newer(tag, __version__):
         return None
     assets = [a for a in (data.get("assets") or []) if isinstance(a, dict)]
-    # Prefer AppImage over .deb when both match on Linux.
     ranked = sorted(
         assets,
-        key=lambda asset: 0 if str(asset.get("name") or "").lower().endswith(".appimage") else 1,
+        key=lambda asset: _asset_rank(str(asset.get("name") or ""), platform),
     )
     for asset in ranked:
         name = str(asset.get("name") or "")
         url = str(asset.get("browser_download_url") or "")
         if name and url and _asset_matches(name, platform):
-            return (tag, name, url)
+            raw_size = asset.get("size")
+            size = int(raw_size) if isinstance(raw_size, int) and raw_size > 0 else 0
+            return (tag, name, url, size)
     # Newer tag exists but this platform's installer is missing (e.g. the
     # macOS job failed) - still an error the user should see, not "up to date".
     raise DownloadError(f"GrabLine {tag} is out, but no installer for this system is attached yet")
+
+
+def _ua() -> dict[str, str]:
+    return {"User-Agent": _API_HEADERS["User-Agent"]}
+
+
+def _emit(
+    progress: ProgressCallback | None,
+    received: int,
+    total: int | None,
+    *,
+    force: bool = False,
+    last: list[int] | None = None,
+) -> None:
+    """Throttle progress callbacks so the GUI isn't flooded every chunk."""
+    if not callable(progress):
+        return
+    if last is not None and not force and received - last[0] < _PROGRESS_EVERY:
+        return
+    if last is not None:
+        last[0] = received
+    progress(received, total)
+
+
+def _download_single(
+    client: httpx.Client,
+    url: str,
+    target: Path,
+    total_hint: int | None,
+    progress: ProgressCallback | None,
+    cancel: threading.Event | None,
+) -> None:
+    with client.stream("GET", url, headers=_ua()) as response:
+        response.raise_for_status()
+        total_raw = response.headers.get("Content-Length")
+        total = int(total_raw) if total_raw and total_raw.isdigit() else total_hint
+        received = 0
+        last = [0]
+        with open(target, "wb") as handle:
+            for chunk in response.iter_bytes(_CHUNK):
+                if cancel is not None and cancel.is_set():
+                    raise UpdateCancelled("update download cancelled")
+                handle.write(chunk)
+                received += len(chunk)
+                _emit(progress, received, total, last=last)
+        _emit(progress, received, total, force=True, last=last)
+
+
+def _plan_spans(total: int, connections: int) -> list[tuple[int, int]]:
+    count = max(1, min(connections, max(1, total // (512 * 1024))))
+    base, extra = divmod(total, count)
+    spans: list[tuple[int, int]] = []
+    offset = 0
+    for index in range(count):
+        length = base + (1 if index < extra else 0)
+        spans.append((offset, offset + length - 1))
+        offset += length
+    return spans
+
+
+def _fetch_span(
+    client: httpx.Client,
+    url: str,
+    start: int,
+    end: int,
+    handle: BinaryIO,
+    lock: threading.Lock,
+    received_box: list[int],
+    total: int,
+    progress: ProgressCallback | None,
+    last: list[int],
+    cancel: threading.Event | None,
+    stop: threading.Event,
+) -> None:
+    headers = {**_ua(), "Range": f"bytes={start}-{end}"}
+    with client.stream("GET", url, headers=headers) as response:
+        # Parallel fetch requires real partial content. A 200 means the server
+        # ignored Range - fall back to a single stream rather than writing the
+        # whole body at a random offset.
+        if response.status_code != 206:
+            raise DownloadError(f"installer range HTTP {response.status_code}")
+        offset = start
+        for chunk in response.iter_bytes(_CHUNK):
+            if stop.is_set() or (cancel is not None and cancel.is_set()):
+                raise UpdateCancelled("update download cancelled")
+            with lock:
+                handle.seek(offset)
+                handle.write(chunk)
+                received_box[0] += len(chunk)
+                current = received_box[0]
+            offset += len(chunk)
+            _emit(progress, current, total, last=last)
+    if offset != end + 1:
+        raise DownloadError(
+            f"installer range short read: got {offset - start} want {end - start + 1}"
+        )
+
+
+def _download_parallel(
+    client: httpx.Client,
+    url: str,
+    target: Path,
+    total: int,
+    progress: ProgressCallback | None,
+    cancel: threading.Event | None,
+) -> None:
+    spans = _plan_spans(total, _PARALLEL_CONNECTIONS)
+    with open(target, "wb") as handle:
+        handle.truncate(total)
+
+    received_box = [0]
+    last = [0]
+    lock = threading.Lock()
+    stop = threading.Event()
+    _emit(progress, 0, total, force=True, last=last)
+
+    def work(span: tuple[int, int]) -> None:
+        start, end = span
+        with open(target, "rb+") as part:
+            _fetch_span(
+                client,
+                url,
+                start,
+                end,
+                part,
+                lock,
+                received_box,
+                total,
+                progress,
+                last,
+                cancel,
+                stop,
+            )
+
+    with ThreadPoolExecutor(max_workers=len(spans), thread_name_prefix="gl-upd") as pool:
+        futures = [pool.submit(work, span) for span in spans]
+        try:
+            for future in as_completed(futures):
+                future.result()
+        except Exception as exc:
+            stop.set()
+            if cancel is not None and cancel.is_set():
+                raise UpdateCancelled("update download cancelled") from exc
+            raise
+    _emit(progress, total, total, force=True, last=last)
 
 
 def download_installer(
@@ -160,60 +339,57 @@ def download_installer(
     proxy: str | None = None,
     progress: object = None,
     cancel: threading.Event | None = None,
+    expected_size: int | None = None,
 ) -> str:
     """Stream the installer to ``dest_dir`` and return its path. ``progress`` is
     an optional callable(received_bytes, total_bytes_or_None).
 
-    Pass a ``cancel`` event to make the download interruptible: it is checked
-    once per chunk, and when set the partial file is removed and
-    :class:`UpdateCancelled` is raised, so pressing Cancel actually stops the
-    transfer instead of leaving it running and opening a half-written installer.
+    Large assets that support HTTP Range are fetched on several connections so
+    a 100MB+ AppImage/Setup does not crawl on one pipe. Pass a ``cancel`` event
+    to make the download interruptible: it is checked once per chunk, and when
+    set the partial file is removed and :class:`UpdateCancelled` is raised.
     """
-    from pathlib import Path
-
+    progress_cb: ProgressCallback | None = progress if callable(progress) else None
     target = Path(dest_dir) / filename
-    cancelled = False
-    # One automatic retry: mid-download drops ("failed midway") are common on
-    # flaky links, and re-fetching from byte 0 is simpler than Range resume for
-    # GitHub CDN URLs that sometimes ignore it.
+    hint = expected_size if expected_size and expected_size > 0 else None
     last_error: Exception | None = None
+
     for attempt in range(2):
-        cancelled = False
+        if cancel is not None and cancel.is_set():
+            target.unlink(missing_ok=True)
+            raise UpdateCancelled("update download cancelled")
         try:
-            with (
-                net.build_client(
-                    proxy=proxy, follow_redirects=True, timeout=_DOWNLOAD_TIMEOUT
-                ) as client,
-                client.stream(
-                    "GET", url, headers={"User-Agent": _API_HEADERS["User-Agent"]}
-                ) as response,
-            ):
-                response.raise_for_status()
-                total_raw = response.headers.get("Content-Length")
-                total = int(total_raw) if total_raw and total_raw.isdigit() else None
-                received = 0
-                with open(target, "wb") as handle:
-                    for chunk in response.iter_bytes(65536):
-                        if cancel is not None and cancel.is_set():
-                            cancelled = True
-                            break
-                        handle.write(chunk)
-                        received += len(chunk)
-                        if callable(progress):
-                            progress(received, total)
-            if cancelled:
-                break
+            limits = httpx.Limits(
+                max_connections=_PARALLEL_CONNECTIONS + 2,
+                max_keepalive_connections=_PARALLEL_CONNECTIONS + 2,
+            )
+            with net.build_client(
+                proxy=proxy,
+                follow_redirects=True,
+                timeout=_DOWNLOAD_TIMEOUT,
+                limits=limits,
+            ) as client:
+                if hint is not None and hint >= _PARALLEL_MIN_BYTES:
+                    total = hint
+                    try:
+                        _download_parallel(client, url, target, total, progress_cb, cancel)
+                    except UpdateCancelled:
+                        raise
+                    except DownloadError as exc:
+                        # CDN ignored Range or short-read - one stream still works.
+                        log.debug("parallel installer fetch fell back: %s", exc)
+                        target.unlink(missing_ok=True)
+                        _download_single(client, url, target, total, progress_cb, cancel)
+                else:
+                    _download_single(client, url, target, hint, progress_cb, cancel)
             return str(target)
-        except (httpx.HTTPError, OSError) as exc:
+        except UpdateCancelled:
+            target.unlink(missing_ok=True)
+            raise
+        except (httpx.HTTPError, OSError, DownloadError) as exc:
             last_error = exc
             log.debug("installer download attempt %s failed: %s", attempt + 1, exc)
             target.unlink(missing_ok=True)
             if cancel is not None and cancel.is_set():
-                cancelled = True
-                break
-    if cancelled:
-        target.unlink(missing_ok=True)
-        raise UpdateCancelled("update download cancelled")
-    if last_error is not None:
-        raise DownloadError(f"could not download update: {last_error}") from last_error
-    raise DownloadError("could not download update")
+                raise UpdateCancelled("update download cancelled") from exc
+    raise DownloadError(f"could not download update: {last_error}") from last_error
