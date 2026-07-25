@@ -443,9 +443,7 @@ def test_resolve_thread_does_not_force_youtube_session() -> None:
 
     from app.ui.work_threads import ResolveThread
 
-    settings = SimpleNamespace(
-        use_browser_session=False, session_browser="firefox", proxy=None
-    )
+    settings = SimpleNamespace(use_browser_session=False, session_browser="firefox", proxy=None)
     thread = ResolveThread(
         resolver=object(),  # type: ignore[arg-type]
         url="https://www.youtube.com/watch?v=1La4QzGeaaQ",
