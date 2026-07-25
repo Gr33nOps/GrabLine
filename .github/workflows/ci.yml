@@ -61,6 +61,6 @@ jobs:
 
       - name: Tests (segmenter, resume, kill -9 milestone)
         timeout-minutes: 12
-        run: pytest --timeout=90 --timeout-method=thread
+        run: pytest --timeout=90 --timeout-method=thread -m "not network"
         env:
           QT_QPA_PLATFORM: offscreen

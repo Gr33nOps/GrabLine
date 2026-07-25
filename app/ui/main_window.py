@@ -87,7 +87,12 @@ from app.core.resolver import Resolution, Resolver
 from app.core.settings import MAX_CONNECTIONS, Settings
 from app.engines import cloud as cloud_engine
 from app.engines import torrent as torrent_engine
-from app.engines.smart import generic_quality_options, option_for_label
+from app.engines.smart import (
+    cancel_download_prefetch,
+    generic_quality_options,
+    option_for_label,
+    prefetch_download_ready,
+)
 from app.ui import (
     chrome,
     components,
@@ -1693,8 +1698,19 @@ class MainWindow(QMainWindow):
             )
             self.refresh()
             return
+        # Kick off the download-ready extract before any folder/quality UI so
+        # even "ask where to save" time overlaps with YouTube's slow pass.
+        if resolution.kind is JobKind.SMART and resolution.media is not None:
+            prefetch_download_ready(
+                resolution.url,
+                proxy=self.settings.proxy,
+                session_browser=self.settings.session_browser or None,
+                headers=headers,
+            )
         dest = self._ask_dest()
         if dest is None:
+            if resolution.kind is JobKind.SMART and resolution.media is not None:
+                cancel_download_prefetch(resolution.url, self.settings.proxy)
             return
         if resolution.kind is JobKind.SMART and resolution.playlist is not None:
             playlist_panel = PlaylistPanel(
@@ -1720,9 +1736,11 @@ class MainWindow(QMainWindow):
                 resolution.media, self, default_label=self.settings.video_default_quality
             )
             if quality_panel.exec() != QualityPanel.DialogCode.Accepted:
+                cancel_download_prefetch(resolution.url, self.settings.proxy)
                 return
             option = quality_panel.selected_option()
             if option is None:
+                cancel_download_prefetch(resolution.url, self.settings.proxy)
                 return
             self.manager.add_smart(
                 resolution.url,

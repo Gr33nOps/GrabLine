@@ -479,12 +479,19 @@ def curate_formats(info: dict[str, Any]) -> tuple[QualityOption, ...]:
 #: Raw single-video info dicts from analysis, handed to the download so a
 #: fresh add never pays the extraction twice (analysis for the quality panel,
 #: then the download re-extracting the very same thing - the reason YouTube
-#: felt twice as slow as single-extraction sites). Keyed (url, proxy); only
-#: cookie-free, non-generic extractions are stored, and format URLs from
-#: YouTube stay valid for hours, far beyond this TTL.
+#: felt twice as slow as single-extraction sites). Keyed (url, proxy).
+#: Format URLs from YouTube stay valid for hours, far beyond this TTL.
 _INFO_TTL = 300.0
 _info_lock = threading.Lock()
 _info_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+
+#: Download-shaped extracts (cookies + JS runtime for YouTube) started while
+#: the quality panel is open so Confirm does not wait on a second extraction.
+_READY_TTL = 300.0
+_ready_lock = threading.Lock()
+_ready_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_ready_inflight: dict[tuple[str, str], threading.Event] = {}
+_ready_cancels: dict[tuple[str, str], threading.Event] = {}
 
 
 def _remember_info(url: str, proxy: str | None, info: dict[str, Any]) -> None:
@@ -505,6 +512,133 @@ def recall_info(url: str, proxy: str | None = None) -> dict[str, Any] | None:
         if hit is None or time.monotonic() - hit[0] >= _INFO_TTL:
             return None
         return copy.deepcopy(hit[1])
+
+
+def _ready_key(url: str, proxy: str | None) -> tuple[str, str]:
+    return (url, proxy or "")
+
+
+def _remember_download_ready(url: str, proxy: str | None, info: dict[str, Any]) -> None:
+    if not info.get("formats"):
+        return
+    with _ready_lock:
+        now = time.monotonic()
+        for key, (at, _value) in list(_ready_cache.items()):
+            if now - at >= _READY_TTL:
+                del _ready_cache[key]
+        _ready_cache[_ready_key(url, proxy)] = (now, copy.deepcopy(info))
+
+
+def recall_download_ready(url: str, proxy: str | None = None) -> dict[str, Any] | None:
+    """Prefetched download-ready info for ``url``, or None."""
+    with _ready_lock:
+        hit = _ready_cache.get(_ready_key(url, proxy))
+        if hit is None or time.monotonic() - hit[0] >= _READY_TTL:
+            return None
+        return copy.deepcopy(hit[1])
+
+
+def cancel_download_prefetch(url: str, proxy: str | None = None) -> None:
+    """Signal an in-flight panel prefetch to abandon its result."""
+    with _ready_lock:
+        cancel = _ready_cancels.get(_ready_key(url, proxy))
+    if cancel is not None:
+        cancel.set()
+
+
+def take_download_ready(
+    url: str,
+    proxy: str | None = None,
+    *,
+    wait: float = 0.0,
+    stop: threading.Event | None = None,
+) -> dict[str, Any] | None:
+    """Return a prefetched extract, waiting briefly if one is still running.
+
+    Used by the download path so Confirm after the quality panel does not start
+    a second full YouTube extraction when the panel already kicked one off.
+    """
+    key = _ready_key(url, proxy)
+    hit = recall_download_ready(url, proxy)
+    if hit is not None:
+        return hit
+    if wait <= 0:
+        return None
+    with _ready_lock:
+        done = _ready_inflight.get(key)
+    if done is None:
+        return recall_download_ready(url, proxy)
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        if stop is not None and stop.is_set():
+            return None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        if done.wait(timeout=min(0.25, remaining)):
+            break
+    return recall_download_ready(url, proxy)
+
+
+def prefetch_download_ready(
+    url: str,
+    *,
+    proxy: str | None = None,
+    session_browser: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> None:
+    """Start a background download-shaped extract for ``url`` (idempotent).
+
+    Matches SmartDownload's YouTube policy: cookies + JS runtime when a browser
+    profile exists. Safe to call from the GUI thread; work runs off-thread.
+    """
+    key = _ready_key(url, proxy)
+    with _ready_lock:
+        hit = _ready_cache.get(key)
+        if hit is not None and time.monotonic() - hit[0] < _READY_TTL:
+            return  # already warm
+        if key in _ready_inflight:
+            return  # already running
+        done = threading.Event()
+        cancel = threading.Event()
+        _ready_inflight[key] = done
+        _ready_cancels[key] = cancel
+
+    def work() -> None:
+        try:
+            if cancel.is_set():
+                return
+            from app.core.browser_setup import detect_cookie_browser
+
+            browser = session_browser or detect_cookie_browser()
+            youtube = needs_js_runtime(url)
+            use_session = bool(youtube and browser)
+            with_runtime = bool(youtube)  # unthrottled formats need the challenge solved
+            if cancel.is_set():
+                return
+            engine = SmartEngine()
+            info = engine._extract_info(
+                url,
+                with_runtime=with_runtime,
+                use_session=use_session,
+                session_browser=browser or "chrome",
+                proxy=proxy,
+                force_generic=False,
+                headers=headers,
+            )
+            if cancel.is_set():
+                return
+            _remember_download_ready(url, proxy, info)
+            log.info("prefetched download-ready info for %s", url)
+        except Exception:
+            log.debug("download-ready prefetch failed for %s", url, exc_info=True)
+        finally:
+            with _ready_lock:
+                _ready_inflight.pop(key, None)
+                _ready_cancels.pop(key, None)
+            done.set()
+
+    threading.Thread(target=work, name="gl-prefetch", daemon=True).start()
 
 
 def needs_js_runtime(url: str, *, use_session: bool = False) -> bool:
@@ -601,22 +735,20 @@ class SmartEngine:
     ) -> MediaInfo | PlaylistInfo:
         """Metadata for a URL, reusing a recent analysis of the same URL.
 
-        Analysis is the slow part of adding a video (yt-dlp fetches the page,
-        solves the site's JS challenge and lists every format), and we redo it
-        verbatim whenever a URL is added twice - 'Download again', answering
-        yes to the duplicate prompt, or the extension resending. The result
-        only fills in the quality panel; the download re-extracts the URL when
-        it runs, so nothing is ever fetched from a stale address.
-
-        YouTube is special: anonymous clients hit a bot check, so analysis
-        always reads the browser login automatically - the person never has to
-        find a cookies.txt or flip a setting.
+        Analysis is the slow part of adding a video (yt-dlp fetches the page
+        and lists every format). The quality panel only needs that list, so
+        YouTube runs JS-less first (~seconds); cookies + JS runtime escalate
+        only on auth walls / empty formats. While the panel is open a separate
+        download-ready prefetch pays for the unthrottled extract so Confirm
+        does not wait on a second full extraction.
         """
-        if needs_js_runtime(url):
-            use_session = True
+        # Auto-pick a browser name for the cache key / escalation path, but do
+        # not force use_session=True - that was making every YouTube analysis
+        # take the 26-87s cookies+runtime path before the panel appeared.
+        if needs_js_runtime(url) and not session_browser:
             from app.core.browser_setup import detect_cookie_browser
 
-            session_browser = session_browser or detect_cookie_browser() or "chrome"
+            session_browser = detect_cookie_browser() or "chrome"
         header_key = tuple(sorted((headers or {}).items()))
         key = (url, use_session, session_browser, proxy or "", force_generic, header_key)
         now = time.monotonic()
@@ -775,8 +907,9 @@ class SmartEngine:
             raise DownloadError(friendly_error(str(exc))) from exc
         if not isinstance(info, dict):
             raise DownloadError("No downloadable media was found at this address.")
-        if not use_session and not force_generic:
-            # Hand this analysis to the download so it can skip re-extracting.
+        if not force_generic:
+            # Hand this analysis to the download so it can skip re-extracting
+            # when the download stays on the same cookie/runtime policy.
             _remember_info(url, proxy, info)
         return info
 
@@ -1280,12 +1413,22 @@ class SmartDownload:
         import yt_dlp
 
         opts = self._build_options(with_cookies=with_cookies, with_runtime=with_runtime)
-        # Fast start: a fresh analysis of this URL means the extraction is
-        # already done - feed it straight to the downloader (yt-dlp's
-        # --load-info-json path) instead of extracting the same thing again.
-        # Cookie/runtime escalations always extract fresh.
-        cached = None
-        if not with_cookies and not with_runtime and not self.job.options.get("hq_first"):
+        # Fast start: prefer a panel prefetch (cookies+runtime for YouTube),
+        # then a plain analysis cache when this attempt stays cookie-free.
+        cached = take_download_ready(
+            self.job.url,
+            self.proxy,
+            # Prefetch usually finishes while the person picks a quality; wait
+            # a bit if they confirmed instantly so we don't double-extract.
+            wait=45.0 if (with_cookies or with_runtime) else 0.0,
+            stop=self._stop_event,
+        )
+        if (
+            cached is None
+            and not with_cookies
+            and not with_runtime
+            and not self.job.options.get("hq_first")
+        ):
             cached = recall_info(self.job.url, self.proxy)
         if cached is not None:
             log.info("job %s: downloading from the cached analysis", self.job.id)

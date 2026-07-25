@@ -524,6 +524,7 @@ def test_download_reuses_a_fresh_analysis(db: Database, dest: Path, monkeypatch)
     from app.engines import smart
 
     smart._info_cache.clear()
+    smart._ready_cache.clear()
     smart._remember_info("https://youtu.be/x", None, {"id": "x", "formats": [{"url": "u"}]})
     job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4")
     task = SmartDownload(db, job, ffmpeg_path=None)
@@ -552,11 +553,71 @@ def test_download_reuses_a_fresh_analysis(db: Database, dest: Path, monkeypatch)
     assert task._download(with_cookies=False, with_runtime=False) == {"title": "ok"}
     assert calls == ["process"]  # no second extraction
 
-    # Escalations (cookies/runtime) and a cold cache extract fresh.
+    # Cold analysis cache extracts fresh.
     calls.clear()
     smart._info_cache.clear()
+    smart._ready_cache.clear()
     assert task._download(with_cookies=False, with_runtime=False) == {"title": "ok"}
     assert calls == ["extract"]
+
+
+def test_download_reuses_panel_prefetch_even_with_cookies(db: Database, dest: Path, monkeypatch):
+    """Confirm after the quality panel must not re-extract when prefetch landed."""
+    import yt_dlp
+
+    from app.engines import smart
+
+    smart._info_cache.clear()
+    smart._ready_cache.clear()
+    smart._remember_download_ready(
+        "https://youtu.be/pref", None, {"id": "pref", "formats": [{"url": "u"}]}
+    )
+    job = _smart_job(db, "https://youtu.be/pref", dest, "v.mp4")
+    task = SmartDownload(db, job, ffmpeg_path=None)
+    calls: list[str] = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def process_ie_result(self, info, download):
+            calls.append("process")
+            assert info["id"] == "pref" and download
+            return {"title": "ok"}
+
+        def extract_info(self, url, download):
+            calls.append("extract")
+            return {"title": "ok"}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    assert task._download(with_cookies=True, with_runtime=True) == {"title": "ok"}
+    assert calls == ["process"]
+
+
+def test_prefetch_download_ready_stores_extract(monkeypatch):
+    from app.engines import smart
+
+    smart._ready_cache.clear()
+    smart._ready_inflight.clear()
+    smart._ready_cancels.clear()
+
+    def fake_extract(self, url, **kwargs):
+        return {"id": "p", "formats": [{"url": "https://example.com/v.mp4"}]}
+
+    monkeypatch.setattr(smart.SmartEngine, "_extract_info", fake_extract)
+    monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda: "firefox")
+    smart.prefetch_download_ready("https://youtu.be/p", session_browser="firefox")
+    # Wait for the background thread.
+    hit = smart.take_download_ready("https://youtu.be/p", wait=5.0)
+    assert hit is not None and hit["id"] == "p"
+
+    smart.cancel_download_prefetch("https://youtu.be/other")
 
 
 def test_download_falls_back_when_the_cached_analysis_is_stale(

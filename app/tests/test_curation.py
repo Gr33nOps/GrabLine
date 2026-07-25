@@ -204,11 +204,9 @@ def test_friendly_errors():
     assert friendly_error("ERROR: something odd\nTraceback...") == "something odd"
 
 
-def test_inspect_youtube_uses_browser_login_automatically(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """YouTube analysis must open with the browser login on its own - callers
-    still pass use_session=False, but the person never sees a bot-check."""
+def test_inspect_youtube_is_jsless_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """YouTube analysis must stay JS-less first so the quality panel appears in
+    seconds; cookies+runtime are for download (and auth-wall retries)."""
     engine = SmartEngine()
     calls: list[tuple[bool, bool]] = []
 
@@ -216,10 +214,9 @@ def test_inspect_youtube_uses_browser_login_automatically(
         use_session = bool(kwargs.get("use_session"))
         with_runtime = bool(kwargs.get("with_runtime"))
         calls.append((use_session, with_runtime))
-        assert use_session  # forced for YouTube even when the caller said False
         return {
             "id": "x",
-            "title": "Signed in",
+            "title": "Fast list",
             "webpage_url": url,
             "formats": [
                 {
@@ -236,8 +233,8 @@ def test_inspect_youtube_uses_browser_login_automatically(
     monkeypatch.setattr(engine, "_extract_info", fake_extract)
     result = engine.inspect("https://youtu.be/x", use_session=False, session_browser="firefox")
     assert isinstance(result, MediaInfo)
-    assert result.title == "Signed in"
-    assert calls == [(True, True)]
+    assert result.title == "Fast list"
+    assert calls == [(False, False)]
 
 
 def test_inspect_reuses_a_recent_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,16 +263,16 @@ def test_inspect_reuses_a_recent_analysis(monkeypatch: pytest.MonkeyPatch) -> No
     assert calls == ["https://youtu.be/abc"]  # analysed once, then reused
     assert second is first
 
-    # A different URL analyses afresh. use_session=True is a no-op for YouTube
-    # (session is forced anyway), so the same URL still hits the cache.
+    # A different URL analyses afresh. use_session=True is a distinct cache key.
     engine.inspect("https://youtu.be/xyz")
     engine.inspect("https://youtu.be/abc", use_session=True)
-    assert len(calls) == 2
+    assert len(calls) == 3
+
 
     # A stale entry is re-analysed rather than served forever.
     monkeypatch.setattr(SmartEngine, "INSPECT_TTL", -1.0)
     engine.inspect("https://youtu.be/abc")
-    assert len(calls) == 3
+    assert len(calls) == 4
 
 
 def test_needs_js_runtime_only_for_youtube_or_a_session() -> None:
@@ -326,11 +323,10 @@ def test_provisioning_failure_never_breaks_analysis(monkeypatch: pytest.MonkeyPa
     assert smart.provision_js_runtime("https://youtu.be/abc") is None
 
 
-def test_youtube_analysis_uses_runtime_with_browser_login(
+def test_youtube_analysis_escalates_only_on_auth_wall(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """YouTube analysis always attaches the browser login (and the JS runtime
-    those clients need) so a bot-check never reaches the person."""
+    """YouTube analysis is JS-less first; cookies+runtime only on auth/empty."""
     engine = SmartEngine()
     calls: list[tuple[bool, bool]] = []
 
@@ -359,7 +355,7 @@ def test_youtube_analysis_uses_runtime_with_browser_login(
     monkeypatch.setattr(engine, "_extract_info", fake_extract)
     info = engine.inspect("https://youtu.be/fast", use_session=False)
     assert isinstance(info, MediaInfo) and info.options
-    assert calls == [(True, True)]
+    assert calls == [(False, False)]
 
     # Non-YouTube still stays jsless unless a session is requested.
     calls.clear()
@@ -367,8 +363,23 @@ def test_youtube_analysis_uses_runtime_with_browser_login(
     assert isinstance(info, MediaInfo)
     assert calls == [(False, False)]
 
-    # A hard failure on YouTube is not endlessly retried (already on the
-    # cookies+runtime path from the first attempt).
+    # Auth wall: one jsless failure, then cookies+runtime retry.
+    calls.clear()
+
+    def auth_then_ok(
+        url: str, *, with_runtime: bool, use_session: bool, **kwargs: Any
+    ) -> dict[str, Any]:
+        calls.append((use_session, with_runtime))
+        if not use_session:
+            raise DownloadError("Sign in to confirm your age")
+        return good
+
+    monkeypatch.setattr(engine, "_extract_info", auth_then_ok)
+    info = engine.inspect("https://youtu.be/age", use_session=False, session_browser="firefox")
+    assert isinstance(info, MediaInfo) and info.options
+    assert calls == [(False, False), (True, True)]
+
+    # A hard private-video error (not an auth-wall marker) is not retried.
     calls.clear()
 
     def hard_error(
@@ -380,4 +391,4 @@ def test_youtube_analysis_uses_runtime_with_browser_login(
     monkeypatch.setattr(engine, "_extract_info", hard_error)
     with pytest.raises(DownloadError):
         engine.inspect("https://youtu.be/private")
-    assert calls == [(True, True)]
+    assert calls == [(False, False)]
