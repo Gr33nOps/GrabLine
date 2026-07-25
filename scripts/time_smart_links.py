@@ -2,9 +2,9 @@
 """One-by-one timing for dialog / start / finish on a fixed link list.
 
 Phases:
-  dialog  – SmartEngine.inspect (quality panel ready)
-  start   – download-ready prefetch + yt-dlp until first progress byte
-  finish  – download completes (capped at 360p / worst so 4K/8K don't run for hours)
+  dialog  - SmartEngine.inspect (quality panel ready)
+  start   - download-ready prefetch + yt-dlp until first progress byte
+  finish  - download completes (capped at 360p / worst so 4K/8K don't run for hours)
 
 Live URLs only measure dialog (+ note). Incomplete / homepage URLs are recorded
 as skipped with a reason.
@@ -240,7 +240,7 @@ def time_one(spec: LinkSpec, engine: SmartEngine) -> TimingRow:
 
     if spec.kind == "live":
         row.status = "live-smoke"
-        row.note = (row.note + "; " if row.note else "") + "live — not fully downloaded"
+        row.note = (row.note + "; " if row.note else "") + "live - not fully downloaded"
         return row
 
     # Resolve a concrete media URL for playlists (first entry).
@@ -258,7 +258,7 @@ def time_one(spec: LinkSpec, engine: SmartEngine) -> TimingRow:
         prefetch_s = round(time.perf_counter() - t1, 2)
         row.extras["prefetch_s"] = prefetch_s
         if ready is None and smart_needs_prefetch(download_url):
-            row.note = (row.note + "; " if row.note else "") + "prefetch empty — live extract"
+            row.note = (row.note + "; " if row.note else "") + "prefetch empty - live extract"
     except Exception as exc:
         row.extras["prefetch_error"] = str(exc)[:120]
 

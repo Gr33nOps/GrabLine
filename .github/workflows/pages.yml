@@ -18,14 +18,16 @@ permissions:
   pages: write
   id-token: write
 
-# One deploy at a time; let a newer run supersede an in-progress one.
+# One deploy at a time. Do not cancel an in-flight deploy: cancel-in-progress
+# left 1.29.10 stuck in waiting/queued until deploy-pages hit its ~10m timeout.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -34,8 +36,8 @@ jobs:
       # Pages must be enabled once in Settings → Pages → Source: GitHub Actions.
       # GITHUB_TOKEN cannot create the site (Resource not accessible by integration).
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: website
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
