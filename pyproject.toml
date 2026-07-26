@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grabline"
-version = "1.29.18"
+version = "1.29.19"
 description = "GrabLine: a fast, free, open-source download manager with a browser button and a full quality picker."
 readme = "README.md"
 requires-python = ">=3.12"

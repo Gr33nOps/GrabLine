@@ -476,9 +476,7 @@ def test_resolve_thread_does_not_prefetch_during_analysis(
     from app.ui.work_threads import ResolveThread
 
     calls: list[str] = []
-    monkeypatch.setattr(
-        smart, "prefetch_download_ready", lambda url, **kwargs: calls.append(url)
-    )
+    monkeypatch.setattr(smart, "prefetch_download_ready", lambda url, **kwargs: calls.append(url))
 
     class FakeResolver:
         def resolve(self, url, **kwargs):
