@@ -463,21 +463,22 @@ def test_resolve_thread_does_not_force_youtube_session() -> None:
     assert thread._use_session is False
 
 
-def test_resolve_thread_prefetches_youtube_in_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Download-ready extract must start with analysis so Confirm is warm."""
+def test_resolve_thread_does_not_prefetch_during_analysis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cookies+runtime prefetch must not race JS-less analysis (that made
+    Analyzing… slow again). Prefetch starts after resolve, in the UI path."""
     from types import SimpleNamespace
 
     from app.core.models import JobKind
     from app.core.resolver import Resolution
+    from app.engines import smart
     from app.ui.work_threads import ResolveThread
 
     calls: list[str] = []
-
-    def fake_prefetch(url, **kwargs):
-        calls.append(url)
-
-    monkeypatch.setattr("app.ui.work_threads.prefetch_download_ready", fake_prefetch)
-    monkeypatch.setattr("app.ui.work_threads.cancel_download_prefetch", lambda *a, **k: None)
+    monkeypatch.setattr(
+        smart, "prefetch_download_ready", lambda url, **kwargs: calls.append(url)
+    )
 
     class FakeResolver:
         def resolve(self, url, **kwargs):
@@ -491,24 +492,4 @@ def test_resolve_thread_prefetches_youtube_in_parallel(monkeypatch: pytest.Monke
         page_title=None,
     )
     thread.run()
-    assert calls == ["https://youtu.be/warm"]
-
-    calls.clear()
-    thread = ResolveThread(
-        resolver=FakeResolver(),  # type: ignore[arg-type]
-        url="https://vimeo.com/clip",
-        settings=settings,  # type: ignore[arg-type]
-        page_title=None,
-    )
-    thread.run()
-    assert calls == []  # non-YouTube stays on the fast path only
-
-    calls.clear()
-    thread = ResolveThread(
-        resolver=FakeResolver(),  # type: ignore[arg-type]
-        url="https://www.youtube.com/playlist?list=PLxx",
-        settings=settings,  # type: ignore[arg-type]
-        page_title=None,
-    )
-    thread.run()
-    assert calls == []  # playlist pages are not download-shaped
+    assert calls == []
