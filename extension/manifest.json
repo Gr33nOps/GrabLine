@@ -1,0 +1,168 @@
+{
+  "manifest_version": 3,
+  "name": "GrabLine Connect",
+  "version": "1.29.20",
+  "description": "The browser companion for GrabLine, the free download manager: right-click download, hover buttons with a quality picker, grab all links or images on a page, and a per-tab list of sniffed streams. All downloading happens in the desktop app.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtgFioXkw5jbChCgtX8mD0WJOFAyAnSnv4H77uqsLyV5ZR5d8fDTUQu6ppHXNggu/50Smx5RSVz4UzBrZPjm0krHwWnwzFAzSGs6IBHzM3uTTpb0aWYqReGftaqjDZTez3FhpNwP6r6UZtLKam1hdfcHwJA4F2nyd7g9EvTgdrCKRy6HzZW5Om5dUEQ0JJjwCZLrjAVmaBL8SsAPR87gyIi20CkAZ37QX5+jHwp6FvJqqEt8jtYsuj+7hOlrzED8YVDVZUE+L2Bj1SMqramz5YHefyfbozpIHKw4y9MbHld2GdkV3GabHZrLb8l1RCacldkMG32HblceGGZ28K7S6/wIDAQAB",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "grabline@grabline.dev",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging",
+    "storage",
+    "alarms",
+    "webRequest",
+    "webRequestBlocking",
+    "downloads",
+    "downloads.shelf",
+    "downloads.ui",
+    "cookies",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "all_frames": true,
+      "js": [
+        "content/lib/messaging.js",
+        "content/lib/format.js",
+        "content/lib/button-kit.js",
+        "content/overlay.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.youtube.com/*"
+      ],
+      "all_frames": true,
+      "js": [
+        "content/lib/messaging.js",
+        "content/lib/button-kit.js",
+        "content/sites/button.js",
+        "content/sites/youtube.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.vimeo.com/*",
+        "*://player.vimeo.com/*"
+      ],
+      "all_frames": true,
+      "js": [
+        "content/lib/messaging.js",
+        "content/lib/button-kit.js",
+        "content/sites/button.js",
+        "content/sites/vimeo.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.x.com/*",
+        "*://*.twitter.com/*"
+      ],
+      "js": [
+        "content/lib/messaging.js",
+        "content/lib/button-kit.js",
+        "content/sites/button.js",
+        "content/sites/x.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.soundcloud.com/*"
+      ],
+      "js": [
+        "content/lib/messaging.js",
+        "content/lib/button-kit.js",
+        "content/sites/button.js",
+        "content/sites/soundcloud.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.instagram.com/*"
+      ],
+      "js": [
+        "content/lib/messaging.js",
+        "content/lib/button-kit.js",
+        "content/sites/button.js",
+        "content/sites/instagram.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.reddit.com/*"
+      ],
+      "js": [
+        "content/lib/messaging.js",
+        "content/lib/button-kit.js",
+        "content/sites/button.js",
+        "content/sites/reddit.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.dailymotion.com/*",
+        "*://geo.dailymotion.com/*"
+      ],
+      "all_frames": true,
+      "js": [
+        "content/lib/messaging.js",
+        "content/lib/button-kit.js",
+        "content/sites/button.js",
+        "content/sites/dailymotion.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/icon48.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

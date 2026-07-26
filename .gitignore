@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Generated packaging icons (rebuilt in CI by packaging/make_icons.py)
+packaging/grabline.png
+packaging/grabline.ico
+packaging/grabline.icns
+packaging/grabline.iconset/
+packaging/grabline-wizard.bmp
+packaging/grabline-wizard-small.bmp
+packaging/grabline-dmg-background.png
+
+# Environments
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Grabline runtime artifacts
+*.gl-part
+*.db
+*.db-wal
+*.db-shm
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Internal working document - never ships in the repo
+docs/ui-redesign-brief.md
