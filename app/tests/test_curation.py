@@ -14,6 +14,7 @@ from app.engines.smart import (
     needs_js_runtime,
     option_for_label,
     parse_playlist,
+    should_prefetch_download,
 )
 
 MB = 1024 * 1024
@@ -283,6 +284,15 @@ def test_needs_js_runtime_only_for_youtube_or_a_session() -> None:
     assert needs_js_runtime("https://example.com/clip.mp4", use_session=True)
 
 
+def test_should_prefetch_download_only_single_youtube_videos() -> None:
+    assert should_prefetch_download("https://www.youtube.com/watch?v=a")
+    assert should_prefetch_download("https://youtu.be/a")
+    assert should_prefetch_download("https://www.youtube.com/shorts/a")
+    assert not should_prefetch_download("https://www.youtube.com/playlist?list=PLxx")
+    assert not should_prefetch_download("https://www.youtube.com/@channel/videos")
+    assert not should_prefetch_download("https://vimeo.com/clip")
+
+
 def test_provision_js_runtime_fetches_only_for_urls_that_need_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -451,3 +461,54 @@ def test_resolve_thread_does_not_force_youtube_session() -> None:
         page_title=None,
     )
     assert thread._use_session is False
+
+
+def test_resolve_thread_prefetches_youtube_in_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Download-ready extract must start with analysis so Confirm is warm."""
+    from types import SimpleNamespace
+
+    from app.core.models import JobKind
+    from app.core.resolver import Resolution
+    from app.ui.work_threads import ResolveThread
+
+    calls: list[str] = []
+
+    def fake_prefetch(url, **kwargs):
+        calls.append(url)
+
+    monkeypatch.setattr("app.ui.work_threads.prefetch_download_ready", fake_prefetch)
+    monkeypatch.setattr("app.ui.work_threads.cancel_download_prefetch", lambda *a, **k: None)
+
+    class FakeResolver:
+        def resolve(self, url, **kwargs):
+            return Resolution(url=url, kind=JobKind.SMART, message=None)
+
+    settings = SimpleNamespace(use_browser_session=False, session_browser="firefox", proxy=None)
+    thread = ResolveThread(
+        resolver=FakeResolver(),  # type: ignore[arg-type]
+        url="https://youtu.be/warm",
+        settings=settings,  # type: ignore[arg-type]
+        page_title=None,
+    )
+    thread.run()
+    assert calls == ["https://youtu.be/warm"]
+
+    calls.clear()
+    thread = ResolveThread(
+        resolver=FakeResolver(),  # type: ignore[arg-type]
+        url="https://vimeo.com/clip",
+        settings=settings,  # type: ignore[arg-type]
+        page_title=None,
+    )
+    thread.run()
+    assert calls == []  # non-YouTube stays on the fast path only
+
+    calls.clear()
+    thread = ResolveThread(
+        resolver=FakeResolver(),  # type: ignore[arg-type]
+        url="https://www.youtube.com/playlist?list=PLxx",
+        settings=settings,  # type: ignore[arg-type]
+        page_title=None,
+    )
+    thread.run()
+    assert calls == []  # playlist pages are not download-shaped

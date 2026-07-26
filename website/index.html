@@ -37,13 +37,14 @@
         "description": "Free open source download manager with parallel connections, browser companion and video quality picker.",
         "url": "https://gr33nops.github.io/GrabLine/",
         "downloadUrl": "https://github.com/Gr33nOps/GrabLine/releases/latest",
-        "softwareVersion": "1.29.15",
+        "softwareVersion": "1.29.16",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "screenshot": [
           "https://gr33nops.github.io/GrabLine/assets/shot-queue.png",
+          "https://gr33nops.github.io/GrabLine/assets/shot-dashboard.png",
           "https://gr33nops.github.io/GrabLine/assets/shot-quality.png",
-          "https://gr33nops.github.io/GrabLine/assets/shot-dashboard.png"
+          "https://gr33nops.github.io/GrabLine/assets/shot-queues.png"
         ],
         "author": { "@type": "Organization", "name": "GrabLine" }
       }
@@ -641,7 +642,7 @@
           position: absolute;
           left: 20px;
           right: 20px;
-          top: calc(60px + 12px + 5 * 44px + 8px);
+          top: calc(60px + 12px + 8 * 44px + 8px);
           margin: 0 0 16px;
           justify-content: center;
         }
@@ -707,6 +708,7 @@
           <div class="nav-links" id="navLinks">
             <a href="#how">How it works</a>
             <a href="#quality">Video</a>
+            <a href="#queues">Queues</a>
             <a href="#features">Features</a>
             <a href="#download">Download</a>
             <a href="#support">Support</a>
@@ -804,6 +806,34 @@
           </div>
         </section>
 
+        <section id="queues" class="sec">
+          <div class="wrap split">
+            <div class="split-copy">
+              <span class="eyebrow">Queue manager</span>
+              <h2>Named queues, quiet hours, and order</h2>
+              <p class="lead">
+                Split work into queues such as Movies or Games. Cap how many run at once, limit
+                downloads to a time window, auto-sort by category, and make one queue wait until
+                another finishes.
+              </p>
+              <ul class="points">
+                <li><span><strong>Schedules.</strong> Only between set hours — useful for overnight batches.</span></li>
+                <li><span><strong>Dependencies.</strong> Wait for another queue so large jobs do not fight for bandwidth.</span></li>
+                <li><span><strong>Per-queue limits.</strong> Use the global cap, or pick how many downloads run at once.</span></li>
+              </ul>
+            </div>
+            <figure class="frame">
+              <img
+                src="assets/shot-queues.png?v=1"
+                width="1024"
+                height="576"
+                alt="GrabLine queue manager with named queues, schedule window, category, and wait-for-queue"
+                loading="lazy"
+              />
+            </figure>
+          </div>
+        </section>
+
         <section class="sec" id="features">
           <div class="wrap">
             <div class="sec-head">
@@ -827,16 +857,16 @@
                 <p>SFTP, FTP, S3 and WebDAV with OS keychain secrets. Public Drive and Dropbox share links.</p>
               </div>
               <div class="feat">
-                <h3>Queues and schedules</h3>
-                <p>Named queues, priorities, job dependencies, quiet hours and shut down when done.</p>
-              </div>
-              <div class="feat">
                 <h3>Proxies and limits</h3>
                 <p>HTTP and SOCKS proxies for downloads and torrents. Global, per job and per host speed caps.</p>
               </div>
               <div class="feat">
                 <h3>Advisory security</h3>
                 <p>Checksums and optional antivirus or VirusTotal checks can warn you. Files are never quarantined.</p>
+              </div>
+              <div class="feat">
+                <h3>Dashboard</h3>
+                <p>Live speed, totals, and graphs for download, upload, CPU, disk and network.</p>
               </div>
             </div>
           </div>

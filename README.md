@@ -44,6 +44,13 @@ GrabLine is built in spare time. If it saves you hassle, [buy me a coffee][suppo
       <sub>Quality picker</sub>
     </td>
   </tr>
+  <tr>
+    <td colspan="2" valign="top" align="center">
+      <br />
+      <img src="docs/screenshots/queues.png" width="920" alt="GrabLine queue manager with named queues, schedule, and dependencies" /><br />
+      <sub>Queue manager — named queues, quiet hours, categories, and wait-for-queue order</sub>
+    </td>
+  </tr>
 </table>
 
 ## What you get

@@ -18,6 +18,11 @@ from PySide6.QtCore import QObject, QThread, Signal
 from app.core.errors import DownloadError
 from app.core.resolver import Resolution, Resolver
 from app.core.settings import Settings
+from app.engines.smart import (
+    cancel_download_prefetch,
+    prefetch_download_ready,
+    should_prefetch_download,
+)
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +61,17 @@ class ResolveThread(QThread):
         self._proxy = settings.proxy
 
     def run(self) -> None:
+        # Overlap YouTube's slow cookies+runtime extract with JS-less analysis
+        # and the quality dialog. Confirm then reuses the prefetch instead of
+        # waiting a minute after Start.
+        prefetching = should_prefetch_download(self._url)
+        if prefetching:
+            prefetch_download_ready(
+                self._url,
+                proxy=self._proxy,
+                session_browser=self._browser or None,
+                headers=self._headers or None,
+            )
         try:
             resolution = self._resolver.resolve(
                 self._url,
@@ -69,6 +85,8 @@ class ResolveThread(QThread):
             # forever with no result and no error, so report it as one.
             log.exception("resolving %s failed", self._url)
             resolution = Resolution(url=self._url, kind=None, message=str(exc))
+        if prefetching and resolution.kind is None:
+            cancel_download_prefetch(self._url, self._proxy)
         self.resolved.emit(
             resolution, self._page_title, self._quality, self._fallbacks, self._headers
         )

@@ -620,6 +620,87 @@ def test_prefetch_download_ready_stores_extract(monkeypatch):
     smart.cancel_download_prefetch("https://youtu.be/other")
 
 
+def test_take_download_ready_waits_out_slow_prefetch(monkeypatch):
+    """Confirm must not give up mid-prefetch and start a second extract."""
+    import threading
+    import time
+
+    from app.engines import smart
+
+    smart._ready_cache.clear()
+    smart._ready_inflight.clear()
+    smart._ready_cancels.clear()
+    started = threading.Event()
+
+    def slow_extract(self, url, **kwargs):
+        started.set()
+        time.sleep(0.6)  # longer than the old 45s-style "brief" waits in tests
+        return {"id": "slow", "formats": [{"url": "https://example.com/v.mp4"}]}
+
+    monkeypatch.setattr(smart.SmartEngine, "_extract_info", slow_extract)
+    monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda: "firefox")
+    smart.prefetch_download_ready("https://youtu.be/slow", session_browser="firefox")
+    assert started.wait(2.0)
+    # A short timed wait would have returned None and triggered a double extract.
+    assert smart.take_download_ready("https://youtu.be/slow", wait=0.1) is None
+    hit = smart.take_download_ready("https://youtu.be/slow", wait=None)
+    assert hit is not None and hit["id"] == "slow"
+
+
+def test_download_waits_for_inflight_prefetch_instead_of_reextracting(
+    db: Database, dest: Path, monkeypatch
+):
+    import threading
+    import time
+
+    import yt_dlp
+
+    from app.engines import smart
+
+    smart._info_cache.clear()
+    smart._ready_cache.clear()
+    smart._ready_inflight.clear()
+    smart._ready_cancels.clear()
+    started = threading.Event()
+
+    def slow_extract(self, url, **kwargs):
+        started.set()
+        time.sleep(0.4)
+        return {"id": "pref2", "formats": [{"url": "u"}]}
+
+    monkeypatch.setattr(smart.SmartEngine, "_extract_info", slow_extract)
+    monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda: "firefox")
+    smart.prefetch_download_ready("https://youtu.be/pref2", session_browser="firefox")
+    assert started.wait(2.0)
+
+    job = _smart_job(db, "https://youtu.be/pref2", dest, "v.mp4")
+    task = SmartDownload(db, job, ffmpeg_path=None)
+    calls: list[str] = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def process_ie_result(self, info, download):
+            calls.append("process")
+            assert info["id"] == "pref2" and download
+            return {"title": "ok"}
+
+        def extract_info(self, url, download):
+            calls.append("extract")
+            return {"title": "ok"}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    assert task._download(with_cookies=True, with_runtime=True) == {"title": "ok"}
+    assert calls == ["process"]
+
+
 def test_download_falls_back_when_the_cached_analysis_is_stale(
     db: Database, dest: Path, monkeypatch
 ):

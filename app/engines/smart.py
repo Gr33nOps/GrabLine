@@ -550,33 +550,41 @@ def take_download_ready(
     url: str,
     proxy: str | None = None,
     *,
-    wait: float = 0.0,
+    wait: float | None = 0.0,
     stop: threading.Event | None = None,
 ) -> dict[str, Any] | None:
-    """Return a prefetched extract, waiting briefly if one is still running.
+    """Return a prefetched extract, waiting if one is still running.
 
     Used by the download path so Confirm after the quality panel does not start
     a second full YouTube extraction when the panel already kicked one off.
+
+    ``wait`` is seconds to wait for an in-flight prefetch, or ``None`` to wait
+    until that prefetch finishes (or ``stop`` is set). A short timeout that
+    expires while prefetch is still running used to cause a second full
+    cookies+runtime extract on top of the first - the ~1 minute Confirm stall.
     """
     key = _ready_key(url, proxy)
     hit = recall_download_ready(url, proxy)
     if hit is not None:
         return hit
-    if wait <= 0:
+    if wait is not None and wait <= 0:
         return None
     with _ready_lock:
         done = _ready_inflight.get(key)
     if done is None:
         return recall_download_ready(url, proxy)
-    deadline = time.monotonic() + wait
-    while time.monotonic() < deadline:
+    deadline = None if wait is None else time.monotonic() + wait
+    while not done.is_set():
         if stop is not None and stop.is_set():
             return None
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        if done.wait(timeout=min(0.25, remaining)):
-            break
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if done.wait(timeout=min(0.25, remaining)):
+                break
+        else:
+            done.wait(timeout=0.25)
     return recall_download_ready(url, proxy)
 
 
@@ -655,6 +663,27 @@ def needs_js_runtime(url: str, *, use_session: bool = False) -> bool:
     host = (urlsplit(url).hostname or "").lower()
     return host in ("youtu.be", "youtube.com", "youtube-nocookie.com") or host.endswith(
         (".youtube.com", ".youtube-nocookie.com")
+    )
+
+
+def should_prefetch_download(url: str) -> bool:
+    """True for single-video YouTube URLs where a download-ready prefetch helps.
+
+    Playlist / channel pages are skipped - their extract is not the per-entry
+    download shape, and kicking cookies+runtime there only burns time.
+    """
+    if not needs_js_runtime(url):
+        return False
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower().removeprefix("www.")
+    path = parts.path or ""
+    if host == "youtu.be":
+        return bool(path.strip("/"))
+    return (
+        path.startswith("/watch")
+        or path.startswith("/shorts/")
+        or path.startswith("/live/")
+        or path.startswith("/clip/")
     )
 
 
@@ -1486,9 +1515,11 @@ class SmartDownload:
         cached = take_download_ready(
             self.job.url,
             self.proxy,
-            # Prefetch usually finishes while the person picks a quality; wait
-            # a bit if they confirmed instantly so we don't double-extract.
-            wait=45.0 if (with_cookies or with_runtime) else 0.0,
+            # Prefetch usually finishes while the person picks a quality. If
+            # they confirm early, wait for that in-flight extract - never start
+            # a second cookies+runtime pass on top of it (that was the minute
+            # stall after Confirm).
+            wait=None if (with_cookies or with_runtime) else 0.0,
             stop=self._stop_event,
         )
         if (
