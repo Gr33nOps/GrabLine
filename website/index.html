@@ -1,0 +1,1147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GrabLine: free download manager</title>
+    <meta
+      name="description"
+      content="GrabLine is a free, open source download manager for Windows, macOS and Linux. Parallel connections, resume after interruption, video quality picker, torrents and cloud. No ads. No accounts."
+    />
+    <link rel="canonical" href="https://gr33nops.github.io/GrabLine/" />
+    <meta name="theme-color" content="#07090e" />
+    <link rel="icon" href="assets/favicon.png?v=6" />
+    <link rel="apple-touch-icon" href="assets/logo.png?v=7" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="GrabLine: free download manager" />
+    <meta
+      property="og:description"
+      content="Free open source download manager with parallel connections, a browser companion, video quality picker, torrents and cloud support."
+    />
+    <meta property="og:image" content="https://gr33nops.github.io/GrabLine/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="GrabLine, a free open source download manager" />
+    <meta property="og:url" content="https://gr33nops.github.io/GrabLine/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="GrabLine: free download manager" />
+    <meta
+      name="twitter:description"
+      content="Free download manager for Windows, macOS and Linux. Parallel connections, resume, video quality picker."
+    />
+    <meta name="twitter:image" content="https://gr33nops.github.io/GrabLine/assets/og.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "GrabLine",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Windows, macOS, Linux",
+        "description": "Free open source download manager with parallel connections, browser companion and video quality picker.",
+        "url": "https://gr33nops.github.io/GrabLine/",
+        "downloadUrl": "https://github.com/Gr33nOps/GrabLine/releases/latest",
+        "softwareVersion": "1.29.23",
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "screenshot": [
+          "https://gr33nops.github.io/GrabLine/assets/shot-queue.png",
+          "https://gr33nops.github.io/GrabLine/assets/shot-dashboard.png",
+          "https://gr33nops.github.io/GrabLine/assets/shot-quality.png",
+          "https://gr33nops.github.io/GrabLine/assets/shot-queues.png"
+        ],
+        "author": { "@type": "Organization", "name": "GrabLine" }
+      }
+    </script>
+    <!-- Self-hosted (latin subset only - the site is English-only): no
+         third-party request to Google on every page load, and one less
+         external round trip before text can render. -->
+    <link rel="preload" href="assets/fonts/ibm-plex-sans-var.woff2" as="font" type="font/woff2" crossorigin />
+    <style>
+      @font-face {
+        font-family: "IBM Plex Sans";
+        font-style: normal;
+        font-weight: 400 700;
+        font-display: swap;
+        src: url("assets/fonts/ibm-plex-sans-var.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "IBM Plex Mono";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("assets/fonts/ibm-plex-mono-400.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "IBM Plex Mono";
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("assets/fonts/ibm-plex-mono-500.woff2") format("woff2");
+      }
+      :root {
+        --bg: #07090e;
+        --bg-2: #0c1018;
+        --panel: #121821;
+        --line: #1e2736;
+        --ink: #e8eef8;
+        --muted: #a4b0c4;
+        --accent: #2563eb;
+        --accent-2: #3b82f6;
+        /* Slightly darker than --accent-2: white text on --accent-2 itself is
+           only 3.68:1, below the 4.5:1 WCAG AA needs at this text size. Scoped
+           to the button hover only - --accent-2 stays as-is for its other
+           uses (focus ring, links, badge text), which already pass. */
+        --accent-hover: #2e6bee;
+        --accent-ink: #ffffff;
+        --sans: "IBM Plex Sans", system-ui, sans-serif;
+        --mono: "IBM Plex Mono", ui-monospace, monospace;
+        --wrap: min(1120px, calc(100% - 40px));
+        --radius: 12px;
+        --btn-radius: 10px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+      img {
+        max-width: 100%;
+        display: block;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      a:hover {
+        color: var(--ink);
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent-2);
+        outline-offset: 3px;
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 0.9em;
+      }
+
+      .skip {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        z-index: 100;
+        padding: 10px 14px;
+        background: var(--accent);
+        color: #fff;
+        border-radius: var(--btn-radius);
+      }
+      .skip:focus {
+        left: 12px;
+        top: 12px;
+      }
+
+      .wrap {
+        width: var(--wrap);
+        margin-inline: auto;
+      }
+
+      .glow {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background:
+          radial-gradient(640px 320px at 8% -5%, rgba(1, 112, 253, 0.16), transparent 55%),
+          radial-gradient(520px 360px at 95% 12%, rgba(1, 112, 253, 0.07), transparent 50%);
+      }
+
+      .site {
+        position: relative;
+        z-index: 1;
+      }
+
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(14px);
+        background: color-mix(in srgb, var(--bg) 82%, transparent);
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+      }
+      .nav-inner {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 60px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 1.1rem;
+        letter-spacing: -0.02em;
+        white-space: nowrap;
+      }
+      .brand img {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+      }
+      .brand .line,
+      .hero-brand .line {
+        color: var(--accent);
+      }
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        margin-left: auto;
+      }
+      .nav-links a {
+        color: var(--muted);
+        font-size: 0.92rem;
+        font-weight: 500;
+        padding: 8px 10px;
+        border-radius: 8px;
+      }
+      .nav-links a:not(.nav-cta):hover {
+        color: var(--ink);
+        background: color-mix(in srgb, var(--panel) 70%, transparent);
+      }
+      /* The button lives inside .nav-links (so it flows after whatever the
+         last link is, on any screen size, with no positioning math needed) -
+         :not() above keeps the plain-link hover from touching it, and this
+         restores the padding the plain-link rule would otherwise set. */
+      .nav-links .nav-cta {
+        flex-shrink: 0;
+        margin-left: 6px;
+        padding: 0 18px;
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+      .nav-toggle {
+        display: none;
+        margin-left: auto;
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--ink);
+        border-radius: var(--btn-radius);
+        min-height: 40px;
+        padding: 0 12px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 44px;
+        padding: 0 18px;
+        border-radius: var(--btn-radius);
+        border: 1px solid transparent;
+        font-family: var(--sans);
+        font-weight: 600;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #ffffff !important;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        color: #ffffff !important;
+      }
+      .btn-ghost {
+        background: color-mix(in srgb, var(--panel) 65%, transparent);
+        border-color: #3a465c;
+        color: var(--ink);
+      }
+      .btn-ghost:hover {
+        border-color: color-mix(in srgb, var(--accent) 55%, #3a465c);
+        background: var(--panel);
+        color: var(--ink);
+      }
+      .btn-block {
+        width: 100%;
+      }
+
+      .hero {
+        border-bottom: 1px solid var(--line);
+      }
+      .hero-inner {
+        display: grid;
+        grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr);
+        gap: 48px;
+        align-items: center;
+        padding: 56px 0 64px;
+      }
+      .hero-copy {
+        max-width: 36rem;
+      }
+      .hero-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0 0 18px;
+      }
+      .hero-brand img {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        flex-shrink: 0;
+      }
+      .hero-brand strong {
+        font-size: clamp(2.2rem, 4.5vw, 3rem);
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        line-height: 1;
+      }
+      .hero h1 {
+        margin: 0 0 14px;
+        font-weight: 600;
+        font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+        letter-spacing: -0.025em;
+        line-height: 1.25;
+      }
+      .hero .lede {
+        margin: 0 0 26px;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.6;
+        max-width: 48ch;
+      }
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .meta {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.78rem;
+      }
+      .hero-frame {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        background: #0a0d14;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+      }
+      .hero-frame img {
+        width: 100%;
+        height: auto;
+      }
+
+      section {
+        padding: 64px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .sec-head {
+        margin-bottom: 28px;
+        max-width: 40rem;
+      }
+      .eyebrow {
+        display: block;
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #60a5fa;
+        margin-bottom: 10px;
+      }
+      .sec h2,
+      .sec-head h2 {
+        margin: 0 0 10px;
+        font-weight: 700;
+        font-size: clamp(1.55rem, 3vw, 2.05rem);
+        letter-spacing: -0.03em;
+        line-height: 1.2;
+      }
+      .lead {
+        margin: 0;
+        color: var(--muted);
+        font-size: 1.05rem;
+        max-width: 54ch;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1.15fr;
+        gap: 40px;
+        align-items: center;
+      }
+      .split.quality {
+        grid-template-columns: 1.1fr minmax(260px, 380px);
+        justify-content: space-between;
+      }
+
+      .frame {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        background: #000;
+        box-shadow: 0 20px 56px rgba(0, 0, 0, 0.32);
+      }
+      .frame img {
+        width: 100%;
+        height: auto;
+      }
+      .frame.portrait {
+        width: 100%;
+        max-width: 380px;
+        justify-self: end;
+      }
+
+      .points {
+        list-style: none;
+        margin: 20px 0 0;
+        padding: 0;
+        display: grid;
+        gap: 12px;
+      }
+      .points li {
+        display: grid;
+        grid-template-columns: 10px 1fr;
+        gap: 12px;
+        align-items: start;
+        color: var(--muted);
+        font-size: 0.98rem;
+      }
+      .points li::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        margin-top: 0.45em;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .points strong {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .feat-list {
+        display: grid;
+        gap: 0;
+        border-top: 1px solid var(--line);
+      }
+      .feat {
+        display: grid;
+        grid-template-columns: minmax(140px, 200px) 1fr;
+        gap: 20px;
+        padding: 20px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .feat h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      .feat p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.98rem;
+      }
+
+      .dl-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-top: 8px;
+      }
+      .plat {
+        position: relative;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 100%;
+      }
+      .plat.is-you {
+        border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+        background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+      }
+      .you-badge {
+        display: none;
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--accent-2);
+        border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+        border-radius: 6px;
+        padding: 3px 7px;
+      }
+      .plat.is-you .you-badge {
+        display: inline-block;
+      }
+      .plat .os {
+        font-weight: 700;
+        font-size: 1.15rem;
+        letter-spacing: -0.02em;
+        padding-right: 64px;
+      }
+      .plat .hint {
+        color: var(--muted);
+        font-size: 0.9rem;
+        min-height: 2.6em;
+      }
+      .plat .actions {
+        display: grid;
+        gap: 8px;
+        margin-top: auto;
+        padding-top: 8px;
+      }
+      .note {
+        margin-top: 24px;
+        color: var(--muted);
+        font-size: 0.92rem;
+        max-width: 72ch;
+        line-height: 1.6;
+      }
+      .note a {
+        color: var(--accent-2);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
+      .limits {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0;
+        margin-top: 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: var(--bg-2);
+      }
+      .limit {
+        padding: 22px 20px;
+        border-right: 1px solid var(--line);
+      }
+      .limit:last-child {
+        border-right: none;
+      }
+      .limit h3 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+      }
+      .limit p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .faq .sec-head {
+        margin-bottom: 12px;
+      }
+      .qa {
+        border-bottom: 1px solid var(--line);
+      }
+      .qa:first-of-type {
+        border-top: 1px solid var(--line);
+      }
+      .qa summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 18px 40px 18px 0;
+        font-weight: 600;
+        position: relative;
+      }
+      .qa summary::-webkit-details-marker {
+        display: none;
+      }
+      .qa summary::after {
+        content: "+";
+        position: absolute;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--muted);
+        font-weight: 500;
+        font-size: 1.25rem;
+        line-height: 1;
+      }
+      .qa[open] summary::after {
+        content: "×";
+      }
+      .qa p {
+        margin: 0 0 18px;
+        color: var(--muted);
+        max-width: 70ch;
+      }
+
+      footer {
+        padding: 40px 0 52px;
+      }
+      .foot-inner {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 28px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .foot-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        margin-left: auto;
+      }
+      .foot-links a:hover {
+        color: var(--ink);
+      }
+
+      .support-band {
+        margin-top: 8px;
+        padding: 28px 28px 30px;
+        border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+        border-radius: var(--radius);
+        background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+        display: grid;
+        gap: 14px;
+        justify-items: start;
+      }
+      .support-band h2 {
+        margin: 0;
+        font-size: 1.45rem;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+      }
+      .support-band p {
+        margin: 0;
+        max-width: 42rem;
+        color: var(--muted);
+        font-size: 1.02rem;
+        line-height: 1.55;
+      }
+      .support-band .cta-row {
+        margin-top: 4px;
+      }
+
+      @media (max-width: 900px) {
+        .nav-links {
+          display: none;
+        }
+        .nav-toggle {
+          display: inline-flex;
+          align-items: center;
+        }
+        .nav.open .nav-links {
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 60px;
+          margin: 0;
+          padding: 12px 20px 16px;
+          background: color-mix(in srgb, var(--bg) 96%, transparent);
+          border-bottom: 1px solid var(--line);
+          backdrop-filter: blur(14px);
+          gap: 2px;
+        }
+        .nav.open .nav-links a:not(.nav-cta) {
+          padding: 12px 10px;
+        }
+        /* Flows right after whatever the last link is - no pixel math tied to
+           a specific link count or height, unlike the absolute-positioned
+           overlay this replaced. */
+        .nav.open .nav-links .nav-cta {
+          display: flex;
+          margin: 10px 0 0;
+          justify-content: center;
+        }
+        .nav.open {
+          padding-bottom: 16px;
+        }
+        .hero-inner,
+        .split,
+        .split.quality,
+        .dl-grid {
+          grid-template-columns: 1fr;
+        }
+        .frame.portrait {
+          justify-self: center;
+        }
+        .hero-inner {
+          gap: 32px;
+          padding: 36px 0 44px;
+        }
+        .feat {
+          grid-template-columns: 1fr;
+          gap: 6px;
+        }
+        .limits {
+          grid-template-columns: 1fr;
+        }
+        .limit {
+          border-right: none;
+          border-bottom: 1px solid var(--line);
+        }
+        .limit:last-child {
+          border-bottom: none;
+        }
+        .foot-links {
+          margin-left: 0;
+          width: 100%;
+        }
+        section {
+          padding: 52px 0;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+        html {
+          scroll-behavior: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <div class="glow" aria-hidden="true"></div>
+    <div class="site">
+      <nav class="nav" id="nav">
+        <div class="wrap nav-inner">
+          <a class="brand" href="#top" aria-label="GrabLine"><img src="assets/logo.png?v=7" width="28" height="28" alt="" /><span aria-hidden="true">Grab<span class="line">Line</span></span></a>
+          <button class="nav-toggle" type="button" id="navToggle" aria-expanded="false" aria-controls="navLinks">
+            Menu
+          </button>
+          <div class="nav-links" id="navLinks">
+            <a href="#how">How it works</a>
+            <a href="#quality">Video</a>
+            <a href="#queues">Queues</a>
+            <a href="#features">Features</a>
+            <a href="#download">Download</a>
+            <a href="#support">Support</a>
+            <a href="#limits">Limits</a>
+            <a href="#faq">FAQ</a>
+            <a href="https://github.com/Gr33nOps/GrabLine" target="_blank" rel="noopener">GitHub</a>
+            <a class="btn btn-primary nav-cta" id="navDownload" href="#download">Download</a>
+          </div>
+        </div>
+      </nav>
+
+      <main id="main">
+        <header class="hero" id="top">
+          <div class="wrap hero-inner">
+            <div class="hero-copy">
+              <div class="hero-brand">
+                <img src="assets/logo.png?v=7" width="48" height="48" alt="" />
+                <strong>Grab<span class="line">Line</span></strong>
+              </div>
+              <h1>Free download manager for Windows, macOS and Linux</h1>
+              <p class="lede">
+                Split each file across parallel connections, resume after an interruption, and pick
+                video or audio quality from your browser. Torrents, cloud links and queues in one
+                app. Free and open source. No ads. No accounts.
+              </p>
+              <div class="cta-row">
+                <a class="btn btn-primary" id="heroDownload" href="#download">Download for your system</a>
+                <a class="btn btn-ghost" href="https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/" target="_blank" rel="noopener">Firefox add on</a>
+              </div>
+              <p class="meta"><span id="heroVersion">Latest release</span> · Windows · macOS · Linux · AGPL 3.0</p>
+            </div>
+            <figure class="hero-frame">
+              <img
+                src="assets/shot-queue.png?v=8"
+                width="1220"
+                height="780"
+                alt="GrabLine downloads window with live speeds"
+                fetchpriority="high"
+              />
+            </figure>
+          </div>
+        </header>
+
+        <section id="how" class="sec">
+          <div class="wrap split">
+            <div class="split-copy">
+              <span class="eyebrow">How it works</span>
+              <h2>Parallel connections for every file</h2>
+              <p class="lead">
+                GrabLine splits a download into segments and fetches them together (up to 32
+                connections). Idle connections take work from slow ones. Progress is saved to disk
+                so jobs can resume after a crash or restart.
+              </p>
+              <ul class="points">
+                <li><span><strong>Parallel downloads.</strong> Use the defaults, or set connection count, proxies and speed limits.</span></li>
+                <li><span><strong>Resume.</strong> Unfinished jobs continue from the last saved progress.</span></li>
+                <li><span><strong>Live dashboard.</strong> Current, average and peak speed, ETA, and per connection activity.</span></li>
+              </ul>
+            </div>
+            <figure class="frame">
+              <img
+                src="assets/shot-dashboard.png?v=7"
+                width="1366"
+                height="768"
+                alt="GrabLine dashboard with live speed, volume stats, and graphs"
+                loading="lazy"
+              />
+            </figure>
+          </div>
+        </section>
+
+        <section id="quality" class="sec">
+          <div class="wrap split quality">
+            <div class="split-copy">
+              <span class="eyebrow">Video and audio</span>
+              <h2>Choose quality before you download</h2>
+              <p class="lead">
+                Hover media in the browser, or paste a URL. GrabLine lists resolutions, audio only
+                (MP3, M4A, FLAC), subtitles, chapters, SponsorBlock and trim. Powered by yt dlp on
+                1000+ sites.
+              </p>
+              <ul class="points">
+                <li><span><strong>Simple.</strong> Pick Best or 1080p and download.</span></li>
+                <li><span><strong>Detailed.</strong> Set resolution, codec, subtitles and clip start/end.</span></li>
+              </ul>
+            </div>
+            <figure class="frame portrait">
+              <img
+                src="assets/shot-quality.png?v=7"
+                width="560"
+                height="660"
+                alt="GrabLine quality picker for a video download"
+                loading="lazy"
+              />
+            </figure>
+          </div>
+        </section>
+
+        <section id="queues" class="sec">
+          <div class="wrap split">
+            <div class="split-copy">
+              <span class="eyebrow">Queue manager</span>
+              <h2>Named queues, quiet hours, and order</h2>
+              <p class="lead">
+                Split work into queues such as Movies or Games. Cap how many run at once, limit
+                downloads to a time window, auto-sort by category, and make one queue wait until
+                another finishes.
+              </p>
+              <ul class="points">
+                <li><span><strong>Schedules.</strong> Only between set hours, useful for overnight batches.</span></li>
+                <li><span><strong>Dependencies.</strong> Wait for another queue so large jobs do not fight for bandwidth.</span></li>
+                <li><span><strong>Per-queue limits.</strong> Use the global cap, or pick how many downloads run at once.</span></li>
+              </ul>
+            </div>
+            <figure class="frame">
+              <img
+                src="assets/shot-queues.png?v=1"
+                width="1024"
+                height="576"
+                alt="GrabLine queue manager with named queues, schedule window, category, and wait-for-queue"
+                loading="lazy"
+              />
+            </figure>
+          </div>
+        </section>
+
+        <section class="sec" id="features">
+          <div class="wrap">
+            <div class="sec-head">
+              <span class="eyebrow">Features</span>
+              <h2>More than HTTP downloads</h2>
+              <p class="lead">
+                Magnets, cloud shares, remote servers, schedules and speed limits in the same app.
+              </p>
+            </div>
+            <div class="feat-list">
+              <div class="feat">
+                <h3>Browser button</h3>
+                <p>Hover media or right click a link. Hand off uses local Native Messaging. No open network ports.</p>
+              </div>
+              <div class="feat">
+                <h3>Torrents</h3>
+                <p>Magnets and torrent files via libtorrent. DHT, sequential playback, seed ratios and RSS.</p>
+              </div>
+              <div class="feat">
+                <h3>Cloud and servers</h3>
+                <p>SFTP, FTP, S3 and WebDAV with OS keychain secrets. Public Drive and Dropbox share links.</p>
+              </div>
+              <div class="feat">
+                <h3>Proxies and limits</h3>
+                <p>HTTP and SOCKS proxies for downloads and torrents. Global, per job and per host speed caps.</p>
+              </div>
+              <div class="feat">
+                <h3>Advisory security</h3>
+                <p>Checksums and optional antivirus or VirusTotal checks can warn you. Files are never quarantined.</p>
+              </div>
+              <div class="feat">
+                <h3>Dashboard</h3>
+                <p>Live speed, totals, and graphs for download, upload, CPU, disk and network.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="sec" id="download">
+          <div class="wrap">
+            <div class="sec-head">
+              <span class="eyebrow">Download</span>
+              <h2>Install GrabLine <span id="dlVersion"></span></h2>
+              <p class="lead">
+                Packaged builds include everything you need. No separate Python install required.
+              </p>
+            </div>
+            <div class="dl-grid" id="dlGrid">
+              <div class="plat" data-os="windows">
+                <span class="you-badge">Your OS</span>
+                <span class="os">Windows</span>
+                <span class="hint">Setup installer, or a portable zip that runs without admin rights.</span>
+                <div class="actions">
+                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">Installer</a>
+                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">Portable zip</a>
+                </div>
+              </div>
+              <div class="plat" data-os="mac">
+                <span class="you-badge">Your OS</span>
+                <span class="os">macOS</span>
+                <span class="hint">Apple Silicon (M1 and later). Open the DMG and drag GrabLine to Applications.</span>
+                <div class="actions">
+                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">Apple Silicon DMG</a>
+                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">All releases</a>
+                </div>
+              </div>
+              <div class="plat" data-os="linux">
+                <span class="you-badge">Your OS</span>
+                <span class="os">Linux</span>
+                <span class="hint">AppImage for most distributions. DEB for Debian, Ubuntu and Mint.</span>
+                <div class="actions">
+                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">AppImage</a>
+                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">DEB package</a>
+                </div>
+              </div>
+            </div>
+            <p class="note">
+              Builds are unsigned, so the OS may ask for confirmation once. On Windows choose <b>More info</b> then <b>Run anyway</b>.
+              On macOS <b>right click</b> then <b>Open</b>. On Linux without FUSE, use the
+              <a id="tarballLink" href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener"><b>tar.gz</b></a>.
+              See the
+              <a href="https://github.com/Gr33nOps/GrabLine/blob/main/docs/install.md" target="_blank" rel="noopener">install guide</a>
+              ·
+              <a href="https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/" target="_blank" rel="noopener">Firefox add on</a>
+            </p>
+          </div>
+        </section>
+
+        <section class="sec" id="support">
+          <div class="wrap">
+            <div class="sec-head">
+              <span class="eyebrow">Support</span>
+              <h2>GrabLine stays free. Tips keep it moving.</h2>
+            </div>
+            <div class="support-band">
+              <p>
+                No ads, no accounts, no telemetry. The app is built in spare time.
+                If GrabLine helps you download faster or with less hassle, a coffee
+                on Ko-fi really helps keep updates coming.
+              </p>
+              <div class="cta-row">
+                <a class="btn btn-primary" href="https://ko-fi.com/zain021xd" target="_blank" rel="noopener">Buy me a coffee</a>
+                <a class="btn btn-ghost" href="https://github.com/Gr33nOps/GrabLine" target="_blank" rel="noopener">Star on GitHub</a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="sec" id="limits">
+          <div class="wrap">
+            <div class="sec-head">
+              <span class="eyebrow">Limits</span>
+              <h2>What GrabLine does not do</h2>
+            </div>
+            <div class="limits">
+              <div class="limit">
+                <h3>No DRM bypass</h3>
+                <p>Protected services such as Netflix, Prime, Disney+ and Spotify are not supported. GrabLine does not remove DRM.</p>
+              </div>
+              <div class="limit">
+                <h3>Local sessions only</h3>
+                <p>Optional “use my browser session” reads cookies on your machine for your downloads. They are not uploaded.</p>
+              </div>
+              <div class="limit">
+                <h3>No tracking</h3>
+                <p>No ads. No accounts. Downloads go to the sites you choose. The only outbound maintenance call is an optional GitHub update check.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="sec" id="faq">
+          <div class="wrap">
+            <div class="sec-head">
+              <span class="eyebrow">FAQ</span>
+              <h2>Frequently asked questions</h2>
+            </div>
+
+            <details class="qa">
+              <summary>How is it different from IDM?</summary>
+              <p>
+                Both use parallel connections and a browser button. GrabLine is open source, runs on
+                Windows, macOS and Linux, and includes video, audio, torrents, cloud and archives in
+                one app. It does not send usage data to us.
+              </p>
+            </details>
+            <details class="qa">
+              <summary>Which browsers are supported?</summary>
+              <p>
+                Firefox has a signed add on. Chrome, Edge and Brave pair from Browser Setup in the
+                app. Without an extension, paste the URL into GrabLine. Hand off uses a local pipe,
+                not a network port.
+              </p>
+            </details>
+            <details class="qa">
+              <summary>Where are my files and settings stored?</summary>
+              <p>
+                Downloads go to the folder you choose. Settings and the job database stay in the
+                normal app data directory on your computer. Browser session cookies, if used, never
+                leave your disk.
+              </p>
+            </details>
+            <details class="qa">
+              <summary>Is GrabLine free?</summary>
+              <p>Yes. AGPL 3.0, no paid tier and no trial. Source is on GitHub if you want to build it yourself. It is built in spare time with no ads and no telemetry. If GrabLine helps you, <a href="https://ko-fi.com/zain021xd" target="_blank" rel="noopener">a coffee on Ko-fi</a> goes a long way.</p>
+            </details>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <div class="wrap foot-inner">
+          <a class="brand" href="#top" aria-label="GrabLine"><img src="assets/logo.png?v=7" width="28" height="28" alt="" /><span aria-hidden="true">Grab<span class="line">Line</span></span></a>
+          <span>Free · open source · AGPL 3.0</span>
+          <div class="foot-links">
+            <a href="https://github.com/Gr33nOps/GrabLine" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/releases" target="_blank" rel="noopener">Releases</a>
+            <a href="https://ko-fi.com/zain021xd" target="_blank" rel="noopener">Buy me a coffee</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/docs/install.md" target="_blank" rel="noopener">Install</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/SECURITY.md" target="_blank" rel="noopener">Security</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      const nav = document.getElementById("nav");
+      const navToggle = document.getElementById("navToggle");
+      const navLinks = document.getElementById("navLinks");
+      if (navToggle && nav) {
+        navToggle.addEventListener("click", () => {
+          const open = nav.classList.toggle("open");
+          navToggle.setAttribute("aria-expanded", open ? "true" : "false");
+          navToggle.textContent = open ? "Close" : "Menu";
+        });
+        const closeNav = () => {
+          nav.classList.remove("open");
+          navToggle.setAttribute("aria-expanded", "false");
+          navToggle.textContent = "Menu";
+        };
+        // The Download button now lives inside #navLinks (it flows after the
+        // last link instead of being a separately positioned overlay), so this
+        // one listener covers every link and the button.
+        if (navLinks) {
+          navLinks.querySelectorAll("a").forEach((a) => a.addEventListener("click", closeNav));
+        }
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && nav.classList.contains("open")) closeNav();
+        });
+      }
+
+      function detectOS() {
+        const s = (navigator.userAgent + " " + (navigator.platform || "")).toLowerCase();
+        if (s.includes("win")) return "windows";
+        if (s.includes("mac")) return "mac";
+        if (s.includes("linux") || s.includes("x11") || s.includes("android")) return "linux";
+        return "windows";
+      }
+      const osKey = detectOS();
+      const osName = { windows: "Windows", mac: "macOS", linux: "Linux" }[osKey];
+      const heroBtn = document.getElementById("heroDownload");
+      heroBtn.textContent = "Download for " + osName;
+
+      const dlGrid = document.getElementById("dlGrid");
+      if (dlGrid) {
+        const yours = dlGrid.querySelector('.plat[data-os="' + osKey + '"]');
+        if (yours) dlGrid.prepend(yours);
+      }
+
+      function matchAsset(assets, os) {
+        const by = (re) => assets.find((a) => re.test(a.name));
+        if (os === "windows") return by(/setup.*\.exe$/i) || by(/\.exe$/i);
+        if (os === "mac") return by(/applesilicon.*\.dmg$/i) || by(/\.dmg$/i);
+        return by(/\.appimage$/i);
+      }
+      function matchAltAsset(assets, os) {
+        const by = (re) => assets.find((a) => re.test(a.name));
+        if (os === "windows") return by(/portable\.zip$/i);
+        if (os === "linux") return by(/\.deb$/i);
+        return null;
+      }
+
+      // A static file generated once per release by the Pages deploy workflow
+      // (see .github/workflows/pages.yml), not a live call to the GitHub API
+      // from every visitor's browser - that endpoint's 60/hour anonymous rate
+      // limit is shared per IP, so a shared connection (office, campus,
+      // mobile carrier NAT) would routinely exhaust it and fall back to the
+      // generic notice below for every visitor behind it.
+      fetch("latest.json")
+        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+        .then((rel) => {
+          const assets = rel.assets || [];
+          const tag = rel.tag_name || "";
+          document.getElementById("heroVersion").textContent = tag ? "Latest: " + tag : "Latest release";
+          const dv = document.getElementById("dlVersion");
+          if (dv && tag) dv.textContent = tag;
+          const tarball = assets.find((a) => /linux.*\.tar\.gz$/i.test(a.name));
+          const tarballLink = document.getElementById("tarballLink");
+          if (tarball && tarballLink) tarballLink.href = tarball.browser_download_url;
+          document.querySelectorAll(".plat").forEach((card) => {
+            const os = card.getAttribute("data-os");
+            const asset = matchAsset(assets, os);
+            const btn = card.querySelector("[data-dl]");
+            if (asset) btn.href = asset.browser_download_url;
+            const alt = matchAltAsset(assets, os);
+            const altBtn = card.querySelector("[data-dl-alt]");
+            if (altBtn && alt) altBtn.href = alt.browser_download_url;
+            if (os === osKey) card.classList.add("is-you");
+          });
+          const mine = matchAsset(assets, osKey);
+          if (mine) heroBtn.href = mine.browser_download_url;
+        })
+        .catch(() => {
+          document.getElementById("heroVersion").textContent = "Latest release";
+        });
+    </script>
+  </body>
+</html>
