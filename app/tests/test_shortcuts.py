@@ -110,7 +110,7 @@ def test_window_action_map_matches_registry(db: Database):
     manager = DownloadManager(db, settings=settings, max_concurrent=0)
     try:
         window = MainWindow(manager, settings)
-        assert window._shortcuts.action_ids == {shortcut.id for shortcut in DEFAULTS}
+        assert set(window._shortcuts._actions) == {shortcut.id for shortcut in DEFAULTS}
     finally:
         manager.shutdown()
 

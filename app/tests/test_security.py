@@ -150,7 +150,7 @@ def test_local_scan_detection_is_a_warning_not_a_block(
     target.write_bytes(b"x")
     report = security.check_file(target, url="https://example.com/sample.bin")
     assert report.level is Risk.WARNING
-    assert report.scan_clean is False
+    assert any("ClamAV" in finding for finding in report.findings)
     assert target.exists()  # never deleted - advisory only
 
 
@@ -167,13 +167,6 @@ def test_virustotal_flag_raises_warning(tmp_path: Path, monkeypatch: pytest.Monk
     report = security.check_file(target, url="https://example.com/f.zip", virustotal_key="key")
     assert report.level is Risk.WARNING
     assert any("VirusTotal" in f for f in report.findings)
-
-
-def test_check_url_advisory():
-    insecure = security.check_url("http://x.test/f", enforce_https=True)
-    assert insecure.insecure_http and insecure.has_warning
-    secure = security.check_url("https://x.test/f", enforce_https=True)
-    assert not secure.has_warning
 
 
 # ------------------------------------------------------------- settings

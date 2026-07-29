@@ -41,6 +41,16 @@ def test_job_roundtrip(db: Database):
     assert (fetched.url, fetched.filename) == ("http://x.test/a.bin", "a.bin")
 
 
+def test_first_job_for_url_returns_earliest_match(db: Database):
+    a = db.create_job("http://x.test/dup.bin", "/tmp/dl", "dup.bin")
+    db.create_job("http://x.test/dup.bin", "/tmp/dl", "dup.bin")  # a later duplicate
+    db.create_job("http://x.test/other.bin", "/tmp/dl", "other.bin")
+
+    found = db.first_job_for_url("http://x.test/dup.bin")
+    assert found is not None and found.id == a.id  # the earliest, not the latest
+    assert db.first_job_for_url("http://x.test/missing.bin") is None
+
+
 def test_status_and_error_persist(db: Database):
     job = db.create_job("http://x.test/a.bin", "/tmp/dl", "a.bin")
     db.set_job_status(job.id, JobStatus.FAILED, error="disk full")

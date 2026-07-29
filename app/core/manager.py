@@ -174,7 +174,6 @@ class DownloadManager:
         # Automatic-throttle ('polite mode') sampling state.
         self._system_sampler = SystemSampler()
         self._rate_mark: tuple[float, int] | None = None
-        self._job_byte_mark: dict[int, int] = {}
         self._last_download_rate = 0.0
         # Sticky estimate of line capacity (bytes/sec) used when fair-speed is
         # on and there is no global speed limit. While several jobs share, this
@@ -276,7 +275,6 @@ class DownloadManager:
                 self._last_download_rate = measured
                 self._update_line_capacity(measured, n_active)
         self._rate_mark = (now, total)
-        self._job_byte_mark = {job_id: size for job_id, size in items}
 
     def _update_line_capacity(self, measured: float, n_active: int) -> None:
         """Learn how fast the line is without letting fair-speed choke itself.
@@ -636,11 +634,9 @@ class DownloadManager:
 
     def find_existing(self, url: str) -> Job | None:
         """Duplicate detection at add time: the first job (any status) already
-        pointing at this exact URL, or None."""
-        for job in self.db.list_jobs():
-            if job.url == url:
-                return job
-        return None
+        pointing at this exact URL, or None. Indexed lookup, so a long download
+        history doesn't turn every add into a full-table scan."""
+        return self.db.first_job_for_url(url)
 
     def move_job_file(self, job_id: int, dest_dir: str | Path) -> Path:
         """Move a completed download into ``dest_dir`` (a favorite folder) and

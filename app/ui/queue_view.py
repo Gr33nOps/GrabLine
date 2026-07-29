@@ -24,11 +24,36 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.i18n import t
+from app.core.i18n import N_, t
 from app.core.manager import DownloadManager
 from app.core.models import Queue
 from app.ui import components, design
-from app.ui.queue_dialog import _CATEGORIES, _would_cycle
+
+_CATEGORIES = (
+    "",
+    N_("Video"),
+    N_("Music"),
+    N_("Images"),
+    N_("Documents"),
+    N_("Archives"),
+    N_("Programs"),
+    N_("Games"),
+    N_("Torrents"),
+)
+
+
+def _would_cycle(queues: dict[int, Queue], queue_id: int, depends_on: int | None) -> bool:
+    """Following the depends_on chain from ``depends_on``, do we reach
+    ``queue_id`` again? (A cycle would deadlock both queues.)"""
+    seen: set[int] = set()
+    current = depends_on
+    while current is not None and current not in seen:
+        if current == queue_id:
+            return True
+        seen.add(current)
+        parent = queues.get(current)
+        current = parent.depends_on if parent else None
+    return False
 
 
 class QueueView(QWidget):

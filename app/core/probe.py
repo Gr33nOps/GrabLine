@@ -69,6 +69,16 @@ def probe(
                 resumable = True
                 match = _CONTENT_RANGE_UNSATISFIED.match(response.headers.get("content-range", ""))
                 total = int(match.group(1)) if match else None
+            elif status in (401, 403):
+                # Reached here despite the browser-like User-Agent and Referer
+                # every client now sends, so this is a real access wall, not the
+                # bot filter those defaults clear. Point the user at the one
+                # thing that fixes it: their own browser session.
+                raise DownloadError(
+                    f"the server refused this download (HTTP {status}). It likely "
+                    "needs you to be signed in - open the page in your browser and "
+                    "use the GrabLine button so your login travels with it"
+                )
             else:
                 raise DownloadError(f"server responded with HTTP {status}")
             return ProbeResult(

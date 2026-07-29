@@ -371,11 +371,15 @@ def test_ffmpeg_protocol_whitelist(db: Database, dest: Path):
     task = HlsDownload(db, job, ffmpeg_path="ffmpeg")
     command = task._command(job.part_path)
 
-    # Every -i is immediately preceded by the whitelist.
+    # Every -i is preceded by the whitelist, which pins its value. A -headers
+    # block now always rides in between (a default browser UA/Referer), so check
+    # the run before each -i rather than a fixed offset.
     for i, arg in enumerate(command):
         if arg == "-i":
-            assert command[i - 2] == "-protocol_whitelist"
-            assert command[i - 1] == _INPUT_PROTOCOLS
+            preceding = command[:i]
+            assert "-protocol_whitelist" in preceding
+            wl = len(preceding) - 1 - preceding[::-1].index("-protocol_whitelist")
+            assert command[wl + 1] == _INPUT_PROTOCOLS
     # file: is deliberately absent; the dangerous exotics never appear.
     protocols = set(_INPUT_PROTOCOLS.split(","))
     assert "file" not in protocols
@@ -409,13 +413,20 @@ def test_command_forwards_browser_headers_to_ffmpeg(db: Database, dest: Path):
             assert "Cookie: sess=abc123\r\n" in block
 
 
-def test_command_omits_headers_flag_when_none_stored(db: Database, dest: Path):
-    """A plain paste (no browser handoff) has no headers to forward - the
-    flag must be absent entirely, not sent empty."""
+def test_command_sends_default_browser_headers_when_none_stored(db: Database, dest: Path):
+    """A plain paste (no browser handoff) still gets a browser-like User-Agent
+    and a same-origin Referer, because FFmpeg's own UA ("Lavf/...") and a
+    missing Referer are exactly what a CDN's bot/hotlink filter answers with a
+    403. So the -headers block is present, not omitted."""
+    from app.core import net
+
     job = _hls_job(db, "https://cdn.example/master.m3u8", dest)
     task = HlsDownload(db, job, ffmpeg_path="ffmpeg")
     command = task._command(job.part_path)
-    assert "-headers" not in command
+    assert "-headers" in command
+    block = command[command.index("-headers") + 1]
+    assert f"User-Agent: {net.DEFAULT_USER_AGENT}\r\n" in block
+    assert "Referer: https://cdn.example/\r\n" in block
 
 
 @pytest.mark.skipif(FFMPEG is None, reason="needs a real ffmpeg")

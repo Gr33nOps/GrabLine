@@ -14,7 +14,6 @@ from app.engines.smart import (
     needs_js_runtime,
     option_for_label,
     parse_playlist,
-    should_prefetch_download,
 )
 
 MB = 1024 * 1024
@@ -282,15 +281,6 @@ def test_needs_js_runtime_only_for_youtube_or_a_session() -> None:
     assert not needs_js_runtime("https://example.com/clip.mp4")
     # A browser session can push yt-dlp onto a JS-dependent client anywhere.
     assert needs_js_runtime("https://example.com/clip.mp4", use_session=True)
-
-
-def test_should_prefetch_download_only_single_youtube_videos() -> None:
-    assert should_prefetch_download("https://www.youtube.com/watch?v=a")
-    assert should_prefetch_download("https://youtu.be/a")
-    assert should_prefetch_download("https://www.youtube.com/shorts/a")
-    assert not should_prefetch_download("https://www.youtube.com/playlist?list=PLxx")
-    assert not should_prefetch_download("https://www.youtube.com/@channel/videos")
-    assert not should_prefetch_download("https://vimeo.com/clip")
 
 
 def test_provision_js_runtime_fetches_only_for_urls_that_need_it(

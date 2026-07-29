@@ -666,27 +666,6 @@ def needs_js_runtime(url: str, *, use_session: bool = False) -> bool:
     )
 
 
-def should_prefetch_download(url: str) -> bool:
-    """True for single-video YouTube URLs where a download-ready prefetch helps.
-
-    Playlist / channel pages are skipped - their extract is not the per-entry
-    download shape, and kicking cookies+runtime there only burns time.
-    """
-    if not needs_js_runtime(url):
-        return False
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower().removeprefix("www.")
-    path = parts.path or ""
-    if host == "youtu.be":
-        return bool(path.strip("/"))
-    return (
-        path.startswith("/watch")
-        or path.startswith("/shorts/")
-        or path.startswith("/live/")
-        or path.startswith("/clip/")
-    )
-
-
 def provision_js_runtime(
     url: str, *, use_session: bool = False, proxy: str | None = None
 ) -> tuple[str, str] | None:

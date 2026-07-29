@@ -210,6 +210,12 @@ class Database:
     def _migrate(self) -> None:
         """Add columns introduced after Phase 0 to databases created before them."""
         for table, migrations in (("jobs", _JOBS_MIGRATIONS), ("handoffs", _HANDOFFS_MIGRATIONS)):
+            # PRAGMA cannot take a bound parameter, so the table name is
+            # interpolated into the SQL. It is one of our own literals today;
+            # pin it to an allowlist so it can never drift into an injection
+            # sink if a caller ever passes the name in from elsewhere.
+            if table not in ("jobs", "handoffs"):
+                raise ValueError(f"refusing to introspect unknown table {table!r}")
             existing = {
                 row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
             }
@@ -318,6 +324,16 @@ class Database:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM jobs WHERE url = ? ORDER BY id DESC LIMIT 1", (url,)
+            ).fetchone()
+        return _job_from_row(row) if row else None
+
+    def first_job_for_url(self, url: str) -> Job | None:
+        """The earliest job pointing at a URL, for add-time duplicate detection.
+        Uses the ``idx_jobs_url`` index, so it stays O(log n) instead of scanning
+        the whole history the way a Python-side loop over every job did."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM jobs WHERE url = ? ORDER BY id LIMIT 1", (url,)
             ).fetchone()
         return _job_from_row(row) if row else None
 

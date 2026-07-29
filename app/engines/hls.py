@@ -103,6 +103,17 @@ class HlsDownload:
         # request (see _command).
         raw_headers = options.get("http_headers")
         self._headers: dict[str, str] = dict(raw_headers) if isinstance(raw_headers, dict) else {}
+        # Look like a browser by default. FFmpeg's own UA ("Lavf/...") and a
+        # missing Referer are exactly what a CDN's bot/hotlink filter answers
+        # with 403 (or an HTML error page FFmpeg then can't parse). These reach
+        # both the app's native segment fetch and FFmpeg's own requests via the
+        # -headers block; a real browser handoff already set them, so setdefault
+        # leaves the handoff's values untouched. FFmpeg suppresses its default
+        # User-Agent when the -headers block already carries one.
+        self._headers.setdefault("User-Agent", net.DEFAULT_USER_AGENT)
+        hls_referer = net.default_referer(self._input_url)
+        if hls_referer:
+            self._headers.setdefault("Referer", hls_referer)
 
     def pause(self) -> None:
         self._stop_event.set()

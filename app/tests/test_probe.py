@@ -22,6 +22,17 @@ def test_probe_range_server(server: MediaServer, client: httpx.Client):
     assert result.etag
 
 
+def test_probe_403_gives_actionable_message(server: MediaServer, client: httpx.Client):
+    """A real access wall (403 even with browser-like defaults) must tell the
+    user the one thing that fixes it - their browser session - not just echo a
+    bare status code."""
+    url = server.add("/gated.bin", payload(1000, 3), required_headers={"Cookie": "s=1"})
+    with pytest.raises(DownloadError) as exc:
+        probe(client, url)
+    message = str(exc.value).lower()
+    assert "403" in message and "signed in" in message
+
+
 def test_probe_server_without_ranges(server: MediaServer, client: httpx.Client):
     url = server.add("/plain.bin", payload(50_000, 2), supports_ranges=False)
     result = probe(client, url)

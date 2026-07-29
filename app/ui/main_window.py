@@ -107,7 +107,6 @@ from app.ui import (
 from app.ui.archive_dialog import ArchiveDialog
 from app.ui.batch_dialog import BatchImportDialog, BatchImportThread
 from app.ui.cloud_dialog import CloudFolderDialog, prompt_cloud_url
-from app.ui.dashboard import DashboardDialog
 from app.ui.dashboard_view import DashboardView
 from app.ui.detail_drawer import DetailDrawer
 from app.ui.dupes_dialog import DupesDialog
@@ -118,7 +117,6 @@ from app.ui.inspector_dialog import InspectorDialog
 from app.ui.link_panel import LinkPanel
 from app.ui.playlist_panel import PlaylistPanel
 from app.ui.quality_panel import QualityPanel
-from app.ui.queue_dialog import QueueManagerDialog
 from app.ui.security_dialog import SecurityDialog
 from app.ui.setup_dialog import SetupDialog
 from app.ui.torrent_dialog import AddTorrentDialog, CreateTorrentDialog
@@ -222,8 +220,6 @@ class MainWindow(QMainWindow):
         # Queue and Settings are built the first time they are opened. Settings
         # alone is ~500ms of widget construction (18 sections, ~100 fields) and
         # most sessions never open it.
-        self._queue_view: QWidget | None = None
-        self._settings_view: QWidget | None = None
         self._page_factories: dict[str, Callable[[], QWidget]] = {
             "queue": self._make_queue_page,
             "settings": self._make_settings_page,
@@ -667,10 +663,6 @@ class MainWindow(QMainWindow):
         if factory is None:
             return None
         widget = factory()
-        if key == "queue":
-            self._queue_view = widget
-        elif key == "settings":
-            self._settings_view = widget
         self._page_index[key] = self._pages.addWidget(widget)
         return self._page_index[key]
 
@@ -1092,7 +1084,7 @@ class MainWindow(QMainWindow):
             guard.end(self._in_flight, "update")
             self.statusBar().showMessage(t("Ready"))  # never leave "Checking…" stuck
             if result is not None:
-                tag, name, url, size = cast("tuple[str, str, str, int]", result)
+                tag, name, url, size, digest = cast("tuple[str, str, str, int, str | None]", result)
                 box = QMessageBox(self)
                 box.setWindowTitle("GrabLine")
                 box.setText(
@@ -1108,7 +1100,7 @@ class MainWindow(QMainWindow):
                 box.addButton(QMessageBox.StandardButton.Cancel)
                 box.exec()
                 if box.clickedButton() is update_btn:
-                    self._download_and_run_installer(name, url, size)
+                    self._download_and_run_installer(name, url, size, digest)
                 elif box.clickedButton() is site_btn:
                     QDesktopServices.openUrl(QUrl(update.WEBSITE_DOWNLOAD_URL))
             elif not quiet:
@@ -1128,9 +1120,12 @@ class MainWindow(QMainWindow):
 
         self._run_file_op(partial(update.installer_update, proxy), done, failed)
 
-    def _download_and_run_installer(self, name: str, url: str, size: int = 0) -> None:
+    def _download_and_run_installer(
+        self, name: str, url: str, size: int = 0, digest: str | None = None
+    ) -> None:
         """Fetch the new installer to the download folder and open it - the
-        closest we get to auto-update without a signed self-updater."""
+        closest we get to auto-update without a signed self-updater. ``digest``
+        is GitHub's published SHA-256, verified before the installer opens."""
         from PySide6.QtWidgets import QProgressBar, QProgressDialog
 
         progress = QProgressDialog(t("Downloading {name}…", name=name), t("Cancel"), 0, 1000, self)
@@ -1224,6 +1219,7 @@ class MainWindow(QMainWindow):
                 progress=report,
                 cancel=cancel_event,
                 expected_size=size or None,
+                expected_sha256=digest,
             ),
             done,
             failed,
@@ -1908,20 +1904,6 @@ class MainWindow(QMainWindow):
         if not reveal.open_folder(str(self.settings.download_dir)):
             self.statusBar().showMessage(t("Could not open the folder"), 3000)
 
-    def _open_settings(self) -> None:
-        from app.ui.settings_dialog import SettingsDialog
-
-        with guard.single_flight(self._in_flight, "settings") as go:
-            if not go:
-                return
-            dialog = SettingsDialog(self.settings, self)
-            dialog.settings_reset.connect(self.manager.reload_settings)
-            if dialog.exec() == SettingsDialog.DialogCode.Accepted:
-                self.manager.reload_settings()
-                app = QApplication.instance()
-                if isinstance(app, QApplication):
-                    theme.apply_theme(app, self.settings.theme)
-
     # -------------------------------------------------------- row actions
 
     def _view_for_row(self, row: int) -> JobView | None:
@@ -2396,9 +2378,6 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ dashboard
 
-    def _open_dashboard(self) -> None:
-        DashboardDialog(self.manager, self).exec()
-
     # ------------------------------------------------------------- security
 
     def _advisory_scan(self, view: JobView, file_path: Path) -> None:
@@ -2471,10 +2450,6 @@ class MainWindow(QMainWindow):
         ).exec()
 
     # --------------------------------------------------------------- queues
-
-    def _open_queue_manager(self) -> None:
-        QueueManagerDialog(self.manager, self).exec()
-        self.refresh()
 
     def _pick_start_after(self, view: JobView) -> None:
         """Job dependency: hold this download until a chosen one finishes."""

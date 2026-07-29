@@ -54,8 +54,8 @@ def test_language_registry_is_consistent():
     codes = [code for code, _name, _native in langs]
     assert "en" in codes
     assert len(codes) == len(set(codes)) == 14
-    assert i18n.is_supported("fr") and not i18n.is_supported("zz")
-    assert i18n.is_supported("ur") and i18n.is_rtl("ur")
+    assert "fr" in codes and "zz" not in codes
+    assert "ur" in codes and i18n.is_rtl("ur")
 
 
 def test_every_catalog_is_wellformed_and_keeps_placeholders():

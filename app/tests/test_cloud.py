@@ -62,7 +62,6 @@ def test_box_static_passthrough_but_share_page_declined():
 def test_non_cloud_urls_are_ignored():
     assert cloudlinks.direct_download_url("https://example.com/file.zip") is None
     assert cloudlinks.direct_download_url("ftp://host/file") is None
-    assert not cloudlinks.is_cloud_share("https://example.com/x")
 
 
 # --------------------------------------------------------------- resolver

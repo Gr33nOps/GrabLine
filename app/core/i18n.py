@@ -60,10 +60,6 @@ def available_languages() -> tuple[tuple[str, str, str], ...]:
     return LANGUAGES
 
 
-def is_supported(code: str) -> bool:
-    return code in _CODES
-
-
 def current_language() -> str:
     return _current
 

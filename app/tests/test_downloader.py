@@ -124,6 +124,55 @@ def test_gated_download_without_cookie_fails(server: MediaServer, db: Database, 
     assert not (dest / "gated.bin").exists()
 
 
+def test_download_sends_default_browser_ua_and_referer(
+    server: MediaServer, db: Database, dest: Path
+):
+    """A plain paste (no browser handoff) still goes out looking like a browser:
+    a real User-Agent and a same-origin Referer. httpx's own UA and a missing
+    Referer are what bot/hotlink filters answer with 403 - the reported bug."""
+    from app.core import net
+
+    data = payload(512 * 1024, 3)
+    url = server.add("/plain.bin", data)
+    job = db.create_job(url, str(dest), "plain.bin")
+
+    assert SegmentedDownload(db, job, connections=4).run() is JobStatus.COMPLETED
+    sent = server.received_headers("/plain.bin")
+    assert sent["user-agent"] == net.DEFAULT_USER_AGENT
+    assert sent["referer"] == net.default_referer(url)
+
+
+def test_download_clears_hotlink_403_with_default_referer(
+    server: MediaServer, db: Database, dest: Path
+):
+    """End to end: a server that 403s without a same-origin Referer now
+    downloads on a plain paste, because the downloader sends one by default."""
+    from app.core import net
+
+    data = payload(512 * 1024, 4)
+    ref = net.default_referer(server.url("/hotlink.bin"))
+    url = server.add("/hotlink.bin", data, required_headers={"Referer": ref})
+    job = db.create_job(url, str(dest), "hotlink.bin")
+
+    assert SegmentedDownload(db, job, connections=4).run() is JobStatus.COMPLETED
+    assert sha256_file(dest / "hotlink.bin") == sha256(data)
+
+
+def test_handoff_referer_overrides_default(server: MediaServer, db: Database, dest: Path):
+    """A real Referer from the browser handoff wins over the same-origin default,
+    so a CDN that checks Referer against the *page* still gets the right one."""
+    data = payload(256 * 1024, 6)
+    url = server.add("/watch.bin", data, required_headers={"Referer": "https://site.example/watch"})
+    job = db.create_job(url, str(dest), "watch.bin")
+
+    status = SegmentedDownload(
+        db, job, connections=4, headers={"Referer": "https://site.example/watch"}
+    ).run()
+
+    assert status is JobStatus.COMPLETED
+    assert server.received_headers("/watch.bin")["referer"] == "https://site.example/watch"
+
+
 def test_single_connection_fallback_when_no_ranges(server: MediaServer, db: Database, dest: Path):
     data = payload(1 * MB, 11)
     url = server.add("/legacy.bin", data, supports_ranges=False)

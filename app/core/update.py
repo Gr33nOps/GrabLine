@@ -6,6 +6,7 @@ private or offline, it simply returns None and nothing happens.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import threading
@@ -109,15 +110,6 @@ def latest_release(proxy: str | None = None) -> tuple[str, str] | None:
     return (tag, url) if tag else None
 
 
-def check_for_update(proxy: str | None = None) -> tuple[str, str] | None:
-    """Return (tag, url) when a newer release exists, else None."""
-    latest = latest_release(proxy)
-    if latest is None:
-        return None
-    tag, url = latest
-    return (tag, url) if is_newer(tag, __version__) else None
-
-
 #: Where the "Download update" fallback points: the website's download
 #: section, which always links the current installers.
 WEBSITE_DOWNLOAD_URL = "https://gr33nops.github.io/GrabLine/#download"
@@ -154,15 +146,30 @@ def _asset_rank(name: str, platform: str) -> int:
     return 1
 
 
+def _asset_digest(asset: dict[str, Any]) -> str | None:
+    """The lowercase SHA-256 hex GitHub publishes for a release asset, or None.
+
+    GitHub returns it as ``"sha256:<hex>"`` in the ``digest`` field. Only sha256
+    is understood; anything else (or a missing field, on older releases) yields
+    None, and the download then falls back to HTTPS-to-GitHub as its only
+    integrity guarantee."""
+    raw = asset.get("digest")
+    if not isinstance(raw, str) or not raw.lower().startswith("sha256:"):
+        return None
+    hex_part = raw.split(":", 1)[1].strip().lower()
+    return hex_part if re.fullmatch(r"[0-9a-f]{64}", hex_part) else None
+
+
 def installer_update(
     proxy: str | None = None, platform: str | None = None
-) -> tuple[str, str, str, int] | None:
-    """(tag, asset name, download URL, size) of this platform's installer for a
-    newer release, or None when already up to date / no matching asset.
+) -> tuple[str, str, str, int, str | None] | None:
+    """(tag, asset name, download URL, size, sha256) of this platform's installer
+    for a newer release, or None when already up to date / no matching asset.
 
-    ``size`` is the GitHub asset byte length (0 when unknown). Network failures
-    raise :class:`DownloadError` so the UI's failed handler runs (instead of
-    the 'you have the latest version' notice)."""
+    ``size`` is the GitHub asset byte length (0 when unknown); ``sha256`` is the
+    asset's published checksum (None when the release predates digest publishing).
+    Network failures raise :class:`DownloadError` so the UI's failed handler runs
+    (instead of the 'you have the latest version' notice)."""
     import sys
 
     platform = platform or sys.platform
@@ -181,7 +188,7 @@ def installer_update(
         if name and url and _asset_matches(name, platform):
             raw_size = asset.get("size")
             size = int(raw_size) if isinstance(raw_size, int) and raw_size > 0 else 0
-            return (tag, name, url, size)
+            return (tag, name, url, size, _asset_digest(asset))
     # Newer tag exists but this platform's installer is missing (e.g. the
     # macOS job failed) - still an error the user should see, not "up to date".
     raise DownloadError(f"GrabLine {tag} is out, but no installer for this system is attached yet")
@@ -189,6 +196,34 @@ def installer_update(
 
 def _ua() -> dict[str, str]:
     return {"User-Agent": _API_HEADERS["User-Agent"]}
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _verify_digest(target: Path, expected_sha256: str | None) -> None:
+    """Raise :class:`DownloadError` (and delete the file) when it doesn't match.
+
+    The installers are unsigned, so this checksum is the one thing standing
+    between a tampered or truncated download and the user double-clicking it.
+    ``expected_sha256`` None means GitHub published no digest for this asset -
+    there is nothing to check against, and HTTPS-to-GitHub is the only integrity
+    we then have.
+    """
+    if not expected_sha256:
+        return
+    actual = _sha256_file(target)
+    if actual != expected_sha256.lower():
+        target.unlink(missing_ok=True)
+        raise DownloadError(
+            "the downloaded update did not match its published checksum and was "
+            "discarded. Download it from the website instead, to be safe"
+        )
 
 
 def _emit(
@@ -340,6 +375,7 @@ def download_installer(
     progress: object = None,
     cancel: threading.Event | None = None,
     expected_size: int | None = None,
+    expected_sha256: str | None = None,
 ) -> str:
     """Stream the installer to ``dest_dir`` and return its path. ``progress`` is
     an optional callable(received_bytes, total_bytes_or_None).
@@ -348,6 +384,10 @@ def download_installer(
     a 100MB+ AppImage/Setup does not crawl on one pipe. Pass a ``cancel`` event
     to make the download interruptible: it is checked once per chunk, and when
     set the partial file is removed and :class:`UpdateCancelled` is raised.
+
+    ``expected_sha256`` (GitHub's published asset digest) is verified before the
+    path is returned: a mismatch deletes the file and raises, so the caller never
+    opens a tampered or truncated - and unsigned - installer.
     """
     progress_cb: ProgressCallback | None = progress if callable(progress) else None
     target = Path(dest_dir) / filename
@@ -382,6 +422,10 @@ def download_installer(
                         _download_single(client, url, target, total, progress_cb, cancel)
                 else:
                     _download_single(client, url, target, hint, progress_cb, cancel)
+            # Integrity gate: a mismatch raises here and is caught below like any
+            # other download failure, so the retry gets a fresh copy before the
+            # loop gives up for good.
+            _verify_digest(target, expected_sha256)
             return str(target)
         except UpdateCancelled:
             target.unlink(missing_ok=True)

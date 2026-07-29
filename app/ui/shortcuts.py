@@ -171,11 +171,6 @@ class ShortcutManager:
         self._list_widget = list_widget
         self._live: list[QShortcut] = []
 
-    @property
-    def action_ids(self) -> set[str]:
-        """The ids the window supplied a handler for."""
-        return set(self._actions)
-
     def effective(self) -> dict[str, str]:
         """Merged defaults + user overrides, canonicalized: ``{id: sequence}``.
         A stored "" means the user unbound that action."""

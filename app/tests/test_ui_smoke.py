@@ -314,7 +314,8 @@ def test_main_window_sidebar_is_pure_navigation(db: Database, tmp_path: Path):
         assert not hasattr(window, "_overflow_menu")
         assert not hasattr(window, "_tools_view")
         window._switch_view("settings")
-        assert window._pages.currentWidget() is window._settings_view
+        assert window._page_index.get("settings") is not None
+        assert window._pages.currentIndex() == window._page_index["settings"]
     finally:
         manager.shutdown()
 
@@ -557,23 +558,12 @@ def test_cloud_account_editor_builds_account(db: Database):
     assert secret == "s3cret"
 
 
-def test_queue_editor_roundtrip_and_cycle_guard(db: Database, tmp_path: Path):
+def test_queue_cycle_guard(db: Database):
     from app.core.models import Queue
-    from app.ui.queue_dialog import _QueueEditor, _would_cycle
+    from app.ui.queue_view import _would_cycle
 
-    _qapp()
     a = db.create_queue("A")
     b = db.create_queue("B")
-    queues = {q.id: q for q in db.list_queues()}
-
-    editor = _QueueEditor(a, list(queues.values()))
-    editor.name_edit.setText("Movies")
-    editor.concurrent_spin.setValue(1)  # sequential mode
-    editor.category_combo.setCurrentIndex(editor.category_combo.findData("Video"))
-    editor.depends_combo.setCurrentIndex(editor.depends_combo.findData(b.id))
-    result = editor.result_queue()
-    assert result.name == "Movies" and result.max_concurrent == 1
-    assert result.category == "Video" and result.depends_on == b.id
 
     # Cycle detection: A -> B -> A would deadlock.
     db.update_queue(Queue(id=b.id, name="B", position=b.position, depends_on=a.id))
@@ -620,23 +610,6 @@ def test_inspector_render_sections(db: Database):
 
     unreachable = InspectionReport(url="x", final_url="x", reachable=False, error="boom")
     assert "boom" in _render(unreachable)
-
-
-def test_dashboard_dialog_populates(db: Database):
-    from app.core.manager import DownloadManager
-    from app.ui.dashboard import DashboardDialog
-
-    _qapp()
-    db.record_download("Video", "cdn.example.com", 1234)
-    manager = DownloadManager(db, max_concurrent=0)
-    try:
-        dialog = DashboardDialog(manager)  # _tick runs once in __init__
-        assert dialog._tiles["lifetime"].value.text() != ""
-        assert dialog.server_tree.topLevelItemCount() == 1
-        assert dialog.category_tree.topLevelItemCount() == 1
-        dialog.done(0)  # stops the timer cleanly
-    finally:
-        manager.shutdown()
 
 
 def test_time_graph_pushes_samples(db: Database):
@@ -1276,23 +1249,22 @@ def test_heavy_pages_are_built_on_first_visit(db: Database, tmp_path: Path):
         window.show()
         # Downloads and Dashboard exist up front (the dashboard samples history).
         assert set(window._page_index) == {"downloads", "dashboard"}
-        assert window._settings_view is None  # declared, but not built yet
+        assert "settings" not in window._page_index  # not built yet
 
         window._switch_view("settings")
-        assert window._pages.currentWidget() is window._settings_view
+        settings_page = window._pages.currentWidget()
         assert "settings" in window._page_index
 
         # Built once, then reused - switching away and back keeps the same page
         # (and any half-typed field on it).
-        built = window._settings_view
         window._switch_view("downloads")
         window._switch_view("settings")
-        assert window._settings_view is built
+        assert window._pages.currentWidget() is settings_page
 
         window._switch_view("queue")
-        assert window._pages.currentWidget() is window._queue_view
+        queue_page = window._pages.currentWidget()
         window._switch_view("nonsense")  # unknown key stays a no-op
-        assert window._pages.currentWidget() is window._queue_view
+        assert window._pages.currentWidget() is queue_page
     finally:
         manager.shutdown()
 
@@ -1359,9 +1331,7 @@ def test_add_download_dialog_fields_category_and_outcomes(db: Database):
         with_quality=True,
     )
     assert dialog.chosen_name() == "The Odyssey"
-    assert dialog.chosen_category() == "Video"
     assert dialog.chosen_directory() == str(Path("/home/u/Downloads/Video"))
-    assert dialog.chosen_quality() == "Best"
     assert dialog.outcome() is None
 
     # The save folder follows the category until the user edits it.
@@ -1386,7 +1356,7 @@ def test_add_download_dialog_file_has_no_quality(db: Database):
         download_dir=str(Path("/home/u/Downloads")),
         with_quality=False,
     )
-    assert dialog.chosen_quality() is None
+    assert dialog._quality is None
     assert not dialog.dont_ask_again()
 
 

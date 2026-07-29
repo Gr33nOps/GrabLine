@@ -192,6 +192,15 @@ class SegmentedDownload:
         self.job_limiter = job_limiter
         self.host_limiter = host_limiter
         self.fair_limiter = fair_limiter
+        # identity so the bytes on the wire are the bytes of the file (see the
+        # note on the client below), plus a same-origin Referer so hotlink
+        # protection lets a plain paste through. Browser-handoff headers (a real
+        # Referer/Cookie/User-Agent) go on last and win over these defaults.
+        request_headers: dict[str, str] = {"Accept-Encoding": "identity"}
+        referer = net.default_referer(job.url)
+        if referer:
+            request_headers["Referer"] = referer
+        request_headers.update(headers or {})
         self._client = net.build_client(
             proxy=proxy,
             bypass_hosts=bypass_hosts,
@@ -215,7 +224,7 @@ class SegmentedDownload:
             # transparent gzip, httpx decompresses while Content-Length and the
             # byte ranges still describe the compressed stream, which stitches
             # segments at wrong offsets and trips the final size check.
-            headers={"Accept-Encoding": "identity", **(headers or {})},
+            headers=request_headers,
         )
         self._checkpointer = _Checkpointer(db, checkpoint_interval)
         self._segments: list[Segment] = []

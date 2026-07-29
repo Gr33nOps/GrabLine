@@ -41,7 +41,7 @@ def test_summarize_video_and_audio():
     assert summary.vcodec == "H264" and summary.acodec == "AAC"
     assert summary.fps == 29.97 and summary.duration == 12.5
     assert summary.container == "MOV"  # first of the format family
-    assert summary.has_video
+    assert summary.vcodec is not None
 
 
 def test_summarize_audio_only():
@@ -51,7 +51,7 @@ def test_summarize_audio_only():
     }
     summary = _summarize(data)
     assert summary is not None
-    assert not summary.has_video
+    assert summary.vcodec is None
     assert summary.acodec == "MP3" and summary.width is None
 
 

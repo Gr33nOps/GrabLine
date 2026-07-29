@@ -35,11 +35,6 @@ _STATUS_LABEL = {
 }
 
 
-def _dim(hex_color: str, alpha: float) -> str:
-    c = QColor(hex_color)
-    return f"rgba({c.red()},{c.green()},{c.blue()},{alpha})"
-
-
 def role_label(text: str, role: str, *, size: int | None = None, bold: bool = False) -> QLabel:
     """A label whose *color* comes from the global stylesheet (``role`` -> a
     QLabel[role=...] rule), so it re-tints automatically on a theme swap. Size
@@ -154,6 +149,11 @@ class IconButton(QPushButton):
         # Every button explains itself on hover - icon-only ones especially.
         if tooltip or label:
             self.setToolTip(tooltip or label)
+        # Give assistive tech a real name: an icon-only button has no text for a
+        # screen reader to announce, so without this it reads as "button".
+        name = label or tooltip
+        if name:
+            self.setAccessibleName(name)
         self.setIconSize(QSize(16, 16))
         self.retint()
 
@@ -188,6 +188,9 @@ class SidebarButton(QPushButton):
         self._icon_name = icon_name
         self._active = False
         self.setToolTip(tooltip)
+        # Icon-only nav button: name it for screen readers (it otherwise reads
+        # as an unlabeled "button").
+        self.setAccessibleName(tooltip)
         self.setFixedSize(38, 38)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -375,13 +378,6 @@ def card_frame() -> QFrame:
     frame = QFrame()
     frame.setProperty("card", "true")
     return frame
-
-
-def hline() -> QFrame:
-    line = QFrame()
-    line.setFixedWidth(1)
-    line.setObjectName("Separator")
-    return line
 
 
 def app_logo(size: int = 28) -> QLabel:

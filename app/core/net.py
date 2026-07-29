@@ -23,6 +23,37 @@ log = logging.getLogger(__name__)
 PROXY_SCHEMES = ("http", "https", "socks5", "socks5h", "socks4", "socks4a")
 _SOCKS4 = ("socks4", "socks4a")
 
+#: The User-Agent every client sends when the caller supplies none. httpx's own
+#: default ("python-httpx/x.y") is a dead giveaway that a bot, not a browser, is
+#: asking - bot filters and hotlink protection answer it with 403, which is why
+#: a plainly-pasted link that carries no browser handoff so often "fails with
+#: HTTP 403". A download manager has to look like a browser by default. The
+#: browser extension still overrides this with the real UA it captured, and
+#: Settings -> Network lets a user pin their own.
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+
+def default_referer(url: str) -> str | None:
+    """A same-origin Referer (``scheme://host/``) for ``url``, or None when it
+    has no usable http(s) origin.
+
+    Hotlink protection commonly refuses a request whose Referer is missing or
+    points off-site; a Referer matching the file's own origin passes the usual
+    check without having to know the real page. It is a default only - a real
+    Referer from the browser handoff always wins over it.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    return f"{parts.scheme}://{parts.netloc}/"
+
+
 #: Dual-stacked host the v6 health probe handshakes against. It must be a
 #: destination the app actually talks to: v6 brokenness is per-route (peering,
 #: tunnels), so a generic anycast host can answer fine while this one's v6
@@ -185,32 +216,19 @@ def build_client(
         client_kwargs["transport"] = httpx.HTTPTransport(
             local_address="0.0.0.0", http2=bool(kwargs.pop("http2", False))
         )
-    if user_agent:
-        headers = dict(kwargs.pop("headers", None) or {})
-        headers.setdefault("User-Agent", user_agent)
-        kwargs["headers"] = headers
+    # Always present a browser-like User-Agent. A caller-supplied one (Settings
+    # -> Network) or a User-Agent already inside ``headers`` (the browser
+    # handoff's real UA) still wins via setdefault; only when neither exists do
+    # we fall back to DEFAULT_USER_AGENT instead of letting httpx announce
+    # itself as a bot and earn a 403.
+    headers = dict(kwargs.pop("headers", None) or {})
+    headers.setdefault("User-Agent", user_agent or DEFAULT_USER_AGENT)
+    kwargs["headers"] = headers
     return httpx.Client(**client_kwargs, **kwargs)
 
 
 #: Interface-name fragments that strongly suggest a VPN / tunnel is up.
 _VPN_HINTS = ("tun", "tap", "wg", "ppp", "utun", "ipsec", "nordlynx", "proton", "mullvad", "wintun")
-
-
-def detect_vpn() -> bool:
-    """True when a VPN-like network interface appears to be up. A heuristic -
-    it looks for tunnel adapters (WireGuard, OpenVPN, IKEv2, ...), so it is a
-    hint, not a guarantee. Never raises."""
-    try:
-        import psutil
-
-        stats = psutil.net_if_stats()
-    except Exception:  # pragma: no cover - no psutil / permissions
-        return False
-    for name, info in stats.items():
-        lowered = name.lower()
-        if getattr(info, "isup", False) and any(hint in lowered for hint in _VPN_HINTS):
-            return True
-    return False
 
 
 def active_vpn_interfaces() -> list[str]:
@@ -226,11 +244,3 @@ def active_vpn_interfaces() -> list[str]:
         for name, info in stats.items()
         if getattr(info, "isup", False) and any(h in name.lower() for h in _VPN_HINTS)
     ]
-
-
-def resolves(host: str) -> bool:  # pragma: no cover - trivial DNS probe
-    try:
-        socket.getaddrinfo(host, None)
-        return True
-    except OSError:
-        return False

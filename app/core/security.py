@@ -74,9 +74,6 @@ class SecurityReport:
     level: Risk = Risk.OK
     findings: list[str] = field(default_factory=list)
     checksums: dict[str, str] = field(default_factory=dict)
-    scanner: str = ""
-    scan_clean: bool | None = None  # None = not scanned
-    scan_detail: str = ""
     virustotal: reputation.VirusTotalResult | None = None
     executable: bool = False
     https: bool | None = None  # None = unknown / not http(s)
@@ -135,21 +132,17 @@ def check_file(
             # the rest of the advisory report - but it should leave a trace.
             log.debug("virus scan failed for %s: %s", path, exc)
             result = None
-        if result is not None:
-            report.scanner = result.scanner
-            report.scan_clean = result.clean
-            report.scan_detail = result.detail
-            if not result.clean:
-                detail = f" ({result.detail})" if result.detail else ""
-                report._raise(
-                    Risk.WARNING,
-                    t(
-                        "{scanner} flagged this file{detail}. Antivirus false "
-                        "positives happen. Decide based on where it came from.",
-                        scanner=result.scanner,
-                        detail=detail,
-                    ),
-                )
+        if result is not None and not result.clean:
+            detail = f" ({result.detail})" if result.detail else ""
+            report._raise(
+                Risk.WARNING,
+                t(
+                    "{scanner} flagged this file{detail}. Antivirus false "
+                    "positives happen. Decide based on where it came from.",
+                    scanner=result.scanner,
+                    detail=detail,
+                ),
+            )
 
     if virustotal_key:
         sha256 = report.checksums.get("sha256") or verify.hash_file(path, "sha256")
@@ -170,31 +163,3 @@ def check_file(
     if report.level is Risk.OK and not report.findings:
         report.findings.append(t("Nothing suspicious found."))
     return report
-
-
-@dataclass(frozen=True)
-class UrlAdvisory:
-    insecure_http: bool = False
-    threat: str = ""  # Safe Browsing threat type, if any
-
-    @property
-    def has_warning(self) -> bool:
-        return self.insecure_http or bool(self.threat)
-
-
-def check_url(
-    url: str,
-    *,
-    enforce_https: bool = False,
-    safebrowsing_key: str = "",
-    proxy: str | None = None,
-) -> UrlAdvisory:
-    """A pre-download advisory for a URL: plain-HTTP (if the user asked to be
-    warned) and a Safe Browsing match (if a key is configured). Advisory only -
-    the caller warns and lets the user proceed."""
-    scheme = urlsplit(url).scheme.lower()
-    insecure = enforce_https and scheme == "http"
-    threat = ""
-    if safebrowsing_key and scheme in ("http", "https"):
-        threat = reputation.safebrowsing_check(url, safebrowsing_key, proxy=proxy) or ""
-    return UrlAdvisory(insecure_http=insecure, threat=threat)

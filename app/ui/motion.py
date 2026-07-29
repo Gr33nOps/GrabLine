@@ -20,7 +20,6 @@ from PySide6.QtWidgets import QWidget
 
 from app.core.i18n import t
 from app.ui import theme
-from app.ui.format import human_bytes
 
 #: Animation frame rate. 30, not 60: nothing here moves fast enough for the
 #: difference to be visible - a progress bar eases over ~200ms and the graphs
@@ -425,6 +424,3 @@ class Sparkline(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPolyline(QPolygonF(pts))
         painter.end()
-
-    def human(self, bps: float) -> str:  # pragma: no cover - convenience
-        return f"{human_bytes(bps)}/s"

@@ -97,9 +97,13 @@ def _hls_variants(
     without it - the browser handoff already captured them, so they need to
     ride along into the manifest fetch, not just the direct-file probe.
     """
+    request_headers = dict(headers or {})
+    referer = net.default_referer(url)
+    if referer:
+        request_headers.setdefault("Referer", referer)
     try:
         with net.build_client(proxy=proxy, follow_redirects=True, http2=True, timeout=10) as client:
-            response = client.get(url, headers=headers)
+            response = client.get(url, headers=request_headers or None)
             if response.status_code != 200:
                 return ()
             return parse_master_playlist(response.text, str(response.url))
@@ -175,6 +179,10 @@ class Resolver:
             variants = _hls_variants(url, proxy, headers) if path.endswith(".m3u8") else ()
             return Resolution(url=url, kind=JobKind.HLS, variants=variants)
 
+        probe_headers = dict(headers or {})
+        referer = net.default_referer(url)
+        if referer:
+            probe_headers.setdefault("Referer", referer)
         try:
             with net.build_client(
                 proxy=proxy,
@@ -182,7 +190,7 @@ class Resolver:
                 http2=True,
                 timeout=httpx.Timeout(20.0, connect=10.0),
             ) as client:
-                result = probe(client, url, headers)
+                result = probe(client, url, probe_headers or None)
         except DownloadError as exc:
             return Resolution(
                 url=url,

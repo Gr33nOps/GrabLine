@@ -33,10 +33,6 @@ class MediaSummary:
     acodec: str | None = None
     container: str | None = None
 
-    @property
-    def has_video(self) -> bool:
-        return self.vcodec is not None or self.width is not None
-
 
 def ffprobe_for(ffmpeg: str) -> str | None:
     """The ffprobe binary that sits next to a resolved ffmpeg path, falling back

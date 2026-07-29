@@ -99,10 +99,6 @@ def direct_download_url(url: str) -> str | None:
     return None
 
 
-def is_cloud_share(url: str) -> bool:
-    return direct_download_url(url) is not None
-
-
 #: Services whose downloads need end-to-end decryption or a proprietary,
 #: client-secret OAuth flow an open-source app can't ship - we say so plainly
 #: instead of failing with a confusing HTML/parse error.

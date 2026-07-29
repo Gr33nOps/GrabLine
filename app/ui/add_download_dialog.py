@@ -157,14 +157,8 @@ class AddDownloadDialog(chrome.Dialog):
     def chosen_name(self) -> str:
         return self._name.text().strip()
 
-    def chosen_category(self) -> str:
-        return str(self._category.currentData())
-
     def chosen_directory(self) -> str:
         return self._directory.text().strip()
-
-    def chosen_quality(self) -> str | None:
-        return str(self._quality.currentData()) if self._quality is not None else None
 
     def dont_ask_again(self) -> bool:
         return self._dont_ask.isChecked()

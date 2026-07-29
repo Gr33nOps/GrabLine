@@ -49,7 +49,6 @@ class Palette:
     st_cancelled: str
     # advisory levels
     ok: str
-    caution: str
     warn: str
     # graph series
     g_dl: str
@@ -86,7 +85,6 @@ LIGHT = Palette(
     st_failed="#cf222e",
     st_cancelled="#8a8a8a",
     ok="#1f9d55",
-    caution="#d29922",
     warn="#cf222e",
     g_dl="#0170fd",
     g_ul="#db6d28",
@@ -122,7 +120,6 @@ DARK = Palette(
     st_failed="#f85149",
     st_cancelled="#6b7280",
     ok="#3fb950",
-    caution="#d29922",
     warn="#f85149",
     g_dl="#3d8dfd",
     g_ul="#db6d28",
@@ -134,8 +131,6 @@ DARK = Palette(
 
 # ---------------------------------------------------------------- scale
 
-#: 4pt spacing scale (px).
-SPACE = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24}
 RADIUS = {"sm": 4, "md": 6, "lg": 8, "pill": 999}
 #: Font point sizes. Body ~13px at 96dpi; Qt uses points, so keep modest.
 FONT = {"caption": 8, "small": 9, "body": 10, "h2": 11, "h1": 13, "display": 16}

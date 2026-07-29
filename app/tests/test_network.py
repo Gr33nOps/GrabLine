@@ -60,9 +60,9 @@ def test_direct_client_has_no_proxy_transport():
 # ------------------------------------------------------------------ vpn
 
 
-def test_detect_vpn_runs(monkeypatch: pytest.MonkeyPatch):
-    # Never raises, returns a bool; and picks up a faked tunnel interface.
-    assert isinstance(net.detect_vpn(), bool)
+def test_active_vpn_interfaces(monkeypatch: pytest.MonkeyPatch):
+    # Never raises, returns a list; and picks up a faked tunnel interface.
+    assert isinstance(net.active_vpn_interfaces(), list)
 
     class _Stat:
         isup = True
@@ -70,11 +70,10 @@ def test_detect_vpn_runs(monkeypatch: pytest.MonkeyPatch):
     import psutil
 
     monkeypatch.setattr(psutil, "net_if_stats", lambda: {"wg0": _Stat(), "eth0": _Stat()})
-    assert net.detect_vpn() is True
     assert net.active_vpn_interfaces() == ["wg0"]
 
     monkeypatch.setattr(psutil, "net_if_stats", lambda: {"eth0": _Stat()})
-    assert net.detect_vpn() is False
+    assert net.active_vpn_interfaces() == []
 
 
 # --------------------------------------------------------- torrent proxy
@@ -281,3 +280,33 @@ def test_redact_credentials_strips_userinfo():
     assert net.redact_credentials("socks5://host:1080") == "socks5://host:1080"
     assert net.redact_credentials("") == ""
     assert net.redact_credentials("http://host/@path") == "http://host/@path"
+
+
+# ---------------------------------------------- default browser UA + Referer
+
+
+def test_default_referer_is_same_origin():
+    assert net.default_referer("https://cdn.example/a/b/file.zip") == "https://cdn.example/"
+    assert net.default_referer("http://host:8080/x?y=1") == "http://host:8080/"
+    # No usable http(s) origin -> nothing to send.
+    assert net.default_referer("ftp://host/x") is None
+    assert net.default_referer("magnet:?xt=urn:btih:abc") is None
+    assert net.default_referer("not a url") is None
+
+
+def test_build_client_defaults_to_a_browser_user_agent():
+    # httpx's own "python-httpx/x.y" is exactly what bot filters 403; a client
+    # built with no UA must instead look like a browser.
+    with net.build_client() as client:
+        assert client.headers["user-agent"] == net.DEFAULT_USER_AGENT
+
+
+def test_build_client_explicit_user_agent_wins():
+    with net.build_client(user_agent="Pinned/1.0") as client:
+        assert client.headers["user-agent"] == "Pinned/1.0"
+
+
+def test_build_client_header_user_agent_wins_over_default():
+    # A User-Agent already in headers (the browser handoff's real UA) is kept.
+    with net.build_client(headers={"User-Agent": "Handoff/2.0"}) as client:
+        assert client.headers["user-agent"] == "Handoff/2.0"
