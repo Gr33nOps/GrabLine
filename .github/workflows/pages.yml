@@ -33,6 +33,24 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # Pre-fetch the latest release into a static file the page reads at
+      # runtime, instead of every visitor's browser calling the GitHub REST
+      # API directly. That endpoint's 60/hour anonymous limit is shared per
+      # IP - visitors behind one (an office, a university, mobile carrier
+      # NAT) would routinely exhaust it and fall back to a generic "Latest
+      # release" notice. One authenticated call here, once per release
+      # (main only moves on release), avoids that entirely.
+      - name: Fetch latest release info
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -sSL --fail \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+            | jq '{tag_name, assets: [.assets[] | {name, browser_download_url}]}' \
+            > website/latest.json
+          cat website/latest.json
       # Pages must be enabled once in Settings → Pages → Source: GitHub Actions.
       # GITHUB_TOKEN cannot create the site (Resource not accessible by integration).
       - uses: actions/configure-pages@v5

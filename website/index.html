@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://gr33nops.github.io/GrabLine/" />
     <meta name="theme-color" content="#07090e" />
     <link rel="icon" href="assets/favicon.png?v=6" />
-    <link rel="apple-touch-icon" href="assets/logo.png?v=6" />
+    <link rel="apple-touch-icon" href="assets/logo.png?v=7" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="GrabLine: free download manager" />
     <meta
@@ -19,6 +19,9 @@
       content="Free open source download manager with parallel connections, a browser companion, video quality picker, torrents and cloud support."
     />
     <meta property="og:image" content="https://gr33nops.github.io/GrabLine/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="GrabLine, a free open source download manager" />
     <meta property="og:url" content="https://gr33nops.github.io/GrabLine/" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="GrabLine: free download manager" />
@@ -37,7 +40,7 @@
         "description": "Free open source download manager with parallel connections, browser companion and video quality picker.",
         "url": "https://gr33nops.github.io/GrabLine/",
         "downloadUrl": "https://github.com/Gr33nOps/GrabLine/releases/latest",
-        "softwareVersion": "1.29.20",
+        "softwareVersion": "1.29.23",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "screenshot": [
@@ -49,13 +52,32 @@
         "author": { "@type": "Organization", "name": "GrabLine" }
       }
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Self-hosted (latin subset only - the site is English-only): no
+         third-party request to Google on every page load, and one less
+         external round trip before text can render. -->
+    <link rel="preload" href="assets/fonts/ibm-plex-sans-var.woff2" as="font" type="font/woff2" crossorigin />
     <style>
+      @font-face {
+        font-family: "IBM Plex Sans";
+        font-style: normal;
+        font-weight: 400 700;
+        font-display: swap;
+        src: url("assets/fonts/ibm-plex-sans-var.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "IBM Plex Mono";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("assets/fonts/ibm-plex-mono-400.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "IBM Plex Mono";
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("assets/fonts/ibm-plex-mono-500.woff2") format("woff2");
+      }
       :root {
         --bg: #07090e;
         --bg-2: #0c1018;
@@ -65,6 +87,11 @@
         --muted: #a4b0c4;
         --accent: #2563eb;
         --accent-2: #3b82f6;
+        /* Slightly darker than --accent-2: white text on --accent-2 itself is
+           only 3.68:1, below the 4.5:1 WCAG AA needs at this text size. Scoped
+           to the button hover only - --accent-2 stays as-is for its other
+           uses (focus ring, links, badge text), which already pass. */
+        --accent-hover: #2e6bee;
         --accent-ink: #ffffff;
         --sans: "IBM Plex Sans", system-ui, sans-serif;
         --mono: "IBM Plex Mono", ui-monospace, monospace;
@@ -188,13 +215,20 @@
         padding: 8px 10px;
         border-radius: 8px;
       }
-      .nav-links a:hover {
+      .nav-links a:not(.nav-cta):hover {
         color: var(--ink);
         background: color-mix(in srgb, var(--panel) 70%, transparent);
       }
-      .nav-cta {
+      /* The button lives inside .nav-links (so it flows after whatever the
+         last link is, on any screen size, with no positioning math needed) -
+         :not() above keeps the plain-link hover from touching it, and this
+         restores the padding the plain-link rule would otherwise set. */
+      .nav-links .nav-cta {
         flex-shrink: 0;
         margin-left: 6px;
+        padding: 0 18px;
+        font-size: 0.95rem;
+        font-weight: 600;
       }
       .nav-toggle {
         display: none;
@@ -230,7 +264,7 @@
         color: #ffffff !important;
       }
       .btn-primary:hover {
-        background: var(--accent-2);
+        background: var(--accent-hover);
         color: #ffffff !important;
       }
       .btn-ghost {
@@ -612,9 +646,6 @@
         .nav-links {
           display: none;
         }
-        .nav-cta {
-          display: none;
-        }
         .nav-toggle {
           display: inline-flex;
           align-items: center;
@@ -628,26 +659,25 @@
           right: 0;
           top: 60px;
           margin: 0;
-          padding: 12px 20px 8px;
+          padding: 12px 20px 16px;
           background: color-mix(in srgb, var(--bg) 96%, transparent);
           border-bottom: 1px solid var(--line);
           backdrop-filter: blur(14px);
           gap: 2px;
         }
-        .nav.open .nav-links a {
+        .nav.open .nav-links a:not(.nav-cta) {
           padding: 12px 10px;
         }
-        .nav.open .nav-cta {
+        /* Flows right after whatever the last link is - no pixel math tied to
+           a specific link count or height, unlike the absolute-positioned
+           overlay this replaced. */
+        .nav.open .nav-links .nav-cta {
           display: flex;
-          position: absolute;
-          left: 20px;
-          right: 20px;
-          top: calc(60px + 12px + 8 * 44px + 8px);
-          margin: 0 0 16px;
+          margin: 10px 0 0;
           justify-content: center;
         }
         .nav.open {
-          padding-bottom: 72px;
+          padding-bottom: 16px;
         }
         .hero-inner,
         .split,
@@ -701,7 +731,7 @@
     <div class="site">
       <nav class="nav" id="nav">
         <div class="wrap nav-inner">
-          <a class="brand" href="#top" aria-label="GrabLine"><img src="assets/logo.png?v=6" alt="" /><span aria-hidden="true">Grab<span class="line">Line</span></span></a>
+          <a class="brand" href="#top" aria-label="GrabLine"><img src="assets/logo.png?v=7" width="28" height="28" alt="" /><span aria-hidden="true">Grab<span class="line">Line</span></span></a>
           <button class="nav-toggle" type="button" id="navToggle" aria-expanded="false" aria-controls="navLinks">
             Menu
           </button>
@@ -712,10 +742,11 @@
             <a href="#features">Features</a>
             <a href="#download">Download</a>
             <a href="#support">Support</a>
+            <a href="#limits">Limits</a>
             <a href="#faq">FAQ</a>
-            <a href="https://github.com/Gr33nOps/GrabLine">GitHub</a>
+            <a href="https://github.com/Gr33nOps/GrabLine" target="_blank" rel="noopener">GitHub</a>
+            <a class="btn btn-primary nav-cta" id="navDownload" href="#download">Download</a>
           </div>
-          <a class="btn btn-primary nav-cta" id="navDownload" href="#download">Download</a>
         </div>
       </nav>
 
@@ -724,7 +755,7 @@
           <div class="wrap hero-inner">
             <div class="hero-copy">
               <div class="hero-brand">
-                <img src="assets/logo.png?v=6" width="48" height="48" alt="" />
+                <img src="assets/logo.png?v=7" width="48" height="48" alt="" />
                 <strong>Grab<span class="line">Line</span></strong>
               </div>
               <h1>Free download manager for Windows, macOS and Linux</h1>
@@ -735,7 +766,7 @@
               </p>
               <div class="cta-row">
                 <a class="btn btn-primary" id="heroDownload" href="#download">Download for your system</a>
-                <a class="btn btn-ghost" href="https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/">Firefox add on</a>
+                <a class="btn btn-ghost" href="https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/" target="_blank" rel="noopener">Firefox add on</a>
               </div>
               <p class="meta"><span id="heroVersion">Latest release</span> · Windows · macOS · Linux · AGPL 3.0</p>
             </div>
@@ -887,8 +918,8 @@
                 <span class="os">Windows</span>
                 <span class="hint">Setup installer, or a portable zip that runs without admin rights.</span>
                 <div class="actions">
-                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest">Installer</a>
-                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest">Portable zip</a>
+                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">Installer</a>
+                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">Portable zip</a>
                 </div>
               </div>
               <div class="plat" data-os="mac">
@@ -896,8 +927,8 @@
                 <span class="os">macOS</span>
                 <span class="hint">Apple Silicon (M1 and later). Open the DMG and drag GrabLine to Applications.</span>
                 <div class="actions">
-                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest">Apple Silicon DMG</a>
-                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest">All releases</a>
+                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">Apple Silicon DMG</a>
+                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">All releases</a>
                 </div>
               </div>
               <div class="plat" data-os="linux">
@@ -905,19 +936,19 @@
                 <span class="os">Linux</span>
                 <span class="hint">AppImage for most distributions. DEB for Debian, Ubuntu and Mint.</span>
                 <div class="actions">
-                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest">AppImage</a>
-                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest">DEB package</a>
+                  <a class="btn btn-primary btn-block" data-dl href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">AppImage</a>
+                  <a class="btn btn-ghost btn-block" data-dl-alt href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener">DEB package</a>
                 </div>
               </div>
             </div>
             <p class="note">
               Builds are unsigned, so the OS may ask for confirmation once. On Windows choose <b>More info</b> then <b>Run anyway</b>.
               On macOS <b>right click</b> then <b>Open</b>. On Linux without FUSE, use the
-              <a id="tarballLink" href="https://github.com/Gr33nOps/GrabLine/releases/latest"><b>tar.gz</b></a>.
+              <a id="tarballLink" href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener"><b>tar.gz</b></a>.
               See the
-              <a href="https://github.com/Gr33nOps/GrabLine/blob/main/docs/install.md">install guide</a>
+              <a href="https://github.com/Gr33nOps/GrabLine/blob/main/docs/install.md" target="_blank" rel="noopener">install guide</a>
               ·
-              <a href="https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/">Firefox add on</a>
+              <a href="https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/" target="_blank" rel="noopener">Firefox add on</a>
             </p>
           </div>
         </section>
@@ -935,8 +966,8 @@
                 on Ko-fi really helps keep updates coming.
               </p>
               <div class="cta-row">
-                <a class="btn btn-primary" href="https://ko-fi.com/zain021xd">Buy me a coffee</a>
-                <a class="btn btn-ghost" href="https://github.com/Gr33nOps/GrabLine">Star on GitHub</a>
+                <a class="btn btn-primary" href="https://ko-fi.com/zain021xd" target="_blank" rel="noopener">Buy me a coffee</a>
+                <a class="btn btn-ghost" href="https://github.com/Gr33nOps/GrabLine" target="_blank" rel="noopener">Star on GitHub</a>
               </div>
             </div>
           </div>
@@ -998,7 +1029,7 @@
             </details>
             <details class="qa">
               <summary>Is GrabLine free?</summary>
-              <p>Yes. AGPL 3.0, no paid tier and no trial. Source is on GitHub if you want to build it yourself. It is built in spare time with no ads and no telemetry. If GrabLine helps you, <a href="https://ko-fi.com/zain021xd">a coffee on Ko-fi</a> goes a long way.</p>
+              <p>Yes. AGPL 3.0, no paid tier and no trial. Source is on GitHub if you want to build it yourself. It is built in spare time with no ads and no telemetry. If GrabLine helps you, <a href="https://ko-fi.com/zain021xd" target="_blank" rel="noopener">a coffee on Ko-fi</a> goes a long way.</p>
             </details>
           </div>
         </section>
@@ -1006,28 +1037,25 @@
 
       <footer>
         <div class="wrap foot-inner">
-          <a class="brand" href="#top" aria-label="GrabLine"><img src="assets/logo.png?v=6" alt="" /><span aria-hidden="true">Grab<span class="line">Line</span></span></a>
+          <a class="brand" href="#top" aria-label="GrabLine"><img src="assets/logo.png?v=7" width="28" height="28" alt="" /><span aria-hidden="true">Grab<span class="line">Line</span></span></a>
           <span>Free · open source · AGPL 3.0</span>
           <div class="foot-links">
-            <a href="https://github.com/Gr33nOps/GrabLine">GitHub</a>
-            <a href="https://github.com/Gr33nOps/GrabLine/releases">Releases</a>
-            <a href="https://ko-fi.com/zain021xd">Buy me a coffee</a>
-            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/docs/install.md">Install</a>
-            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/SECURITY.md">Security</a>
-            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/PRIVACY.md">Privacy</a>
-            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/LICENSE">License</a>
+            <a href="https://github.com/Gr33nOps/GrabLine" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/releases" target="_blank" rel="noopener">Releases</a>
+            <a href="https://ko-fi.com/zain021xd" target="_blank" rel="noopener">Buy me a coffee</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/docs/install.md" target="_blank" rel="noopener">Install</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/SECURITY.md" target="_blank" rel="noopener">Security</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy</a>
+            <a href="https://github.com/Gr33nOps/GrabLine/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
           </div>
         </div>
       </footer>
     </div>
 
     <script>
-      const REPO = "Gr33nOps/GrabLine";
-
       const nav = document.getElementById("nav");
       const navToggle = document.getElementById("navToggle");
       const navLinks = document.getElementById("navLinks");
-      const navDownload = document.getElementById("navDownload");
       if (navToggle && nav) {
         navToggle.addEventListener("click", () => {
           const open = nav.classList.toggle("open");
@@ -1039,10 +1067,15 @@
           navToggle.setAttribute("aria-expanded", "false");
           navToggle.textContent = "Menu";
         };
+        // The Download button now lives inside #navLinks (it flows after the
+        // last link instead of being a separately positioned overlay), so this
+        // one listener covers every link and the button.
         if (navLinks) {
           navLinks.querySelectorAll("a").forEach((a) => a.addEventListener("click", closeNav));
         }
-        if (navDownload) navDownload.addEventListener("click", closeNav);
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && nav.classList.contains("open")) closeNav();
+        });
       }
 
       function detectOS() {
@@ -1076,9 +1109,13 @@
         return null;
       }
 
-      fetch("https://api.github.com/repos/" + REPO + "/releases/latest", {
-        headers: { Accept: "application/vnd.github+json" },
-      })
+      // A static file generated once per release by the Pages deploy workflow
+      // (see .github/workflows/pages.yml), not a live call to the GitHub API
+      // from every visitor's browser - that endpoint's 60/hour anonymous rate
+      // limit is shared per IP, so a shared connection (office, campus,
+      // mobile carrier NAT) would routinely exhaust it and fall back to the
+      // generic notice below for every visitor behind it.
+      fetch("latest.json")
         .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
         .then((rel) => {
           const assets = rel.assets || [];
