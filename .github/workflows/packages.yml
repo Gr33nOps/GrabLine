@@ -1,0 +1,110 @@
+name: Packages
+
+# Publishes a small GHCR image linked to this repo so the Packages sidebar is
+# populated. Real installers stay on GitHub Releases (not duplicated into GHCR).
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: packages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve image tags
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            if [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
+              TAG="v${{ github.ref_name }}"
+              # Fall back to reading version from this commit when no release yet.
+              VER="$(curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/app/__init__.py" \
+                | sed -n 's/^__version__ = \"\(.*\)\"/\1/p' || true)"
+              if [ -n "${VER}" ]; then
+                TAG="v${VER}"
+              fi
+            fi
+          fi
+          V="${TAG#v}"
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "tag=${TAG}"
+            echo "version=${V}"
+            echo "owner=${OWNER}"
+            # Avoid colliding with a leftover "grabline" package from the old repo.
+            echo "image=ghcr.io/${OWNER}/grabline-app"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing ghcr.io/${OWNER}/grabline-app:${V}"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push package image
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.meta.outputs.image }}"
+          V="${{ steps.meta.outputs.version }}"
+          SRC="https://github.com/${{ github.repository }}"
+          mkdir -p pkg
+          cat > pkg/README.txt <<EOF
+          GrabLine ${V}
+
+          Installers: ${SRC}/releases
+          Website: https://gr33nops.github.io/GrabLine/
+          EOF
+          {
+            echo "FROM scratch"
+            echo "COPY README.txt /README.txt"
+          } > pkg/Dockerfile
+          docker build \
+            --label "org.opencontainers.image.source=${SRC}" \
+            --label "org.opencontainers.image.url=${SRC}" \
+            --label "org.opencontainers.image.version=${V}" \
+            --label "org.opencontainers.image.title=GrabLine" \
+            --label "org.opencontainers.image.description=GrabLine download manager" \
+            --label "org.opencontainers.image.licenses=AGPL-3.0-or-later" \
+            -t "${IMAGE}:${V}" \
+            -t "${IMAGE}:latest" \
+            pkg
+          docker push "${IMAGE}:${V}"
+          docker push "${IMAGE}:latest"
+          echo "Published ${IMAGE}:${V} and :latest"
+
+      - name: Prefer public package visibility
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OWNER="${{ steps.meta.outputs.owner }}"
+          gh api \
+            --method PUT \
+            -H "Accept: application/vnd.github+json" \
+            "/user/packages/container/grabline-app/visibility" \
+            -f visibility=public \
+          || gh api \
+            --method PUT \
+            -H "Accept: application/vnd.github+json" \
+            "/orgs/${OWNER}/packages/container/grabline-app/visibility" \
+            -f visibility=public \
+          || echo "Set package visibility to Public in Package settings if needed."
