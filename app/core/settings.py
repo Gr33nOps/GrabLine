@@ -832,13 +832,29 @@ class Settings:
 
     @property
     def confirm_downloads(self) -> bool:
-        """On = a browser download opens the Download Info dialog first (name,
-        category, save location, quality). Off = it starts immediately."""
+        """On = a plain browser file/stream download opens the Download Info
+        dialog first (name, category, save location). Off = it starts
+        immediately. Video quality is a separate setting (confirm_video_quality)
+        - this one no longer touches it, so turning off the name/folder prompt
+        can no longer silently take away the quality panel too."""
         return self._get_bool("confirm_downloads", True)
 
     @confirm_downloads.setter
     def confirm_downloads(self, value: bool) -> None:
         self._set_bool("confirm_downloads", value)
+
+    @property
+    def confirm_video_quality(self) -> bool:
+        """On = a browser video grab is analysed and offers the full quality
+        panel (formats, subtitles, trim) with the real title. Off = it queues
+        immediately at the default quality, no panel - the old behavior when
+        confirm_downloads was off, which also hid the quality panel with no way
+        to turn it back on separately."""
+        return self._get_bool("confirm_video_quality", True)
+
+    @confirm_video_quality.setter
+    def confirm_video_quality(self, value: bool) -> None:
+        self._set_bool("confirm_video_quality", value)
 
     # -------------------------------------------------------- downloads
 

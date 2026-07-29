@@ -1450,11 +1450,15 @@ class MainWindow(QMainWindow):
             is_stream = urlsplit(url).path.lower().endswith((".m3u8", ".mpd"))
 
         if is_video:
-            if self.settings.confirm_downloads:
+            if self.settings.confirm_video_quality:
                 # Analyse and show the full quality panel (formats, subtitles,
                 # trimming) with the real title - the flow the user asked to get
                 # back for YouTube. _resolve_and_queue with quality=None runs the
-                # extractor, then _on_resolved opens QualityPanel.
+                # extractor, then _on_resolved opens QualityPanel. Gated on its
+                # own setting - separate from confirm_downloads (the plain
+                # file/stream name+folder prompt) - so turning that one off to
+                # skip naming prompts can no longer also take away the quality
+                # panel with no way to get it back.
                 self._raise_to_front()
                 self._resolve_and_queue(url, page_title, None, fallbacks, headers)
             else:

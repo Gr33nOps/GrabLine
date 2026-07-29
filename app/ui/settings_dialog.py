@@ -370,7 +370,7 @@ class SettingsDialog(chrome.Dialog):
         self.confirm_exit_check = QCheckBox(t("Confirm exit while downloads are running"))
         general_form.addRow(self.confirm_exit_check)
         self.confirm_downloads_check = QCheckBox(
-            t("Ask for name, folder and quality before each browser download")
+            t("Ask for name and folder before each browser download")
         )
         general_form.addRow(self.confirm_downloads_check)
         self.new_dl_combo = QComboBox()
@@ -552,6 +552,17 @@ class SettingsDialog(chrome.Dialog):
         video_layout.addWidget(
             _note(
                 "Solves YouTube's JS challenge up front; can add minutes before a download begins."
+            )
+        )
+        self.confirm_video_quality_check = QCheckBox(
+            t("Show the quality panel for browser video downloads")
+        )
+        video_layout.addWidget(self.confirm_video_quality_check)
+        video_layout.addWidget(
+            _note(
+                "Off queues immediately at the default quality below, with no panel. "
+                "Separate from 'Ask for name and folder' in General - turning that off "
+                "no longer turns this off too."
             )
         )
         defaults_form = QFormLayout()
@@ -1504,6 +1515,7 @@ class SettingsDialog(chrome.Dialog):
         # Video downloader.
         self.playlist_cap_spin.setValue(s.playlist_batch_cap)
         self.hq_first_check.setChecked(s.video_hq_first)
+        self.confirm_video_quality_check.setChecked(s.confirm_video_quality)
         self.default_quality_combo.setCurrentText(s.video_default_quality)
         self.bitrate_combo.setCurrentIndex(max(0, self.bitrate_combo.findData(s.audio_bitrate)))
         self.cookies_edit.setText(s.cookies_file)
@@ -1675,6 +1687,7 @@ class SettingsDialog(chrome.Dialog):
         self.settings.rename_rules = _parse_rename_rules(self.rename_edit.toPlainText())
         self.settings.playlist_batch_cap = self.playlist_cap_spin.value()
         self.settings.video_hq_first = self.hq_first_check.isChecked()
+        self.settings.confirm_video_quality = self.confirm_video_quality_check.isChecked()
         self.settings.start_minimized = self.start_min_check.isChecked()
         self.settings.minimize_to_tray = self.tray_min_check.isChecked()
         self.settings.close_to_tray = self.tray_close_check.isChecked()

@@ -23,6 +23,10 @@ def test_defaults(db: Database, monkeypatch: pytest.MonkeyPatch):
     assert settings.connections == 8
     assert settings.fair_speed is True
     assert settings.ffmpeg_path is None
+    # Independent settings: turning off the plain-file name/folder prompt must
+    # not also default-off the video quality panel.
+    assert settings.confirm_downloads is True
+    assert settings.confirm_video_quality is True
 
 
 def test_session_browser_defaults_to_detected(db: Database, monkeypatch: pytest.MonkeyPatch):

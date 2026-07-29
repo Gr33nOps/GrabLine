@@ -1419,11 +1419,11 @@ def test_browser_grab_of_video_runs_analysis_for_the_full_panel(
 ):
     """A YouTube hover grab must analyse the URL (so the real title resolves and
     the full quality panel is shown) rather than the quick Download Info dialog -
-    the fix for 'watch' filenames and the missing settings popup on hover."""
+    the fix for 'watch' filenames and the missing settings popup on hover.
+    confirm_video_quality defaults to True, so no setting needs to be touched."""
     _qapp()
     settings = Settings(db)
     settings.download_dir = tmp_path
-    settings.confirm_downloads = True
     manager = DownloadManager(db, settings=settings, max_concurrent=0)
     try:
         window = MainWindow(manager, settings)
@@ -1440,6 +1440,65 @@ def test_browser_grab_of_video_runs_analysis_for_the_full_panel(
 
         # Routed to analysis with quality=None -> _on_resolved opens QualityPanel.
         assert seen == [(url, None)]
+    finally:
+        manager.shutdown()
+
+
+def test_video_quality_panel_survives_confirm_downloads_off(
+    db: Database, tmp_path: Path, monkeypatch
+):
+    """Turning off 'ask for name and folder' (confirm_downloads) must not also
+    silence the video quality panel - they are independent settings. Regression
+    test for the bug where a single checkbox controlled both."""
+    _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    settings.confirm_downloads = False  # off: skip the plain file name/folder prompt
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        window = MainWindow(manager, settings)
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        window.resolver.smart.matches(url)  # warm the extractor list synchronously
+
+        seen: list[object] = []
+        monkeypatch.setattr(
+            window,
+            "_resolve_and_queue",
+            lambda u, page_title, quality, *a, **k: seen.append((u, quality)),
+        )
+        window._browser_add(url, None, (), None)
+
+        # confirm_video_quality defaults to True regardless of confirm_downloads.
+        assert seen == [(url, None)]
+    finally:
+        manager.shutdown()
+
+
+def test_video_quality_panel_off_queues_at_default_quality(
+    db: Database, tmp_path: Path, monkeypatch
+):
+    """confirm_video_quality off queues immediately at the default quality with
+    no panel - independent of confirm_downloads, which stays on here."""
+    _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    settings.confirm_video_quality = False
+    settings.video_default_quality = "720p"
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        window = MainWindow(manager, settings)
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        window.resolver.smart.matches(url)  # warm the extractor list synchronously
+
+        seen: list[object] = []
+        monkeypatch.setattr(
+            window,
+            "_resolve_and_queue",
+            lambda u, page_title, quality, *a, **k: seen.append((u, quality)),
+        )
+        window._browser_add(url, None, (), None)
+
+        assert seen == [(url, "720p")]
     finally:
         manager.shutdown()
 
