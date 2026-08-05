@@ -597,6 +597,92 @@ def test_a_retryable_status_retries_instead_of_killing_the_job(
     assert sha256_file(dest / "flaky.bin") == sha256(data)
 
 
+def test_mid_download_403_narrows_connections_instead_of_failing(
+    server: MediaServer, db: Database, dest: Path
+):
+    """A host that serves the first segments and then starts answering 403 is
+    rate limiting the parallelism, not refusing the file.
+
+    The reported bug: it burned five retries at full width, raised
+    DownloadError, and threw away a download that was already 72% done. The
+    fix narrows the pool and finishes the job.
+    """
+    data = payload(2 * MB, 91)
+    # Requests 4..9 are refused: enough to outlast the plain retry budget at
+    # the original width, so only backing off can get through this.
+    url = server.add("/limited.bin", data, fail_status=403, fail_from=4, fail_until=9)
+    job = db.create_job(url, str(dest), "limited.bin")
+
+    download = SegmentedDownload(db, job, connections=8, retry_backoff=0.01)
+    status = download.run()
+
+    assert status is JobStatus.COMPLETED
+    assert sha256_file(dest / "limited.bin") == sha256(data)
+    # It learned to use fewer connections rather than giving up.
+    assert download._connection_ceiling is not None
+    assert download._connection_ceiling < 8
+
+
+def test_rate_limit_ceiling_is_remembered_for_the_next_run(
+    server: MediaServer, db: Database, dest: Path
+):
+    """The tolerated connection count is stored on the job, so a retry (or the
+    next run) starts there instead of tripping the same block again."""
+    data = payload(2 * MB, 92)
+    url = server.add("/limited.bin", data, fail_status=403, fail_from=4, fail_until=9)
+    job = db.create_job(url, str(dest), "limited.bin")
+
+    download = SegmentedDownload(db, job, connections=8, retry_backoff=0.01)
+    assert download.run() is JobStatus.COMPLETED
+
+    stored = db.get_job(job.id)
+    assert stored is not None
+    learned = int(stored.options.get("learned_connections") or 0)
+    assert 0 < learned < 8
+
+
+def test_a_hard_403_on_every_request_still_fails_as_rate_limiting(
+    server: MediaServer, db: Database, dest: Path
+):
+    """When even one connection is refused, the job does fail - but with the
+    marker that makes the manager treat it as transient and retry, rather than
+    the bare "HTTP 403" that reads as permanent and strands it forever."""
+    from app.core.downloader import RATE_LIMIT_MARKER
+    from app.core.manager import _is_transient_error
+
+    data = payload(512 * 1024, 93)
+    url = server.add("/blocked.bin", data, fail_status=403, fail_from=2, fail_until=10_000)
+    job = db.create_job(url, str(dest), "blocked.bin")
+
+    status = SegmentedDownload(
+        db, job, connections=4, retry_backoff=0.01, max_pushback_retries=2
+    ).run()
+
+    assert status is JobStatus.FAILED
+    failed = db.get_job(job.id)
+    assert failed is not None and failed.error is not None
+    assert RATE_LIMIT_MARKER in failed.error
+    assert _is_transient_error(failed.error)  # so the manager schedules a retry
+
+
+def test_retry_after_header_is_honored(server: MediaServer, db: Database, dest: Path):
+    """A server that says when to come back is obeyed, instead of the download
+    guessing its own backoff."""
+    import httpx
+
+    from app.core.downloader import _retry_after_seconds
+
+    assert _retry_after_seconds(httpx.Headers({"retry-after": "5"})) == 5.0
+    # Clamped: a huge value must not park the download for hours.
+    assert _retry_after_seconds(httpx.Headers({"retry-after": "99999"})) == 60.0
+    # Absent or unparsable -> fall back to our own backoff.
+    assert _retry_after_seconds(httpx.Headers({})) is None
+    assert _retry_after_seconds(httpx.Headers({"retry-after": "soon"})) is None
+    # HTTP-date form resolves to a delay, never a negative one.
+    past = _retry_after_seconds(httpx.Headers({"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"}))
+    assert past == 0.0
+
+
 def test_segments_are_requested_without_compression(server: MediaServer, db: Database, dest: Path):
     """identity only: httpx would transparently decompress a gzipped response
     while Content-Length and every byte offset still described the compressed

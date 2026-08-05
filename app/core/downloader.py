@@ -21,6 +21,8 @@ import re
 import shutil
 import threading
 from collections.abc import Callable
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from enum import Enum
 from pathlib import Path
 from typing import IO
@@ -45,6 +47,23 @@ DEFAULT_CHUNK_SIZE = 64 * 1024
 #: (re-signed) URL usually cures.
 _RETRYABLE_STATUS = frozenset({403, 408, 409, 425, 429, 500, 502, 503, 504})
 
+#: The subset that means "you are asking for too much at once". A host that
+#: served the first segments happily and then starts answering these is rate
+#: limiting the *parallelism*, not refusing the file - retrying the same way
+#: just burns the retry budget, so these halve the connection count instead.
+#: 403 belongs here because most CDNs use it (not 429) to shed excess range
+#: requests; a genuinely forbidden URL fails on its very first segment, before
+#: any progress, and still ends up failing the job.
+_PUSHBACK_STATUS = frozenset({403, 429, 503})
+
+#: Phrase in the failure message when a download died to rate limiting. The
+#: manager keys its auto-retry off this (see _TRANSIENT_OVERRIDES): the plain
+#: "HTTP 4xx" text alone reads as permanent and would strand the job.
+RATE_LIMIT_MARKER = "rate limiting"
+
+#: Never wait longer than this on a Retry-After, however large it says.
+_MAX_RETRY_AFTER = 60.0
+
 _CONTENT_RANGE_START = re.compile(r"\s*bytes\s+(\d+)-")
 
 
@@ -57,6 +76,36 @@ class StopReason(Enum):
 
 class _Retry(Exception):
     """Internal: the current attempt failed but the segment may be retried."""
+
+
+class _Pushback(_Retry):
+    """The server refused this request the way a rate limiter does. Carries the
+    server's own Retry-After delay when it sent one."""
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _retry_after_seconds(headers: httpx.Headers) -> float | None:
+    """The server's own Retry-After as seconds, or None when it didn't send a
+    usable one. Both RFC forms are accepted (a delay in seconds, or an HTTP
+    date), clamped so a wildly large value can't park a download for hours."""
+    raw = (headers.get("retry-after") or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, min(float(raw), _MAX_RETRY_AFTER))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:  # a date without a zone is UTC per RFC 9110
+        when = when.replace(tzinfo=UTC)
+    delay = (when - datetime.now(UTC)).total_seconds()
+    return max(0.0, min(delay, _MAX_RETRY_AFTER))
 
 
 def _reserve_space(handle: IO[bytes], total: int) -> bool:
@@ -158,6 +207,10 @@ class SegmentedDownload:
         connections: int = DEFAULT_CONNECTIONS,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         max_retries: int = 5,
+        # A rate-limited segment gets a bigger, slower budget than a plain
+        # network blip: the server is telling us to wait, and the download is
+        # usually most of the way done by the time it starts saying so.
+        max_pushback_retries: int = 8,
         retry_backoff: float = 0.25,
         checkpoint_interval: float = 0.3,
         limiter: RateLimiter | None = None,
@@ -176,6 +229,7 @@ class SegmentedDownload:
         self.connections = connections
         self.chunk_size = chunk_size
         self.max_retries = max_retries
+        self.max_pushback_retries = max_pushback_retries
         self.retry_backoff = retry_backoff
         self.limiter = limiter
         # How many connections this download may run *right now*. With several
@@ -243,6 +297,12 @@ class SegmentedDownload:
         self._active_workers = 0
         self._pool: list[threading.Thread] = []
         self._worker_seq = 0
+        # Learned cap on parallel connections for *this* server. None until it
+        # pushes back; then it halves per complaint, floor 1. Plain int reads
+        # are atomic, so _target_connections can consult it without taking the
+        # lock (which would nest inside _worker_lock and invert the order).
+        self._connection_ceiling: int | None = None
+        self._ceiling_lock = threading.Lock()
 
     # ------------------------------------------------------------ control
 
@@ -387,14 +447,62 @@ class SegmentedDownload:
 
     def _target_connections(self) -> int:
         """This download's connection budget right now - its fair share when
-        siblings run, the full fixed count otherwise."""
+        siblings run, the full fixed count otherwise, and never more than what
+        the server has shown it will tolerate."""
         if self._connections_target_fn is None:
-            return self.connections
+            base = self.connections
+        else:
+            try:
+                # The fair share is a further *reduction* when siblings run, so
+                # this download's own count still caps it - otherwise a count
+                # narrowed by a learned server limit would be widened right back.
+                base = min(max(1, self._connections_target_fn()), self.connections)
+            except Exception:  # a broken callback must never stall the download
+                log.debug("connection-target callback failed", exc_info=True)
+                base = self.connections
+        ceiling = self._connection_ceiling  # atomic read; see __init__
+        return max(1, min(base, ceiling)) if ceiling is not None else base
+
+    def _note_server_pushback(self) -> None:
+        """The server just refused a request the way a rate limiter does. Halve
+        how many connections this download runs against it (floor 1) and
+        remember the number, so the retry after a give-up - and the next run of
+        this job - starts at a level the host actually accepts instead of
+        tripping the same block again."""
+        with self._ceiling_lock:
+            current = (
+                self._connection_ceiling
+                if self._connection_ceiling is not None
+                else self.connections
+            )
+            reduced = max(1, current // 2)
+            if self._connection_ceiling is not None and reduced >= current:
+                return  # already at the floor
+            self._connection_ceiling = reduced
+        log.info(
+            "job %s: server is refusing parallel requests; dropping to %d connection(s)",
+            self.job.id,
+            reduced,
+        )
+        self._persist_learned_connections(reduced)
+
+    def _persist_learned_connections(self, count: int) -> None:
+        """Record the tolerated connection count on the job. Best effort - a
+        failure here costs a slower retry, never the download."""
         try:
-            return max(1, self._connections_target_fn())
-        except Exception:  # a broken callback must never stall the download
-            log.debug("connection-target callback failed", exc_info=True)
-            return self.connections
+            options = dict(self.job.options)
+            if options.get("learned_connections") == count:
+                return
+            options["learned_connections"] = count
+            self.db.update_job_options(self.job.id, options)
+            self.job.options = options
+        except Exception:  # pragma: no cover - bookkeeping must never fail a job
+            log.debug("could not persist the learned connection count", exc_info=True)
+
+    def _over_ceiling(self) -> bool:
+        """Are more workers running than the (possibly just-lowered) target?"""
+        with self._worker_lock:
+            return self._active_workers > self._target_connections()
 
     def _run_workers(self) -> None:
         """Supervise a pool of connection workers whose size follows the live
@@ -500,6 +608,7 @@ class SegmentedDownload:
 
     def _download_segment(self, handle: IO[bytes], segment: Segment) -> None:
         attempts = 0
+        pushbacks = 0
         while not self._stop_event.is_set():
             downloaded_before = segment.downloaded
             try:
@@ -512,6 +621,26 @@ class SegmentedDownload:
                 else:
                     self._stream_full(handle, segment)
                 return
+            except _Pushback as exc:
+                # Too much parallelism, not a bad URL. Narrow the pool first;
+                # hammering the same segment at the same width is what turned a
+                # nearly-finished download into a hard failure.
+                self._note_server_pushback()
+                if self._over_ceiling():
+                    # This worker is one of the excess. Stepping aside *is* the
+                    # fix: the segment goes back to the pool unclaimed and a
+                    # surviving worker finishes it at the narrower width.
+                    return
+                if segment.downloaded > downloaded_before:
+                    pushbacks = 0  # forward progress earns a fresh budget
+                pushbacks += 1
+                if pushbacks > self.max_pushback_retries:
+                    raise DownloadError(
+                        f"the server is {RATE_LIMIT_MARKER} this download "
+                        f"(segment {segment.index}: {exc}). It refused even "
+                        f"{self._target_connections()} connection(s)."
+                    ) from exc
+                self._stop_event.wait(self._pushback_delay(exc, pushbacks))
             except (httpx.TransportError, _Retry) as exc:
                 if segment.downloaded > downloaded_before:
                     attempts = 0  # forward progress earns fresh retries
@@ -531,6 +660,15 @@ class SegmentedDownload:
                 capped = min(self.retry_backoff * 2 ** (attempts - 1), 5.0)
                 delay = capped * (0.5 + random.random() * 0.5)
                 self._stop_event.wait(delay)
+
+    def _pushback_delay(self, exc: _Pushback, attempt: int) -> float:
+        """How long to wait before retrying a rate-limited segment: whatever the
+        server asked for, else a jittered exponential backoff that climbs higher
+        than the ordinary one (a rate limit window outlasts a network blip)."""
+        if exc.retry_after is not None:
+            return exc.retry_after
+        capped: float = min(self.retry_backoff * 2**attempt, 20.0)
+        return capped * (0.5 + random.random() * 0.5)
 
     #: A segment must have at least this much left to be worth splitting; each
     #: half then stays above MIN_SEGMENT_SIZE.
@@ -584,7 +722,7 @@ class SegmentedDownload:
             log.debug("job %s: falling back to the original URL", self.job.id)
             self._final_url_ok = False
 
-    def _reject_status(self, status: int, segment: Segment) -> None:
+    def _reject_status(self, response: httpx.Response, segment: Segment) -> None:
         """Never returns: raise the right kind of failure for a bad status.
 
         Retryable statuses must not become a DownloadError - that stops every
@@ -592,6 +730,10 @@ class SegmentedDownload:
         "permanent failure" marker, so one flaky CDN response would throw away
         a nearly-complete download for good.
         """
+        status = response.status_code
+        if status in _PUSHBACK_STATUS:
+            self._distrust_final_url()
+            raise _Pushback(f"HTTP {status}", retry_after=_retry_after_seconds(response.headers))
         if status in _RETRYABLE_STATUS:
             self._distrust_final_url()
             raise _Retry(f"segment {segment.index}: HTTP {status}")
@@ -619,7 +761,7 @@ class SegmentedDownload:
         headers = {"Range": f"bytes={offset}-{end}"}
         with self._client.stream("GET", self._request_url(), headers=headers) as response:
             if response.status_code != 206:
-                self._reject_status(response.status_code, segment)
+                self._reject_status(response, segment)
             self._check_range_start(response, offset, segment)
             for chunk in response.iter_bytes(self.chunk_size):
                 if self._stop_event.is_set():
@@ -658,7 +800,7 @@ class SegmentedDownload:
             self._checkpointer.report(segment.id, 0)
         with self._client.stream("GET", self._request_url()) as response:
             if response.status_code != 200:
-                self._reject_status(response.status_code, segment)
+                self._reject_status(response, segment)
             for chunk in response.iter_bytes(self.chunk_size):
                 if self._stop_event.is_set():
                     return

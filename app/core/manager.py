@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from app.core import categories, connectivity, naming, power
 from app.core.credentials import CredentialStore
-from app.core.downloader import SegmentedDownload
+from app.core.downloader import RATE_LIMIT_MARKER, SegmentedDownload
 from app.core.errors import DownloadError
 from app.core.ffmpeg import find_ffmpeg
 from app.core.models import Job, JobKind, JobStatus, Queue
@@ -84,12 +84,17 @@ _PERMANENT_ERROR_MARKERS = (
 #: 4xx codes that are NOT permanent: 408 is a server-side timeout and 429 is
 #: rate limiting - both clear on their own, so backing off and retrying is
 #: exactly right even though the generic "http 4" marker would call them fatal.
+#: RATE_LIMIT_MARKER covers the downloader's own verdict: a host that served
+#: most of a file and then started refusing parallel requests is throttling us,
+#: not denying the file, and the retry starts from the connection count it
+#: learned to tolerate.
 _TRANSIENT_OVERRIDES = (
     "http 408",
     "http error 408",
     "http 429",
     "http error 429",
     "too many requests",
+    RATE_LIMIT_MARKER,
 )
 
 
@@ -1134,6 +1139,14 @@ class DownloadManager:
         # A pin keeps its full fixed count and stays out of the split; an
         # unpinned download runs its fair share, recomputed live by the pool.
         fixed = max(1, min(MAX_CONNECTIONS, pinned)) if pinned else self.connections
+        if not pinned:
+            # A previous run learned how much parallelism this host tolerates
+            # before it starts refusing requests. Start there rather than
+            # re-discovering the same block (and burning the retry budget) from
+            # the full width every time.
+            learned = int(job.options.get("learned_connections") or 0)
+            if learned:
+                fixed = max(1, min(fixed, learned))
         return SegmentedDownload(
             self.db,
             job,
