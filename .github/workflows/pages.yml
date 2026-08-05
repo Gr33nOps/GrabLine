@@ -27,28 +27,65 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Generous: the release-info step waits up to 20 minutes for this
+    # version's tag build to finish publishing before it gives up.
+    timeout-minutes: 35
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      # Pre-fetch the latest release into a static file the page reads at
-      # runtime, instead of every visitor's browser calling the GitHub REST
-      # API directly. That endpoint's 60/hour anonymous limit is shared per
-      # IP - visitors behind one (an office, a university, mobile carrier
-      # NAT) would routinely exhaust it and fall back to a generic "Latest
-      # release" notice. One authenticated call here, once per release
-      # (main only moves on release), avoids that entirely.
-      - name: Fetch latest release info
+      # Pre-fetch the release into a static file the page reads at runtime,
+      # instead of every visitor's browser calling the GitHub REST API
+      # directly. That endpoint's 60/hour anonymous limit is shared per IP -
+      # visitors behind one (an office, a university, mobile carrier NAT)
+      # would routinely exhaust it and fall back to a generic "Latest release"
+      # notice. One authenticated call here, once per release, avoids that.
+      #
+      # Ask for THIS commit's version, not /releases/latest. A release pushes
+      # main and the tag together, so this job starts ~7 minutes before the
+      # tag build has finished publishing - "latest" is therefore reliably the
+      # PREVIOUS release, and the site shipped one version behind on every
+      # release from 1.29.21 through 1.29.25 (five for five, measured). So
+      # wait for our own tag instead. Note the obvious alternative does not
+      # work: an `on: release` trigger never fires, because the release is
+      # created with GITHUB_TOKEN and GitHub suppresses workflow triggers from
+      # token-created events.
+      - name: Fetch this version's release info
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          curl -sSL --fail \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
-            | jq '{tag_name, assets: [.assets[] | {name, browser_download_url}]}' \
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -1)
+          test -n "$version"
+          echo "this commit is version $version"
+
+          release() {
+            curl -sSL --fail \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$1"
+          }
+
+          raw=""
+          for attempt in $(seq 1 40); do
+            if raw=$(release "tags/v$version"); then
+              echo "v$version is published (attempt $attempt)"
+              break
+            fi
+            raw=""
+            echo "v$version not published yet (attempt $attempt/40); waiting 30s"
+            sleep 30
+          done
+          if [ -z "$raw" ]; then
+            # The tag build failed or was never pushed. Stale links beat none:
+            # publish the previous release rather than leaving the download
+            # buttons pointing at the generic fallback notice.
+            echo "::warning::v$version never appeared; falling back to the latest published release"
+            raw=$(release latest)
+          fi
+
+          jq '{tag_name, assets: [.assets[] | {name, browser_download_url}]}' <<<"$raw" \
             > website/latest.json
           cat website/latest.json
       # Pages must be enabled once in Settings → Pages → Source: GitHub Actions.
