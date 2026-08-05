@@ -12,6 +12,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -60,6 +61,23 @@ _FAIR_PROBE_SECONDS = 1.5
 #: bottleneck - raise it so equal shares can climb toward the real line rate.
 _FAIR_SATURATION_RATIO = 0.90
 _FAIR_SATURATION_BOOST = 1.20
+
+#: Smallest fair cap worth handing out (bytes/sec).
+_MIN_FAIR_CAP = 1024
+#: How much of the cap it was given a download must actually be moving before
+#: it counts as wanting more. Below this, its own server - not our cap - is
+#: what's holding it back, and the difference is share nobody is using.
+_FAIR_SATURATED = 0.85
+#: Headroom over its measured rate before a download is treated as satisfied.
+#: Demand pinned to exactly what it moved last half-second could never grow;
+#: 1.3x lets a recovering (or slow-starting) download climb back to full speed
+#: geometrically, in a couple of seconds.
+_FAIR_DEMAND_HEADROOM = 1.30
+#: How fast a per-download rate estimate follows a *drop*. Rises are taken at
+#: face value - they are real demand and must be met at once - while a dip is
+#: eased in, so one slow half-second can't cost a download its share. That
+#: asymmetry is what stops reclaim from turning into the old see-saw.
+_FAIR_RATE_DECAY = 0.25
 
 #: Failures worth an automatic retry are everything EXCEPT these permanent
 #: ones (DRM, private, 404s, disk-full ...). Unknown errors are retried, which
@@ -180,6 +198,11 @@ class DownloadManager:
         self._system_sampler = SystemSampler()
         self._rate_mark: tuple[float, int] | None = None
         self._last_download_rate = 0.0
+        # Per-download throughput: last sampled byte count, and the smoothed
+        # rate the fair-share reclaim reads to tell "this one is pinned by our
+        # cap" from "this one's server is simply slower than its share".
+        self._job_marks: dict[int, int] = {}
+        self._job_rates: dict[int, float] = {}
         # Sticky estimate of line capacity (bytes/sec) used when fair-speed is
         # on and there is no global speed limit. While several jobs share, this
         # only ratchets up - shrinking it from our own throttled samples is what
@@ -279,7 +302,34 @@ class DownloadManager:
                 measured = max(0.0, (total - self._rate_mark[1]) / elapsed)
                 self._last_download_rate = measured
                 self._update_line_capacity(measured, n_active)
+                self._update_job_rates(items, elapsed)
         self._rate_mark = (now, total)
+        self._job_marks = dict(items)
+
+    def _update_job_rates(self, items: Sequence[tuple[int, int]], elapsed: float) -> None:
+        """Refresh each active download's smoothed throughput.
+
+        Rises are believed immediately (a download that just sped up needs its
+        share raised now); falls decay in slowly, so a single quiet sample -
+        a stalled connection, a checkpoint pause - can't hand this download's
+        share to its siblings and make speeds bounce.
+        """
+        for job_id, size in items:
+            before = self._job_marks.get(job_id)
+            if before is None or size < before:
+                # Brand new, or restarted from zero: no usable sample yet, and
+                # no estimate is better than a nonsensical one.
+                self._job_rates.pop(job_id, None)
+                continue
+            sample = (size - before) / elapsed
+            previous = self._job_rates.get(job_id)
+            if previous is None or sample >= previous:
+                self._job_rates[job_id] = sample
+            else:
+                self._job_rates[job_id] = previous + (sample - previous) * _FAIR_RATE_DECAY
+        live = {job_id for job_id, _ in items}
+        for job_id in [job_id for job_id in self._job_rates if job_id not in live]:
+            del self._job_rates[job_id]
 
     def _update_line_capacity(self, measured: float, n_active: int) -> None:
         """Learn how fast the line is without letting fair-speed choke itself.
@@ -451,9 +501,19 @@ class DownloadManager:
     def _compute_fair_caps(self, job_ids: Sequence[int]) -> dict[int, int]:
         """Per-job download caps in bytes/sec (0 = unlimited).
 
-        Strict equal split of the budget - the same model IDM-style managers
-        use. No reclaim of "unused" share: redistributing from short-term rate
-        samples made one download surge while another starved, every half second.
+        An equal split of the budget is the promise and the floor: no download
+        can be squeezed below budget÷N by a greedier sibling. But an equal split
+        on its own wastes line - a download whose own server only manages 1 MB/s
+        still holds a 50 MB/s share, and the sibling that could have used it sits
+        capped at 50. So the share a download demonstrably cannot use is handed
+        to the ones that can (classic max-min fairness, the "water filling" any
+        good manager does): equal when everyone wants everything, and every byte
+        of the line in use when they don't.
+
+        The reclaim reads *smoothed* rates, never a raw half-second sample - and
+        only ever moves share away from a download sitting well under the cap it
+        was already given. Reclaiming off jumpy samples is what made an earlier
+        attempt at this surge one download while starving another.
         """
         if not job_ids:
             return {}
@@ -466,8 +526,43 @@ class DownloadManager:
             # Line not measured yet, or still in the post-start probe window:
             # leave everyone unlimited so capacity can form at full speed.
             return {job_id: 0 for job_id in job_ids}
-        equal = max(1024, budget // len(job_ids))
-        return {job_id: equal for job_id in job_ids}
+        demands = {job_id: self._fair_demand(job_id) for job_id in job_ids}
+        caps: dict[int, int] = {}
+        hungry = list(job_ids)
+        left = budget
+        while hungry:
+            share = left // len(hungry)
+            modest = [
+                (job_id, demand)
+                for job_id in hungry
+                if (demand := demands[job_id]) is not None and demand < share
+            ]
+            if not modest:
+                # Everyone left wants at least an equal share, so that is what
+                # they get; nobody is holding line they cannot use.
+                for job_id in hungry:
+                    caps[job_id] = max(_MIN_FAIR_CAP, share)
+                break
+            for job_id, demand in modest:
+                caps[job_id] = max(_MIN_FAIR_CAP, demand)
+                left = max(0, left - caps[job_id])
+                hungry.remove(job_id)
+        return caps
+
+    def _fair_demand(self, job_id: int) -> int | None:
+        """How many bytes/sec this download can actually use, or None when it
+        wants everything it can get.
+
+        None is the honest answer whenever we can't see a ceiling: no rate
+        sample yet, no cap in force to measure against, or a download already
+        running at the cap it has (which tells us the cap binds, not how much
+        more it would take).
+        """
+        rate = self._job_rates.get(job_id)
+        applied = self._fair_applied.get(job_id, 0)
+        if rate is None or applied <= 0 or rate >= applied * _FAIR_SATURATED:
+            return None
+        return int(rate * _FAIR_DEMAND_HEADROOM)
 
     def _apply_fair_speed(self) -> None:
         """Push live per-job caps so simultaneous downloads share the line.
@@ -1151,7 +1246,7 @@ class DownloadManager:
             self.db,
             job,
             connections=fixed,
-            connections_target=None if pinned else self._fair_share_connections,
+            connections_target=None if pinned else partial(self._fair_share_connections, job.id),
             shares_budget=not pinned,
             limiter=self.limiter,
             job_limiter=self._job_limiter_for(job),
@@ -1163,20 +1258,35 @@ class DownloadManager:
             user_agent=self.settings.user_agent or None,
         )
 
-    def _fair_share_connections(self) -> int:
-        """One unpinned download's live, equal slice of the connection budget:
-        ``budget // (number of unpinned downloads running now)``, floored so no
-        download starves and capped at the budget so a lone job gets it all.
+    def _fair_share_connections(self, job_id: int) -> int:
+        """This download's live, equal slice of the connection budget.
 
-        Shares never exceed the budget in aggregate: a floor above ``budget // n``
-        would over-allocate sockets and recreate the hogging this exists to stop.
+        ``budget // (unpinned downloads running now)``, floored at one so no
+        download starves and capped at the budget so a lone job gets it all.
+        The remainder an uneven split leaves over is *not* dropped - with a
+        budget of 8 across 3 downloads that would idle a quarter of the pool -
+        it goes one connection each to the lowest job ids, so shares differ by
+        at most one and the whole budget stays in use.
+
+        Shares never exceed the budget in aggregate: handing *everyone* the
+        rounded-up share would over-allocate sockets and recreate the hogging
+        this exists to stop.
         """
         with self._cond:
-            sharers = sum(
-                1 for task in self._active.values() if getattr(task, "shares_budget", False)
+            sharers = sorted(
+                active_id
+                for active_id, task in self._active.items()
+                if getattr(task, "shares_budget", False)
             )
         budget = self.connections
-        share = budget // max(1, sharers)
+        if not sharers:
+            return budget
+        share, remainder = divmod(budget, len(sharers))
+        try:
+            if sharers.index(job_id) < remainder:
+                share += 1
+        except ValueError:
+            pass  # not registered yet: the plain share is the safe answer
         return max(1, min(budget, share))
 
     def _kick(self) -> None:

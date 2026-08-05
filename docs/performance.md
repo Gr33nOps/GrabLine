@@ -59,7 +59,8 @@ Worth recording, so nobody optimizes these twice:
 - **SQLite is already configured** for this workload: WAL, `synchronous`
   NORMAL, a busy timeout.
 - **Rows are updated in place**, never rebuilt, while downloads run.
-- **Read chunks stay a full 64KB** whether or not a speed limit is set.
+- **Read sizes do not shrink** when a speed limit is set; the limiter sleeps
+  between full reads rather than taking smaller ones.
 - **No leaks.** Adding and removing 200 jobs returns every per-job structure
   to empty, and repeated refreshes create no extra widgets. RSS does not fall
   back on its own, which is the allocator holding freed pages, not a leak.
@@ -77,3 +78,47 @@ For context on the download figure: five concurrent transfers through plain
 `httpx`, writing to disk through the same rate limiter and doing nothing else,
 cost 2.0% CPU at 1.17 MB/s on this machine. GrabLine does the same work plus a
 live UI.
+
+## Download throughput (1.29.25)
+
+The ceiling was the interpreter, not the line - and it got *worse* with more
+connections, which is the opposite of what an accelerator is for. One 300 MB
+file, server in its own process so only the client's cost is counted, best of
+three:
+
+| Connections | Before | After | |
+|---|---|---|---|
+| 1 | 125 MB/s | 179 MB/s | +43% |
+| 4 | 68 MB/s | 156 MB/s | +129% |
+| 8 | 67 MB/s | 147 MB/s | +119% |
+| 16 | 67 MB/s | 142 MB/s | +112% |
+
+Two causes, both per byte and both multiplied by every worker of every
+download:
+
+**The response was being re-chunked.** Asking httpx for fixed-size chunks runs
+each read through a buffer, copies the whole buffer out, and re-slices it.
+Reading raw skips all of it - and is the more correct reading anyway, because a
+segment has to be written exactly as it arrived or its byte offsets stop
+matching what the server said they were.
+
+**Socket reads were 64KB.** On a fast line that is thousands of
+read-parse-yield trips a second per connection, and with N workers under one
+interpreter lock those add up until adding a connection costs throughput
+instead of adding it. 256KB reads fixed the scaling; 1MB measured worse.
+
+Writes also seek once per attempt now instead of once per chunk - a segment is
+written in order, so the file position is already where the next chunk goes.
+
+## Sharing the line between downloads
+
+An equal split is the promise, but on its own it wastes line: a download whose
+own server tops out at 2 MB/s still held half a 10 MB/s budget while the
+sibling that could have used it sat capped at 5. Shares a download
+demonstrably cannot use are now passed to the ones that can, equal remaining
+the floor. Simulated against a 10 MB/s budget with one slow server, aggregate
+recovers from 6.9 MB/s to 9.2 MB/s within two scheduler passes (about a
+second) and then holds - no bouncing.
+
+The same rounding waste was in the connection budget: 8 connections across 3
+downloads used to be 2+2+2, idling a quarter of the pool. It is 3+3+2 now.

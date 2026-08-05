@@ -40,7 +40,6 @@ log = logging.getLogger(__name__)
 
 MIN_SEGMENT_SIZE = 256 * 1024
 DEFAULT_CONNECTIONS = 8
-DEFAULT_CHUNK_SIZE = 64 * 1024
 
 #: Statuses that mean "try this segment again" rather than "the job is dead":
 #: rate limits, transient server faults, and the auth-flavored ones a refreshed
@@ -205,7 +204,6 @@ class SegmentedDownload:
         job: Job,
         *,
         connections: int = DEFAULT_CONNECTIONS,
-        chunk_size: int = DEFAULT_CHUNK_SIZE,
         max_retries: int = 5,
         # A rate-limited segment gets a bigger, slower budget than a plain
         # network blip: the server is telling us to wait, and the download is
@@ -227,7 +225,6 @@ class SegmentedDownload:
         self.db = db
         self.job = job
         self.connections = connections
-        self.chunk_size = chunk_size
         self.max_retries = max_retries
         self.max_pushback_retries = max_pushback_retries
         self.retry_backoff = retry_backoff
@@ -246,6 +243,14 @@ class SegmentedDownload:
         self.job_limiter = job_limiter
         self.host_limiter = host_limiter
         self.fair_limiter = fair_limiter
+        # Flattened once: _throttle runs on every chunk of every connection, and
+        # at these read sizes the walk over four mostly-None slots was a
+        # measurable slice of the per-byte cost.
+        self._limiters = tuple(
+            limit
+            for limit in (limiter, job_limiter, host_limiter, fair_limiter)
+            if limit is not None
+        )
         # identity so the bytes on the wire are the bytes of the file (see the
         # note on the client below), plus a same-origin Referer so hotlink
         # protection lets a plain paste through. Browser-handoff headers (a real
@@ -274,10 +279,11 @@ class SegmentedDownload:
                 max_connections=connections + 2,
                 max_keepalive_connections=connections + 2,
             ),
-            # identity so the bytes on the wire are the bytes of the file: with
-            # transparent gzip, httpx decompresses while Content-Length and the
-            # byte ranges still describe the compressed stream, which stitches
-            # segments at wrong offsets and trips the final size check.
+            # identity so the bytes on the wire are the bytes of the file, which
+            # is what lets the workers read raw and write straight through: a
+            # compressed body would have Content-Length and the byte ranges
+            # describing the compressed stream, stitching segments at the wrong
+            # offsets. _reject_encoded catches a server that gzips anyway.
             headers=request_headers,
         )
         self._checkpointer = _Checkpointer(db, checkpoint_interval)
@@ -740,6 +746,21 @@ class SegmentedDownload:
         raise DownloadError(f"server responded with HTTP {status} for segment {segment.index}")
 
     @staticmethod
+    def _reject_encoded(response: httpx.Response, segment: Segment) -> None:
+        """Refuse a body the server compressed anyway.
+
+        Segments are written straight off the wire (``iter_raw``), which is the
+        only reading that keeps byte offsets meaning what Content-Range says
+        they mean. Every request asks for ``identity``; a server that ignores
+        that and gzips regardless would have us write compressed bytes into the
+        file at ranges that describe the plain one. Retrying is right - the
+        redirect chain often lands somewhere that honors the header.
+        """
+        encoding = (response.headers.get("content-encoding") or "").strip().lower()
+        if encoding and encoding != "identity":
+            raise _Retry(f"segment {segment.index}: server sent {encoding}-compressed bytes")
+
+    @staticmethod
     def _check_range_start(response: httpx.Response, offset: int, segment: Segment) -> None:
         """A 206 that answers a *different* range than we asked for would be
         written at the requested offset, silently corrupting the file."""
@@ -762,8 +783,14 @@ class SegmentedDownload:
         with self._client.stream("GET", self._request_url(), headers=headers) as response:
             if response.status_code != 206:
                 self._reject_status(response, segment)
+            self._reject_encoded(response, segment)
             self._check_range_start(response, offset, segment)
-            for chunk in response.iter_bytes(self.chunk_size):
+            # Seek once, then write sequentially: every chunk lands exactly
+            # where the previous one left off, so a per-chunk lseek buys
+            # nothing. This handle belongs to one worker running one segment.
+            handle.seek(offset)
+            position = offset
+            for chunk in response.iter_raw():
                 if self._stop_event.is_set():
                     return
                 if not chunk:
@@ -771,12 +798,13 @@ class SegmentedDownload:
                 # Re-read .end each chunk: a steal may have shrunk this segment,
                 # in which case we stop at the new boundary.
                 cap = segment.end if segment.end is not None else end
-                remaining = cap - (segment.start + segment.downloaded) + 1
+                remaining = cap - position + 1
                 if remaining <= 0:
                     return
-                data = chunk[:remaining]
-                self._write_at(handle, data, segment.start + segment.downloaded)
-                segment.downloaded += len(data)
+                data = chunk if len(chunk) <= remaining else chunk[:remaining]
+                self._write(handle, data)
+                position += len(data)
+                segment.downloaded = position - segment.start
                 self._checkpointer.report(segment.id, segment.downloaded)
                 self._throttle(len(data))
         final_end = segment.end if segment.end is not None else end
@@ -786,9 +814,8 @@ class SegmentedDownload:
     def _throttle(self, amount: int) -> None:
         # Hand the stop event to each limiter: at a tight cap the sleep here
         # dwarfs the transfer, and Pause has to land during it, not after.
-        for limiter in (self.limiter, self.job_limiter, self.host_limiter, self.fair_limiter):
-            if limiter is not None:
-                limiter.throttle(amount, self._stop_event)
+        for limiter in self._limiters:
+            limiter.throttle(amount, self._stop_event)
 
     def _stream_full(self, handle: IO[bytes], segment: Segment) -> None:
         """Single-connection fallback for servers without range support.
@@ -801,12 +828,14 @@ class SegmentedDownload:
         with self._client.stream("GET", self._request_url()) as response:
             if response.status_code != 200:
                 self._reject_status(response, segment)
-            for chunk in response.iter_bytes(self.chunk_size):
+            self._reject_encoded(response, segment)
+            handle.seek(segment.start)
+            for chunk in response.iter_raw():
                 if self._stop_event.is_set():
                     return
                 if not chunk:
                     continue
-                self._write_at(handle, chunk, segment.start + segment.downloaded)
+                self._write(handle, chunk)
                 segment.downloaded += len(chunk)
                 self._checkpointer.report(segment.id, segment.downloaded)
                 self._throttle(len(chunk))
@@ -819,12 +848,16 @@ class SegmentedDownload:
             raise _Retry("server closed the connection early")
 
     @staticmethod
-    def _write_at(handle: IO[bytes], data: bytes, position: int) -> None:
-        handle.seek(position)
-        view = memoryview(data)
+    def _write(handle: IO[bytes], data: bytes) -> None:
+        """Write every byte at the handle's current position, which the caller
+        has already placed. Raw (unbuffered) handles may write partially, so a
+        short write has to be finished off by hand."""
+        written = handle.write(data)
+        if written >= len(data):
+            return
+        view = memoryview(data)[written:]
         while view:
-            written = handle.write(view)  # raw handles may write partially
-            view = view[written:]
+            view = view[handle.write(view) :]
 
     # --------------------------------------------------------- completion
 

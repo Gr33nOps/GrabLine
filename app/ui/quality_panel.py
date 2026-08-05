@@ -66,9 +66,11 @@ class QualityPanel(chrome.Dialog):
         parent: QWidget | None = None,
         *,
         default_label: str = "",
+        analyzing: bool = False,
     ) -> None:
         super().__init__(parent)
         self.media = media
+        self._default_label = default_label
         self.setWindowTitle(t("Choose quality"))
         self.setMinimumWidth(460)
 
@@ -83,54 +85,29 @@ class QualityPanel(chrome.Dialog):
         from app.ui import components, design
 
         text_column = QVBoxLayout()
-        title = components.role_label(media.title, "strong", size=design.FONT["h1"], bold=True)
-        title.setWordWrap(True)
-        text_column.addWidget(title)
-        detail_parts = [part for part in (media.uploader, duration_text(media.duration)) if part]
-        detail = components.role_label("  •  ".join(detail_parts), "muted")
-        text_column.addWidget(detail)
+        self._title = components.role_label(
+            media.title or t("Reading video …"), "strong", size=design.FONT["h1"], bold=True
+        )
+        self._title.setWordWrap(True)
+        text_column.addWidget(self._title)
+        self._detail = components.role_label("", "muted")
+        text_column.addWidget(self._detail)
         text_column.addStretch(1)
         header.addLayout(text_column, 1)
         layout.addLayout(header)
 
         self.options_list = QListWidget()
-        for index, option in enumerate(media.options):
-            label = option.label
-            if option.kind == "audio":
-                label += "  " + t("(audio only)")
-            if option.estimated_size:
-                label += f"   ~{human_bytes(option.estimated_size)}"
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, index)
-            self.options_list.addItem(item)
-        if media.options:
-            # Preselect the configured default quality (Settings → Video
-            # Downloader) when this video offers it; else the top option.
-            preferred = 0
-            if default_label:
-                for index, option in enumerate(media.options):
-                    if option.label.lower() == default_label.lower():
-                        preferred = index
-                        break
-            self.options_list.setCurrentRow(preferred)
         self.options_list.itemDoubleClicked.connect(lambda _item: self.accept())
         layout.addWidget(self.options_list)
 
         subtitle_row = QHBoxLayout()
         subtitle_row.addWidget(QLabel(t("Subtitles:")))
         self.subtitle_combo = QComboBox()
-        self.subtitle_combo.addItem(t("None"), None)
-        for lang in media.subtitle_languages:
-            self.subtitle_combo.addItem(lang, {"lang": lang, "auto": False})
-        for lang in media.auto_caption_languages:
-            if lang not in media.subtitle_languages:
-                self.subtitle_combo.addItem(
-                    t("{lang} (auto)", lang=lang), {"lang": lang, "auto": True}
-                )
         subtitle_row.addWidget(self.subtitle_combo, 1)
         self.embed_subtitles = QCheckBox(t("Embed"))
         subtitle_row.addWidget(self.embed_subtitles)
         layout.addLayout(subtitle_row)
+        self._fill_from_media(analyzing)
 
         # Extras (all need FFmpeg, which the app fetches on demand).
         extras_row = QHBoxLayout()
@@ -177,13 +154,80 @@ class QualityPanel(chrome.Dialog):
         components.cap_field_widths(self)
 
         self._fetcher: _ThumbnailFetcher | None = None
-        if media.thumbnail_url:
-            self._fetcher = _ThumbnailFetcher(media.thumbnail_url)
-            self._fetcher.loaded.connect(self._set_thumbnail)
-            # The fetcher outlives the dialog if the network is slow; retain()
-            # owns it so closing the panel never destroys a running thread.
-            threads.retain(self._fetcher)
-            self._fetcher.start()
+        self._start_thumbnail()
+
+    # ------------------------------------------------------ live metadata
+
+    def apply_media(self, media: MediaInfo) -> None:
+        """Swap in the analysed metadata behind an already-open panel.
+
+        The panel opens on provisional tiers so the picker is there instantly;
+        this is what arrives a couple of seconds later with the real title,
+        sizes, thumbnail and subtitle languages. Whatever the user has already
+        chosen is kept - re-selecting a row under someone mid-click is how a
+        "helpful" refresh downloads the wrong quality.
+        """
+        chosen = self.selected_option()
+        subtitle = self.subtitle_combo.currentData()
+        self.media = media
+        self._fill_from_media(analyzing=False, keep_label=chosen.label if chosen else "")
+        if subtitle is not None:
+            index = self.subtitle_combo.findData(subtitle)
+            if index >= 0:
+                self.subtitle_combo.setCurrentIndex(index)
+        self._start_thumbnail()
+
+    def _fill_from_media(self, analyzing: bool, keep_label: str = "") -> None:
+        media = self.media
+        if media.title:
+            self._title.setText(media.title)
+        parts = [part for part in (media.uploader, duration_text(media.duration)) if part]
+        if analyzing:
+            parts.append(t("reading details …"))
+        self._detail.setText("  •  ".join(parts))
+
+        self.options_list.clear()
+        for index, option in enumerate(media.options):
+            label = option.label
+            if option.kind == "audio":
+                label += "  " + t("(audio only)")
+            if option.estimated_size:
+                label += f"   ~{human_bytes(option.estimated_size)}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, index)
+            self.options_list.addItem(item)
+        if media.options:
+            # Keep what the user already picked; otherwise preselect the
+            # configured default quality (Settings → Video Downloader) when
+            # this video offers it, and the top option when it doesn't.
+            wanted = (keep_label or self._default_label).lower()
+            preferred = 0
+            if wanted:
+                for index, option in enumerate(media.options):
+                    if option.label.lower() == wanted:
+                        preferred = index
+                        break
+            self.options_list.setCurrentRow(preferred)
+
+        self.subtitle_combo.clear()
+        self.subtitle_combo.addItem(t("None"), None)
+        for lang in media.subtitle_languages:
+            self.subtitle_combo.addItem(lang, {"lang": lang, "auto": False})
+        for lang in media.auto_caption_languages:
+            if lang not in media.subtitle_languages:
+                self.subtitle_combo.addItem(
+                    t("{lang} (auto)", lang=lang), {"lang": lang, "auto": True}
+                )
+
+    def _start_thumbnail(self) -> None:
+        if not self.media.thumbnail_url or self._fetcher is not None:
+            return
+        self._fetcher = _ThumbnailFetcher(self.media.thumbnail_url)
+        self._fetcher.loaded.connect(self._set_thumbnail)
+        # The fetcher outlives the dialog if the network is slow; retain()
+        # owns it so closing the panel never destroys a running thread.
+        threads.retain(self._fetcher)
+        self._fetcher.start()
 
     # -------------------------------------------------------------- result
 

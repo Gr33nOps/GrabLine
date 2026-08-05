@@ -338,15 +338,19 @@ def test_connection_budget_is_shared_across_active_jobs(db: Database, dest: Path
 
         third = segmented("https://x.test/c.bin", "c.bin")
         manager._active[3] = third
-        assert alone._target_connections() == 5  # 16 // 3, for every sharer
-        assert third._target_connections() == 5
+        # 16 across 3 is 6+5+5: the two connections an even split would round
+        # away are handed out rather than left idle.
+        shares = [t._target_connections() for t in (alone, second, third)]
+        assert sorted(shares) == [5, 5, 6]
+        assert sum(shares) == 16
 
         # A pinned download keeps its exact count and stays out of the split.
         pinned = segmented("https://x.test/d.bin", "d.bin", connections=20)
         assert pinned.connections == 20 and pinned.shares_budget is False
         assert pinned._target_connections() == 20
         manager._active[4] = pinned
-        assert alone._target_connections() == 5  # the pin didn't change the share
+        # the pin didn't change the sharers' split
+        assert [t._target_connections() for t in (alone, second, third)] == shares
     finally:
         manager._active.clear()
         manager.shutdown()
@@ -560,7 +564,7 @@ def test_a_crashing_engine_marks_the_job_failed(db: Database, dest: Path):
 
 
 def test_fair_speed_splits_budget_evenly_and_stays_stable(db: Database):
-    """N downloads each get budget÷N - no reclaim that would bounce speeds."""
+    """N downloads each get budget÷N while every one of them wants it all."""
     from app.core.settings import Settings
 
     settings = Settings(db)
@@ -594,8 +598,8 @@ def test_fair_speed_splits_budget_evenly_and_stays_stable(db: Database):
         caps = manager._compute_fair_caps([1, 2])
         assert caps == {1: 1000 * 1024, 2: 1000 * 1024}
 
-        # A slow job must NOT steal share from its sibling (that caused the
-        # up/down see-saw). Equal caps stay equal.
+        # Without a settled rate sample nothing is reclaimed: repeated passes
+        # keep handing out the same equal caps rather than drifting.
         caps = manager._compute_fair_caps([1, 2])
         assert caps[1] == caps[2] == 1000 * 1024
 
@@ -616,6 +620,48 @@ def test_fair_speed_splits_budget_evenly_and_stays_stable(db: Database):
         assert a.limit == 0
     finally:
         manager._active.clear()
+        manager.shutdown()
+
+
+def test_fair_speed_reclaims_share_a_slow_download_cannot_use(db: Database):
+    """The line the slow one leaves on the table goes to the one that can use
+    it - an equal split alone would cap the fast download at half a line that
+    is mostly idle."""
+    from app.core.settings import Settings
+
+    settings = Settings(db)
+    settings.fair_speed = True
+    settings.speed_limit_kbps = 2000  # 2 MB/s budget
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        # Stop the scheduler first: its own sampling pass would clear the rate
+        # and cap state these assertions set up.
+        manager._running = False
+        manager._kick()
+        manager._scheduler.join(timeout=5)
+
+        equal = 1000 * 1024
+        # Both were capped at an equal share on the previous pass; job 1's own
+        # server only ever managed 100 KB/s of it, job 2 is pinned at its cap.
+        manager._fair_applied = {1: equal, 2: equal}
+        manager._job_rates = {1: 100.0 * 1024, 2: float(equal)}
+
+        caps = manager._compute_fair_caps([1, 2])
+
+        assert caps[1] == int(100 * 1024 * 1.30)  # its own rate plus headroom
+        assert caps[2] > equal  # the sibling gets the rest of the budget
+        assert caps[1] + caps[2] <= 2000 * 1024  # and the budget still holds
+
+        # A download held under its share must still be able to speed back up:
+        # a rising sample is believed at once, not averaged away.
+        manager._job_marks = {1: 0}
+        manager._update_job_rates([(1, 800 * 1024)], elapsed=1.0)
+        assert manager._job_rates[1] == 800 * 1024
+        # A dip decays in gradually instead of surrendering the share at once.
+        manager._job_marks = {1: 800 * 1024}
+        manager._update_job_rates([(1, 800 * 1024)], elapsed=1.0)
+        assert manager._job_rates[1] == pytest.approx(600 * 1024)
+    finally:
         manager.shutdown()
 
 

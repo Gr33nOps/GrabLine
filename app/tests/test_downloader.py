@@ -82,6 +82,25 @@ def test_downloader_uses_http1_for_real_parallel_connections(
     assert limits.max_keepalive_connections >= 8  # type: ignore[attr-defined]
 
 
+def test_downloader_refuses_a_body_the_server_compressed_anyway(
+    server: MediaServer, db: Database, dest: Path
+):
+    # Segments are written straight off the wire, which is only safe while the
+    # bytes on the wire are the bytes of the file. Every request asks for
+    # identity; a server that answers with a content-encoding regardless is
+    # describing a *different* stream than its byte ranges do, so the download
+    # has to fail loudly rather than stitch compressed bytes into the file.
+    url = server.add("/gz.bin", payload(2 * MB, 11), extra_headers=(("Content-Encoding", "gzip"),))
+    job = db.create_job(url, str(dest), "gz.bin")
+
+    status = SegmentedDownload(db, job, connections=2, max_retries=1, retry_backoff=0.01).run()
+
+    assert status is JobStatus.FAILED
+    failed = db.get_job(job.id)
+    assert failed is not None and "gzip-compressed" in (failed.error or "")
+    assert not (dest / "gz.bin").exists()
+
+
 def test_finalize_survives_fsync_failure(
     server: MediaServer, db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -489,25 +508,59 @@ def test_fair_share_connections_splits_the_budget(db: Database):
 
     manager = DownloadManager(db, settings=Settings(db), max_concurrent=0, connections=16)
     try:
-        assert manager._fair_share_connections() == 16  # a lone job: whole budget
+        assert manager._fair_share_connections(1) == 16  # a lone job: whole budget
         with manager._cond:
             manager._active[1] = _Task(shares=True)
-        assert manager._fair_share_connections() == 16
+        assert manager._fair_share_connections(1) == 16
         with manager._cond:
             manager._active[2] = _Task(shares=True)
-        assert manager._fair_share_connections() == 8  # two share -> half each
+        assert manager._fair_share_connections(1) == 8  # two share -> half each
+        assert manager._fair_share_connections(2) == 8
         with manager._cond:
             manager._active[3] = _Task(shares=True)
             manager._active[4] = _Task(shares=True)
-        assert manager._fair_share_connections() == 4  # four -> a quarter each
+        assert manager._fair_share_connections(3) == 4  # four -> a quarter each
         with manager._cond:
             for job_id in range(5, 9):
                 manager._active[job_id] = _Task(shares=True)
         # Eight sharers: 16 // 8 = 2 each. Never invent sockets above the budget.
-        assert manager._fair_share_connections() == 2
+        assert manager._fair_share_connections(8) == 2
         with manager._cond:
             manager._active[99] = _Task(shares=False)  # a pinned download
-        assert manager._fair_share_connections() == 2  # ...doesn't change the split
+        assert manager._fair_share_connections(8) == 2  # ...doesn't change the split
+    finally:
+        with manager._cond:
+            manager._active.clear()
+        manager.shutdown()
+
+
+def test_fair_share_connections_spends_the_whole_budget(db: Database):
+    """An uneven split must not idle the leftover connections: 8 across 3
+    downloads is 3+3+2, not 2+2+2 with a quarter of the pool unused."""
+    from app.core.manager import DownloadManager
+    from app.core.settings import Settings
+
+    class _Task:
+        shares_budget = True
+
+        def run(self) -> JobStatus:
+            return JobStatus.COMPLETED
+
+        def pause(self) -> None: ...
+        def cancel(self) -> None: ...
+
+        @property
+        def bytes_downloaded(self) -> int:
+            return 0
+
+    manager = DownloadManager(db, settings=Settings(db), max_concurrent=0, connections=8)
+    try:
+        with manager._cond:
+            for job_id in (4, 7, 9):
+                manager._active[job_id] = _Task()
+        shares = [manager._fair_share_connections(job_id) for job_id in (4, 7, 9)]
+        assert sorted(shares) == [2, 3, 3]
+        assert sum(shares) == 8  # every connection in the budget is spoken for
     finally:
         with manager._cond:
             manager._active.clear()

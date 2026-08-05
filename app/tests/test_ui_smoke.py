@@ -410,6 +410,52 @@ def test_quality_panel_selection_and_trim(db: Database):
     assert panel.trim_range() is None
 
 
+def test_quality_panel_opens_before_analysis_and_upgrades_in_place(db: Database):
+    """The picker is usable immediately on provisional tiers, and the analysed
+    metadata replaces them without moving what the user already chose."""
+    from app.engines.smart import provisional_media
+
+    _qapp()
+    url = "https://tube.example/watch?v=7"
+    panel = QualityPanel(provisional_media(url, "Page Title"), analyzing=True)
+
+    # Every tier is offered up front, and a choice made now is a real one.
+    labels = [panel.options_list.item(i).text() for i in range(panel.options_list.count())]
+    assert any(label.startswith("1080p") for label in labels)
+    panel.options_list.setCurrentRow(labels.index(next(x for x in labels if x.startswith("720p"))))
+    assert (chosen := panel.selected_option()) is not None and chosen.label == "720p"
+    assert panel.subtitle_combo.count() == 1  # "None" only until analysis lands
+
+    analysed = MediaInfo(
+        url=url,
+        id="7",
+        title="The Real Title",
+        uploader="Someone",
+        duration=125.0,
+        thumbnail_url=None,
+        options=(
+            QualityOption(label="Best", kind="video", format_spec="bv*+ba/b"),
+            QualityOption(
+                label="720p",
+                kind="video",
+                format_spec="bv*[height<=720]+ba/b[height<=720]",
+                estimated_size=30 * 1024 * 1024,
+            ),
+        ),
+        subtitle_languages=("en",),
+    )
+    panel.apply_media(analysed)
+
+    assert panel.media is analysed
+    assert panel.options_list.count() == 2
+    # The user picked 720p before the sizes arrived; it stays picked, now sized.
+    still = panel.selected_option()
+    assert still is not None and still.label == "720p"
+    assert still.estimated_size == 30 * 1024 * 1024
+    assert "720p" in panel.options_list.currentItem().text()
+    assert panel.subtitle_combo.count() == 2  # None + en
+
+
 def test_quality_panel_extras_config(db: Database):
     _qapp()
     media = MediaInfo(
@@ -1440,6 +1486,56 @@ def test_browser_grab_of_video_runs_analysis_for_the_full_panel(
 
         # Routed to analysis with quality=None -> _on_resolved opens QualityPanel.
         assert seen == [(url, None)]
+    finally:
+        manager.shutdown()
+
+
+def test_single_video_urls_open_the_picker_ahead_of_analysis(db: Database, tmp_path: Path):
+    """A single video shows its quality picker straight away; anything that
+    might analyse into a list waits, so the picker isn't swapped out from
+    under the user a second later."""
+    from app.ui.main_window import _looks_like_one_video
+
+    assert _looks_like_one_video("https://www.youtube.com/watch?v=abc")
+    assert _looks_like_one_video("https://www.youtube.com/watch?v=abc&list=PL123")
+    assert _looks_like_one_video("https://vimeo.com/123456")
+    assert not _looks_like_one_video("https://www.youtube.com/playlist?list=PL123")
+    assert not _looks_like_one_video("https://www.youtube.com/@somechannel")
+    assert not _looks_like_one_video("https://www.youtube.com/channel/UC123")
+
+
+def test_resolve_and_queue_takes_the_instant_panel_path(db: Database, tmp_path: Path, monkeypatch):
+    """A pasted video URL must reach the instant picker, not the old
+    wait-for-analysis-then-open-a-dialog route."""
+    from app.ui import work_threads
+
+    _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        window = MainWindow(manager, settings)
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        assert window.resolver.smart.matches(url)  # warms the extractor list
+
+        instant: list[str] = []
+        monkeypatch.setattr(
+            window,
+            "_instant_quality_panel",
+            lambda thread, u, *a, **k: instant.append(u),
+        )
+        # No thread may actually run: a real resolve of these URLs would emit
+        # its result into whatever test is pumping events next, and _on_resolved
+        # answers a dead URL with a modal box that nothing is there to close.
+        monkeypatch.setattr(work_threads.ResolveThread, "start", lambda self: None)
+
+        window._resolve_and_queue(url, None, None, (), None)
+        assert instant == [url]
+
+        # A plain file has nothing to analyse - it must not open a video picker.
+        instant.clear()
+        window._resolve_and_queue("https://files.example/big.zip", None, None, (), None)
+        assert instant == []
     finally:
         manager.shutdown()
 

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import (
@@ -92,6 +92,7 @@ from app.engines.smart import (
     generic_quality_options,
     option_for_label,
     prefetch_download_ready,
+    provisional_media,
 )
 from app.ui import (
     chrome,
@@ -133,6 +134,23 @@ _FILTER_STATUSES: dict[str, tuple[JobStatus, ...]] = {
     "completed": (JobStatus.COMPLETED,),
     "failed": (JobStatus.FAILED, JobStatus.CANCELLED),
 }
+
+
+#: Path fragments that mean "a list of videos", not one video. The quality
+#: panel is only opened ahead of analysis for URLs that don't look like these:
+#: showing a single-video picker and then replacing it with the playlist
+#: chooser a second later is worse than simply waiting for the answer.
+_LIST_URL_HINTS = ("/playlist", "/channel/", "/user/", "/@", "/sets/", "/album/", "/browse/")
+
+
+def _looks_like_one_video(url: str) -> bool:
+    """Is this URL, on its face, a single video? Conservative on purpose."""
+    parts = urlsplit(url)
+    query = parts.query.lower()
+    if "v=" in query:
+        return True  # watch?v=…&list=… analyses as one video (noplaylist)
+    path = parts.path.lower()
+    return "list=" not in query and not any(hint in path for hint in _LIST_URL_HINTS)
 
 
 class _ScanFlagged(DownloadError):
@@ -1601,12 +1619,17 @@ class MainWindow(QMainWindow):
                 self.refresh()
                 self._fetch_quick_title(job.id, url)
                 return
+        instant = (
+            quality is None
+            and self.resolver.smart.warm
+            and _looks_like_one_video(url)
+            and self.resolver.smart.matches(url)
+        )
         self.statusBar().showMessage(t("Analyzing {url} …", url=url))
         self._busy_begin()
         thread = work_threads.ResolveThread(
             self.resolver, url, self.settings, page_title, quality, fallbacks, headers, self
         )
-        thread.resolved.connect(self._on_resolved)
 
         def _resolve_finished() -> None:
             self._resolve_threads.remove(thread)
@@ -1615,7 +1638,118 @@ class MainWindow(QMainWindow):
 
         thread.finished.connect(_resolve_finished)
         self._resolve_threads.append(thread)
+        if instant:
+            # Starts the thread itself, then blocks on the modal picker while
+            # the analysis runs behind it.
+            self._instant_quality_panel(thread, url, page_title, fallbacks, headers)
+            return
+        thread.resolved.connect(self._on_resolved)
         thread.start()
+
+    def _instant_quality_panel(
+        self,
+        thread: work_threads.ResolveThread,
+        url: str,
+        page_title: str | None,
+        fallbacks: tuple[str, ...],
+        headers: dict[str, str] | None,
+    ) -> None:
+        """Put the quality picker on screen now and let analysis catch up.
+
+        Analysing a video is seconds of fetching and parsing, and the panel it
+        produces is - for the choice itself - the same ladder every time: the
+        tier selectors are resolved by yt-dlp at *download* time, not here. So
+        the panel opens immediately on provisional tiers and fills in the real
+        title, sizes, thumbnail and subtitles the moment they land. A user who
+        has already picked by then never waits at all.
+
+        Anything that turns out not to be a single video (a playlist, a plain
+        stream, an error) closes the panel and goes back through the normal
+        _on_resolved route, which knows how to handle all of those.
+        """
+        panel = QualityPanel(
+            provisional_media(url, naming.clean_page_title(page_title)),
+            self,
+            default_label=self.settings.video_default_quality,
+            analyzing=True,
+        )
+        landed: dict[str, Resolution] = {}
+
+        def arrived(
+            resolution: Resolution,
+            _title: str | None,
+            _quality: str | None,
+            _fallbacks: tuple[str, ...],
+            hdrs: dict[str, str] | None,
+        ) -> None:
+            if resolution.kind is JobKind.SMART and resolution.media is not None:
+                landed["resolution"] = resolution
+                panel.apply_media(resolution.media)
+                # Start the download-ready extract while the user is still
+                # choosing, so Confirm doesn't pay for a second extraction.
+                prefetch_download_ready(
+                    resolution.url,
+                    proxy=self.settings.proxy,
+                    session_browser=self.settings.session_browser or None,
+                    headers=hdrs,
+                )
+                return
+            # Not a single video after all - hand it back to the full router.
+            landed["other"] = resolution
+            panel.reject()
+
+        thread.resolved.connect(arrived)
+        # Analysis starts here, not before: `arrived` is a queued connection, so
+        # it can only run once the panel's own event loop is turning - the
+        # result can't be delivered to a panel that isn't listening yet.
+        thread.start()
+        accepted = panel.exec() == QualityPanel.DialogCode.Accepted
+        other = landed.get("other")
+        if other is not None:
+            self._on_resolved(other, page_title, None, fallbacks, headers)
+            return
+        resolution = landed.get("resolution")
+        if not accepted:
+            if resolution is not None:
+                cancel_download_prefetch(url, self.settings.proxy)
+            return
+        option = panel.selected_option()
+        if option is None:
+            return
+        dest = self._ask_dest()
+        if dest is None:
+            if resolution is not None:
+                cancel_download_prefetch(url, self.settings.proxy)
+            return
+        common: dict[str, Any] = {
+            "dest_dir": dest or None,
+            "subtitles": panel.subtitles_config(),
+            "trim": panel.trim_range(),
+            "extras": panel.extras_config(),
+            "use_session": self.settings.use_browser_session,
+            "session_browser": self.settings.session_browser,
+            "headers": headers,
+        }
+        if resolution is not None and resolution.media is not None:
+            self.manager.add_smart(resolution.url, resolution.media, option, **common)
+            name = resolution.media.title
+        else:
+            # Chosen before analysis finished. The download does its own
+            # extraction anyway, so this is the *fast* path, not a degraded
+            # one - it just needs a placeholder name until the title lands.
+            # It is also the same route the in-page quality panel already
+            # takes, down to yt-dlp's own ``noplaylist``: should a list URL
+            # have slipped past _looks_like_one_video, this still resolves to
+            # the one video it names rather than emptying a playlist into it.
+            placeholder = naming.clean_page_title(page_title) or t("Fetching title…")
+            common["extras"] = {**(panel.extras_config() or {}), "name_from_metadata": True}
+            job = self.manager.add_smart_entry(url, placeholder, option, **common)
+            self._fetch_quick_title(job.id, url)
+            name = placeholder
+        self.statusBar().showMessage(
+            t("Queued {name} ({label})", name=name, label=option.label), 5000
+        )
+        self.refresh()
 
     def _ask_dest(self) -> str | None:
         """Settings → Downloads 'Ask where to save': a folder for this add,

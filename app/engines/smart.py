@@ -327,6 +327,40 @@ def generic_quality_options() -> tuple[QualityOption, ...]:
     return tuple(options)
 
 
+def provisional_media(url: str, title: str | None = None) -> MediaInfo:
+    """A MediaInfo good enough to open the quality panel with *before* analysis
+    has finished, so the picker is on screen in milliseconds instead of after
+    yt-dlp has fetched and parsed the page.
+
+    Every tier of the ladder is offered because none of them can dead-end:
+    ``_tier_format`` falls back to the best available stream, so picking 2160p
+    on a 720p video still downloads 720p. Sizes, the real title, the thumbnail
+    and the subtitle list are the parts that genuinely need analysis - they
+    arrive a moment later and the panel fills them in.
+    """
+    options = [QualityOption(label="Best", kind="video", format_spec="bv*+ba/b")]
+    options += [
+        QualityOption(label=f"{tier}p", kind="video", format_spec=_tier_format(tier), height=tier)
+        for tier in QUALITY_TIERS
+    ]
+    options += [
+        QualityOption(label="MP3", kind="audio", format_spec="ba/b", audio_format="mp3"),
+        QualityOption(
+            label="M4A", kind="audio", format_spec="ba[ext=m4a]/ba/b", audio_format="m4a"
+        ),
+        QualityOption(label="FLAC", kind="audio", format_spec="ba/b", audio_format="flac"),
+    ]
+    return MediaInfo(
+        url=url,
+        id="",
+        title=title or "",
+        uploader=None,
+        duration=None,
+        thumbnail_url=None,
+        options=tuple(options),
+    )
+
+
 def option_for_label(
     label: str, options: tuple[QualityOption, ...] | None = None
 ) -> QualityOption | None:
@@ -712,8 +746,26 @@ class SmartEngine:
             return self._extractors
 
     def warm_up(self) -> None:
-        """Build the extractor list now. Call from a worker thread."""
+        """Pay yt-dlp's one-time costs now. Call from a worker thread.
+
+        Building the extractor list is the big one, but the first ``YoutubeDL``
+        of the process costs about twice what every later one does (lazy
+        imports of the post-processor and networking stacks). Spending that here
+        rather than inside the first analysis is the difference between the
+        first video of a session feeling slower than the rest and not.
+        """
         self._extractor_classes()
+        self._warm_engine()
+
+    @staticmethod
+    def _warm_engine() -> None:
+        try:
+            import yt_dlp
+
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}):
+                pass
+        except Exception:  # pragma: no cover - a warm-up must never break a launch
+            log.debug("yt-dlp warm-up failed", exc_info=True)
 
     @property
     def warm(self) -> bool:
