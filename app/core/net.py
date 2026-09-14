@@ -9,9 +9,11 @@ in the app is built here so one proxy setting covers all of them.
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import threading
 import time
+from functools import lru_cache
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -208,7 +210,47 @@ def redact_credentials(url: str) -> str:
     return parts._replace(netloc=host).geturl()
 
 
-def _client_kwargs(proxy: str | None, verify: bool) -> dict[str, Any]:
+@lru_cache(maxsize=8)
+def _ssl_context(verify: bool, cert_file: str, cert_dir: str) -> Any:
+    """The TLS context to hand httpx, built once per policy and reused.
+
+    Why this is cached: ``verify=True`` makes httpx call
+    ``ssl.create_default_context(cafile=certifi.where())``, which parses the
+    whole ~300 KB CA bundle - measured at ~30 ms *per client*. The app builds
+    clients constantly (each resolve does two or three, every download one,
+    every HLS manifest and segment batch one more), so that was tens of
+    milliseconds of pure CPU on the path of every add, repeated for nothing:
+    the resulting context is identical every time.
+
+    ``ssl.SSLContext`` is designed to be shared across connections and threads -
+    it is exactly what a connection pool holds onto - so one instance per
+    policy is both correct and what every other HTTP stack does.
+
+    httpx's own builder is used rather than a hand-rolled context so the
+    behaviour (ALPN, hostname checking, ``SSL_CERT_FILE``/``SSL_CERT_DIR``
+    support, keylog) stays bit-for-bit what httpx would have done. The env vars
+    are part of the cache key so a machine that sets them is still honoured. If
+    a future httpx moves that helper, we fall back to the plain bool: slower,
+    never wrong.
+    """
+    del cert_file, cert_dir  # cache-key only; httpx reads the environment itself
+    try:
+        from httpx._config import create_ssl_context
+
+        return create_ssl_context(verify=verify)
+    except Exception:  # pragma: no cover - httpx internals moved; keep working
+        log.debug("could not pre-build an SSL context; using httpx's default", exc_info=True)
+        return verify
+
+
+def ssl_context(*, verify: bool) -> Any:
+    """The shared TLS context for this verification policy."""
+    return _ssl_context(
+        verify, os.environ.get("SSL_CERT_FILE", ""), os.environ.get("SSL_CERT_DIR", "")
+    )
+
+
+def _client_kwargs(proxy: str | None, verify: Any) -> dict[str, Any]:
     """httpx.Client kwargs that apply ``proxy``. SOCKS4/4a get an httpx-socks
     transport; everything else uses httpx's own proxy support.
 
@@ -248,7 +290,9 @@ def build_client(
     a failure: nothing in the app retries a certificate error with verification
     off. Default is, and stays, full verification.
     """
-    verify = not insecure
+    # One shared context per policy instead of re-parsing the CA bundle for
+    # every client (see _ssl_context).
+    verify = ssl_context(verify=not insecure)
     client_kwargs = _client_kwargs(proxy, verify)
     if proxy and bypass_hosts:
         mounts = dict(client_kwargs.get("mounts") or {})

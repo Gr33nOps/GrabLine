@@ -81,6 +81,13 @@ what comes back over the wire.
   retried unverified, and a per-download tick never writes to Settings. When
   the policy is on it is applied to the transport as well as the client, so a
   proxy or the IPv4-bind path cannot silently re-enable or re-disable it.
+  Every TLS-bearing engine is covered, not just httpx: yt-dlp
+  (`nocheckcertificate`), FFmpeg (`-tls_verify`, with certifi's roots passed as
+  `-ca_file` so the verifying case does not depend on which ffmpeg build is
+  installed), FTPS, WebDAV, S3/botocore, the `.torrent` fetch, and libtorrent's
+  HTTPS trackers and web seeds. sftp/scp are deliberately untouched: SSH trust
+  is host keys, not certificates. The analysis caches are keyed on the policy,
+  so metadata fetched unverified can never be handed to a verified download.
 - **Provisioning**: the fetched FFmpeg and Deno binaries are verified against
   hardcoded SHA-256 pins and downloaded over HTTPS from their expected hosts.
 

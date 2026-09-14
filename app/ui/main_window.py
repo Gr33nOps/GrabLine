@@ -1757,6 +1757,11 @@ class MainWindow(QMainWindow):
         stream, an error) closes the panel and goes back through the normal
         _on_resolved route, which knows how to handle all of those.
         """
+        # NB: the cookies+runtime prefetch deliberately does NOT start here.
+        # Racing it against the JS-less analysis is what made "Analyzing…" slow
+        # (see test_resolve_thread_does_not_prefetch_during_analysis); it starts
+        # in `arrived`, once analysis has landed and the panel is on screen with
+        # the user still choosing.
         panel = QualityPanel(
             provisional_media(url, naming.clean_page_title(page_title)),
             self,
@@ -2821,7 +2826,9 @@ class MainWindow(QMainWindow):
 
         self._run_file_op(
             lambda: torrent_engine.magnet_from_torrent(
-                torrent_engine.fetch_torrent_bytes(view.url, proxy=self.settings.proxy)
+                torrent_engine.fetch_torrent_bytes(
+                    view.url, proxy=self.settings.proxy, insecure=self.settings.insecure_ssl
+                )
             ),
             done,
         )
@@ -2851,7 +2858,11 @@ class MainWindow(QMainWindow):
 
         self._run_file_op(
             lambda: torrent_engine.parse_torrent(
-                torrent_engine.fetch_torrent_bytes(source, proxy=self.settings.proxy)
+                torrent_engine.fetch_torrent_bytes(
+                    source,
+                    proxy=self.settings.proxy,
+                    insecure=self.settings.insecure_ssl,
+                )
             ),
             loaded,
         )

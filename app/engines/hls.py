@@ -34,6 +34,7 @@ from urllib.parse import urljoin
 import httpx
 
 from app.core import naming, net, proc
+from app.core.ffmpeg import tls_arguments
 from app.core.models import Job, JobStatus
 from app.db.database import Database
 from app.engines.manifest import is_master_playlist, playlist_duration
@@ -192,6 +193,12 @@ class HlsDownload:
             return None
         return "".join(f"{key}: {value}\r\n" for key, value in self._headers.items())
 
+    def _uses_tls(self) -> bool:
+        """Does any input FFmpeg will open speak TLS?"""
+        return any(
+            (url or "").lower().startswith("https://") for url in (self._input_url, self._audio_url)
+        )
+
     def _command(self, part: Path) -> list[str]:
         assert self.ffmpeg_path is not None
         header_block = self._ffmpeg_headers()
@@ -215,23 +222,20 @@ class HlsDownload:
             "-protocol_whitelist",
             _INPUT_PROTOCOLS,
         ]
-        if self.insecure:
-            # Only ever added when the user opted in (globally or for this
-            # download): FFmpeg 8 verifies certificates by default, so a
-            # self-signed stream host fails there exactly as httpx does. The
-            # secure path deliberately passes nothing and keeps FFmpeg's own
-            # default - turning verification *on* explicitly would need a CA
-            # bundle path we cannot guarantee on every platform.
-            command += ["-tls_verify", "0"]
+        # Per-input, like -protocol_whitelist. FFmpeg's default flipped from
+        # "accept anything" (<=7.x) to "verify" (8.0), so both answers are
+        # stated rather than inherited from whichever build is installed.
+        # Only for an https input: a plain-http stream has no TLS to police,
+        # and skipping it there also skips the one-off capability probe.
+        tls = tls_arguments(self.ffmpeg_path, insecure=self.insecure) if self._uses_tls() else []
+        command += tls
         if header_block:
             # Per-input option, like -protocol_whitelist: must precede each -i
             # it applies to, or FFmpeg attaches it to the wrong stream.
             command += ["-headers", header_block]
         command += ["-i", self._input_url]
         if self._audio_url:
-            command += ["-protocol_whitelist", _INPUT_PROTOCOLS]
-            if self.insecure:
-                command += ["-tls_verify", "0"]
+            command += ["-protocol_whitelist", _INPUT_PROTOCOLS, *tls]
             if header_block:
                 command += ["-headers", header_block]
             command += ["-i", self._audio_url, "-map", "0", "-map", "1"]

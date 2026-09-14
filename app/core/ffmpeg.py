@@ -19,6 +19,7 @@ import tempfile
 import threading
 import zipfile
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 
 import httpx
@@ -31,6 +32,71 @@ from app.core.settings import Settings
 log = logging.getLogger(__name__)
 
 _BINARY_NAMES = {"ffmpeg", "ffprobe", "ffmpeg.exe", "ffprobe.exe"}
+
+#: How long the one-off "does this build verify TLS?" probe may take.
+_PROBE_TIMEOUT = 10.0
+
+
+@lru_cache(maxsize=1)
+def ca_bundle() -> str | None:
+    """Path to the CA bundle httpx already trusts, for handing to FFmpeg.
+
+    FFmpeg has no CA store of its own: ``-tls_verify 1`` without ``-ca_file``
+    rejects everything on the platforms where the system store isn't where
+    OpenSSL expects it. certifi ships with httpx, so the app and FFmpeg end up
+    trusting exactly the same roots. None when it cannot be located, in which
+    case we leave FFmpeg's own default alone rather than break every stream.
+    """
+    try:
+        import certifi
+
+        path = certifi.where()
+    except Exception:  # pragma: no cover - certifi ships with httpx
+        log.debug("no certifi CA bundle available for FFmpeg", exc_info=True)
+        return None
+    return path if Path(path).is_file() else None
+
+
+@lru_cache(maxsize=4)
+def supports_tls_verify(ffmpeg_path: str) -> bool:
+    """Does this FFmpeg build understand ``-tls_verify`` and ``-ca_file``?
+
+    GrabLine runs whatever ffmpeg it finds, and an unknown option is a hard
+    error ("Option not found"), not a warning - so the flags are only ever
+    added to a build that advertises them. One cached subprocess per binary,
+    off the GUI thread (this is called while building a download's command).
+    """
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-h", "protocol=tls"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT,
+            **proc.hidden(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    text = f"{result.stdout}{result.stderr}"
+    return "-tls_verify" in text and "-ca_file" in text
+
+
+def tls_arguments(ffmpeg_path: str | None, *, insecure: bool) -> list[str]:
+    """The ``-tls_verify``/``-ca_file`` pair for an https input.
+
+    FFmpeg's own default is ``tls_verify=0`` on builds through 7.x - i.e. it
+    accepts *any* certificate - and 1 from 8.0. Leaving that to chance means a
+    stream is verified or not depending on which ffmpeg happens to be
+    installed, which is the opposite of a policy. So both answers are stated
+    explicitly: verify against certifi's roots by default, and skip only when
+    the user opted in. A build that doesn't know the options (or a missing CA
+    bundle on the secure path) keeps FFmpeg's default rather than failing.
+    """
+    if not ffmpeg_path or not supports_tls_verify(ffmpeg_path):
+        return []
+    if insecure:
+        return ["-tls_verify", "0"]
+    bundle = ca_bundle()
+    return ["-tls_verify", "1", "-ca_file", bundle] if bundle else []
 
 
 def platform_key() -> str:

@@ -525,18 +525,24 @@ def curate_formats(info: dict[str, Any]) -> tuple[QualityOption, ...]:
 #: Format URLs from YouTube stay valid for hours, far beyond this TTL.
 _INFO_TTL = 300.0
 _info_lock = threading.Lock()
-_info_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+#: Keyed by (url, proxy, certificate policy). The policy is part of the key so
+#: metadata fetched over a connection the user allowed to go unverified can
+#: never be served to a download that is being verified: the resolved media
+#: URLs inside it came from a source nothing authenticated.
+_info_cache: dict[tuple[str, str, bool], tuple[float, dict[str, Any]]] = {}
 
 #: Download-shaped extracts (cookies + JS runtime for YouTube) started while
 #: the quality panel is open so Confirm does not wait on a second extraction.
 _READY_TTL = 300.0
 _ready_lock = threading.Lock()
-_ready_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
-_ready_inflight: dict[tuple[str, str], threading.Event] = {}
-_ready_cancels: dict[tuple[str, str], threading.Event] = {}
+_ready_cache: dict[tuple[str, str, bool], tuple[float, dict[str, Any]]] = {}
+_ready_inflight: dict[tuple[str, str, bool], threading.Event] = {}
+_ready_cancels: dict[tuple[str, str, bool], threading.Event] = {}
 
 
-def _remember_info(url: str, proxy: str | None, info: dict[str, Any]) -> None:
+def _remember_info(
+    url: str, proxy: str | None, info: dict[str, Any], *, insecure: bool = False
+) -> None:
     if not info.get("formats"):
         return  # a flat playlist listing can't be downloaded from
     with _info_lock:
@@ -544,23 +550,27 @@ def _remember_info(url: str, proxy: str | None, info: dict[str, Any]) -> None:
         for key, (at, _value) in list(_info_cache.items()):
             if now - at >= _INFO_TTL:
                 del _info_cache[key]
-        _info_cache[(url, proxy or "")] = (now, copy.deepcopy(info))
+        _info_cache[(url, proxy or "", insecure)] = (now, copy.deepcopy(info))
 
 
-def recall_info(url: str, proxy: str | None = None) -> dict[str, Any] | None:
+def recall_info(
+    url: str, proxy: str | None = None, *, insecure: bool = False
+) -> dict[str, Any] | None:
     """A fresh analysis of ``url``, ready for ``process_ie_result`` - or None."""
     with _info_lock:
-        hit = _info_cache.get((url, proxy or ""))
+        hit = _info_cache.get((url, proxy or "", insecure))
         if hit is None or time.monotonic() - hit[0] >= _INFO_TTL:
             return None
         return copy.deepcopy(hit[1])
 
 
-def _ready_key(url: str, proxy: str | None) -> tuple[str, str]:
-    return (url, proxy or "")
+def _ready_key(url: str, proxy: str | None, insecure: bool = False) -> tuple[str, str, bool]:
+    return (url, proxy or "", insecure)
 
 
-def _remember_download_ready(url: str, proxy: str | None, info: dict[str, Any]) -> None:
+def _remember_download_ready(
+    url: str, proxy: str | None, info: dict[str, Any], *, insecure: bool = False
+) -> None:
     if not info.get("formats"):
         return
     with _ready_lock:
@@ -568,24 +578,31 @@ def _remember_download_ready(url: str, proxy: str | None, info: dict[str, Any]) 
         for key, (at, _value) in list(_ready_cache.items()):
             if now - at >= _READY_TTL:
                 del _ready_cache[key]
-        _ready_cache[_ready_key(url, proxy)] = (now, copy.deepcopy(info))
+        _ready_cache[_ready_key(url, proxy, insecure)] = (now, copy.deepcopy(info))
 
 
-def recall_download_ready(url: str, proxy: str | None = None) -> dict[str, Any] | None:
+def recall_download_ready(
+    url: str, proxy: str | None = None, *, insecure: bool = False
+) -> dict[str, Any] | None:
     """Prefetched download-ready info for ``url``, or None."""
     with _ready_lock:
-        hit = _ready_cache.get(_ready_key(url, proxy))
+        hit = _ready_cache.get(_ready_key(url, proxy, insecure))
         if hit is None or time.monotonic() - hit[0] >= _READY_TTL:
             return None
         return copy.deepcopy(hit[1])
 
 
 def cancel_download_prefetch(url: str, proxy: str | None = None) -> None:
-    """Signal an in-flight panel prefetch to abandon its result."""
+    """Signal an in-flight panel prefetch to abandon its result.
+
+    Cancels under either certificate policy: the caller is saying "this add is
+    over", and which of the two keys its prefetch landed on is an internal
+    detail it should not have to track."""
     with _ready_lock:
-        cancel = _ready_cancels.get(_ready_key(url, proxy))
-    if cancel is not None:
-        cancel.set()
+        cancels = [_ready_cancels.get(_ready_key(url, proxy, policy)) for policy in (False, True)]
+    for cancel in cancels:
+        if cancel is not None:
+            cancel.set()
 
 
 def take_download_ready(
@@ -594,6 +611,7 @@ def take_download_ready(
     *,
     wait: float | None = 0.0,
     stop: threading.Event | None = None,
+    insecure: bool = False,
 ) -> dict[str, Any] | None:
     """Return a prefetched extract, waiting if one is still running.
 
@@ -605,8 +623,8 @@ def take_download_ready(
     expires while prefetch is still running used to cause a second full
     cookies+runtime extract on top of the first - the ~1 minute Confirm stall.
     """
-    key = _ready_key(url, proxy)
-    hit = recall_download_ready(url, proxy)
+    key = _ready_key(url, proxy, insecure)
+    hit = recall_download_ready(url, proxy, insecure=insecure)
     if hit is not None:
         return hit
     if wait is not None and wait <= 0:
@@ -614,7 +632,7 @@ def take_download_ready(
     with _ready_lock:
         done = _ready_inflight.get(key)
     if done is None:
-        return recall_download_ready(url, proxy)
+        return recall_download_ready(url, proxy, insecure=insecure)
     deadline = None if wait is None else time.monotonic() + wait
     while not done.is_set():
         if stop is not None and stop.is_set():
@@ -627,7 +645,7 @@ def take_download_ready(
                 break
         else:
             done.wait(timeout=0.25)
-    return recall_download_ready(url, proxy)
+    return recall_download_ready(url, proxy, insecure=insecure)
 
 
 def prefetch_download_ready(
@@ -643,7 +661,7 @@ def prefetch_download_ready(
     Matches SmartDownload's YouTube policy: cookies + JS runtime when a browser
     profile exists. Safe to call from the GUI thread; work runs off-thread.
     """
-    key = _ready_key(url, proxy)
+    key = _ready_key(url, proxy, insecure)
     with _ready_lock:
         hit = _ready_cache.get(key)
         if hit is not None and time.monotonic() - hit[0] < _READY_TTL:
@@ -680,7 +698,7 @@ def prefetch_download_ready(
             )
             if cancel.is_set():
                 return
-            _remember_download_ready(url, proxy, info)
+            _remember_download_ready(url, proxy, info, insecure=insecure)
             log.info("prefetched download-ready info for %s", url)
         except Exception:
             log.debug("download-ready prefetch failed for %s", url, exc_info=True)
@@ -742,10 +760,14 @@ class SmartEngine:
     #: the download re-extracts the URL itself - so a short window is safe.
     INSPECT_TTL = 300.0
 
+    #: Cap on the matches() memo, so a long session cannot grow it unbounded.
+    _MATCH_CACHE_CAP = 512
+
     def __init__(self) -> None:
         self._extractors: list[Any] | None = None
         self._lock = threading.Lock()
         self._inspected: dict[tuple[Any, ...], tuple[float, MediaInfo | PlaylistInfo]] = {}
+        self._matched: dict[str, bool] = {}
 
     def _extractor_classes(self) -> list[Any]:
         with self._lock:
@@ -790,8 +812,24 @@ class SmartEngine:
         return self._extractors is not None
 
     def matches(self, url: str) -> bool:
-        """Offline check: does a real site extractor (not generic) claim this URL?"""
-        return any(ie.suitable(url) for ie in self._extractor_classes())
+        """Offline check: does a real site extractor (not generic) claim this URL?
+
+        Memoized: the answer is a pure function of the URL and yt-dlp's
+        extractor list, but computing it runs up to ~1750 regexes - measured at
+        30 ms for a URL nothing claims, which is the common case for a plain
+        file link. The same URL is asked about two or three times on its way
+        through an add (the browser handoff, the resolver, the instant-panel
+        gate), and every one of those was on the GUI thread.
+        """
+        cached = self._matched.get(url)
+        if cached is not None:
+            return cached
+        answer = any(ie.suitable(url) for ie in self._extractor_classes())
+        with self._lock:
+            if len(self._matched) >= self._MATCH_CACHE_CAP:
+                self._matched.clear()
+            self._matched[url] = answer
+        return answer
 
     def inspect(
         self,
@@ -1062,7 +1100,7 @@ class SmartEngine:
         if not force_generic:
             # Hand this analysis to the download so it can skip re-extracting
             # when the download stays on the same cookie/runtime policy.
-            _remember_info(url, proxy, info)
+            _remember_info(url, proxy, info, insecure=insecure)
         return info
 
     def _parse_inspected(
@@ -1574,6 +1612,7 @@ class SmartDownload:
         cached = take_download_ready(
             self.job.url,
             self.proxy,
+            insecure=self.insecure,
             # Prefetch usually finishes while the person picks a quality. If
             # they confirm early, wait for that in-flight extract - never start
             # a second cookies+runtime pass on top of it (that was the minute
@@ -1587,7 +1626,7 @@ class SmartDownload:
             and not with_runtime
             and not self.job.options.get("hq_first")
         ):
-            cached = recall_info(self.job.url, self.proxy)
+            cached = recall_info(self.job.url, self.proxy, insecure=self.insecure)
         if cached is not None:
             log.info("job %s: downloading from the cached analysis", self.job.id)
             try:

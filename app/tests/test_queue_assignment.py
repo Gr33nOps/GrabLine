@@ -595,3 +595,148 @@ def test_confirmation_turned_off_keeps_the_old_default_behaviour(
     finally:
         window.close()
         manager.shutdown()
+
+
+# ================================================ reordering stays in its queue
+
+
+def _order_in(manager: DownloadManager, queue_id: int | None) -> list[int]:
+    return [job.id for job in manager._pending_order(queue_id)]
+
+
+def test_move_up_and_down_stay_inside_the_jobs_own_queue(db: Database, dest: Path):
+    """Priorities are global, so "move to top" used to hoist a job above jobs
+    in completely unrelated queues - and the scheduler picks each queue's next
+    job from within the queue, so it did not even do what it looked like."""
+    manager = DownloadManager(db, max_concurrent=0)  # scheduler idle
+    try:
+        first = manager.create_queue("First")
+        second = manager.create_queue("Second")
+        a = [
+            db.create_job(f"http://x.test/a{i}.bin", str(dest), f"a{i}.bin", queue_id=first.id).id
+            for i in range(3)
+        ]
+        b = [
+            db.create_job(f"http://x.test/b{i}.bin", str(dest), f"b{i}.bin", queue_id=second.id).id
+            for i in range(3)
+        ]
+
+        manager.move_to_top(a[2])
+        assert _order_in(manager, first.id) == [a[2], a[0], a[1]]
+        assert _order_in(manager, second.id) == b  # untouched
+
+        manager.move_up(b[2])
+        assert _order_in(manager, second.id) == [b[0], b[2], b[1]]
+        assert _order_in(manager, first.id) == [a[2], a[0], a[1]]  # still untouched
+
+        manager.move_to_bottom(a[2])
+        assert _order_in(manager, first.id) == [a[0], a[1], a[2]]
+    finally:
+        manager.shutdown()
+
+
+def test_reordering_one_queue_leaves_the_other_queues_slots_alone(db: Database, dest: Path):
+    """The global list interleaves queues; a move inside one must permute only
+    the slots that queue already occupied."""
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        first = manager.create_queue("First")
+        second = manager.create_queue("Second")
+        # Interleaved on purpose: a, b, a, b, a, b
+        ids: list[int] = []
+        for i in range(3):
+            ids.append(
+                db.create_job(
+                    f"http://x.test/a{i}.bin", str(dest), f"a{i}.bin", queue_id=first.id
+                ).id
+            )
+            ids.append(
+                db.create_job(
+                    f"http://x.test/b{i}.bin", str(dest), f"b{i}.bin", queue_id=second.id
+                ).id
+            )
+        before = [job.queue_id for job in manager._pending_order()]
+
+        manager.move_to_top(ids[4])  # the third job of the first queue
+
+        after = [job.queue_id for job in manager._pending_order()]
+        assert after == before, "a move inside one queue shifted the queues against each other"
+    finally:
+        manager.shutdown()
+
+
+def test_default_queue_reordering_is_unchanged(db: Database, dest: Path):
+    """The common case - no named queues at all - behaves exactly as before."""
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        ids = [db.create_job(f"http://x.test/{i}.bin", str(dest), f"{i}.bin").id for i in range(4)]
+        manager.move_to_top(ids[3])
+        assert _order_in(manager, None) == [ids[3], ids[0], ids[1], ids[2]]
+        manager.move_down(ids[3])
+        assert _order_in(manager, None) == [ids[0], ids[3], ids[1], ids[2]]
+        manager.move_to_bottom(ids[0])
+        assert _order_in(manager, None) == [ids[3], ids[1], ids[2], ids[0]]
+    finally:
+        manager.shutdown()
+
+
+def test_a_move_at_the_edge_of_its_queue_does_nothing(db: Database, dest: Path):
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        queue = manager.create_queue("Edge")
+        ids = [
+            db.create_job(f"http://x.test/{i}.bin", str(dest), f"{i}.bin", queue_id=queue.id).id
+            for i in range(2)
+        ]
+        manager.move_up(ids[0])  # already first
+        assert _order_in(manager, queue.id) == ids
+        manager.move_down(ids[1])  # already last
+        assert _order_in(manager, queue.id) == ids
+    finally:
+        manager.shutdown()
+
+
+def test_a_sequential_queue_starts_jobs_in_the_order_its_own_moves_produced(
+    server: MediaServer, db: Database, dest: Path
+):
+    """End to end: the order the per-queue move produced is the order the
+    scheduler actually starts them in, while a second queue runs alongside."""
+    urls = [server.add(f"/mv{i}.bin", payload(400_000, 100 + i), **_SLOW) for i in range(3)]
+    queue = db.create_queue("Moved")
+    _edit(db, queue, max_concurrent=1, paused=True)
+    other = db.create_queue("Other")
+    _edit(db, other, max_concurrent=1)
+
+    ids = [
+        db.create_job(
+            url, str(dest), f"mv{i}.bin", queue_id=queue.id, options={"connections": 1}
+        ).id
+        for i, url in enumerate(urls)
+    ]
+    db.create_job(
+        server.add("/other.bin", payload(200_000, 200), **_SLOW),
+        str(dest),
+        "other.bin",
+        queue_id=other.id,
+        options={"connections": 1},
+    )
+
+    manager = DownloadManager(db, max_concurrent=6)
+    try:
+        manager.move_to_top(ids[2])
+        manager.move_up(ids[0])  # now second -> first, giving 0, 2, 1
+        expected = [ids[0], ids[2], ids[1]]
+        assert _order_in(manager, queue.id) == expected
+
+        fresh = db.get_queue(queue.id)
+        assert fresh is not None
+        with _ConcurrencyWatcher(db, ids) as watcher:
+            manager.update_queue(replace(fresh, paused=False))
+            wait_for(
+                lambda: all(_status(db, i) is JobStatus.COMPLETED for i in ids),
+                timeout=150,
+            )
+        assert watcher.peak == 1
+        assert watcher.start_order == expected
+    finally:
+        manager.shutdown()

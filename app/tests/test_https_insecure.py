@@ -375,9 +375,49 @@ def test_the_manager_hands_each_engine_the_effective_policy(db: Database, dest: 
         manager.shutdown()
 
 
-def test_ffmpeg_is_not_told_to_skip_verification_by_default(db: Database, dest: Path) -> None:
+def test_ffmpeg_verifies_by_default_and_is_given_a_ca_bundle(
+    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FFmpeg has no certificate policy of its own worth relying on: its
+    default was "accept anything" through 7.x and "verify" from 8.0. Both
+    answers are now stated explicitly, with the same CA roots httpx trusts."""
+    from app.core import ffmpeg as ffmpeg_module
     from app.engines.hls import HlsDownload
 
+    monkeypatch.setattr(ffmpeg_module, "supports_tls_verify", lambda _path: True)
+    monkeypatch.setattr(ffmpeg_module, "ca_bundle", lambda: "/etc/ssl/cacert.pem")
+
+    job = db.create_job("https://x.test/s.m3u8", str(dest), "s.mp4", kind=JobKind.HLS)
+    secure = HlsDownload(db, job, ffmpeg_path="/usr/bin/ffmpeg")._command(dest / "s.part")
+    assert "-tls_verify" in secure
+    assert secure[secure.index("-tls_verify") + 1] == "1"
+    assert secure[secure.index("-ca_file") + 1] == "/etc/ssl/cacert.pem"
+
+    opted_in = HlsDownload(db, job, ffmpeg_path="/usr/bin/ffmpeg", insecure=True)._command(
+        dest / "s.part"
+    )
+    assert opted_in[opted_in.index("-tls_verify") + 1] == "0"
+    assert "-ca_file" not in opted_in
+
+
+def test_ffmpeg_tls_flags_are_skipped_for_a_plain_http_stream(db: Database, dest: Path) -> None:
+    """No TLS to police, and no reason to pay for the capability probe."""
+    from app.engines.hls import HlsDownload
+
+    job = db.create_job("http://x.test/s.m3u8", str(dest), "s.mp4", kind=JobKind.HLS)
+    command = HlsDownload(db, job, ffmpeg_path="/usr/bin/ffmpeg")._command(dest / "s.part")
+    assert "-tls_verify" not in command and "-ca_file" not in command
+
+
+def test_ffmpeg_tls_flags_are_skipped_on_a_build_that_does_not_know_them(
+    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unknown option is a hard FFmpeg error, so an older build keeps its
+    own default rather than failing every stream."""
+    from app.core import ffmpeg as ffmpeg_module
+    from app.engines.hls import HlsDownload
+
+    monkeypatch.setattr(ffmpeg_module, "supports_tls_verify", lambda _path: False)
     job = db.create_job("https://x.test/s.m3u8", str(dest), "s.mp4", kind=JobKind.HLS)
     command = HlsDownload(db, job, ffmpeg_path="/usr/bin/ffmpeg")._command(dest / "s.part")
     assert "-tls_verify" not in command
@@ -414,3 +454,128 @@ def test_an_https_error_message_names_the_certificate(tls_server: MediaServer):
     with net.build_client(timeout=10) as client, pytest.raises(httpx.HTTPError) as caught:
         client.get(url)
     assert "certificate" in str(caught.value).lower()
+
+
+# ------------------------------------ the other engines: cloud and torrents
+
+
+def test_webdav_goes_through_the_shared_client_and_carries_the_policy(
+    db: Database, dest: Path
+) -> None:
+    """WebDAV used to build a bare ``httpx.Client``, so it had neither the
+    app's proxy/User-Agent defaults nor any certificate policy at all."""
+    from app.engines.cloud import CloudDownload
+
+    job = db.create_job("webdavs://box.test/f.bin", str(dest), "f.bin", kind=JobKind.CLOUD)
+    assert CloudDownload(db, job).insecure is False
+    assert CloudDownload(db, job, insecure=True).insecure is True
+
+
+def test_ftps_control_and_data_channels_follow_the_policy() -> None:
+    from app.engines.cloud import _tls_context
+
+    secure = _tls_context(insecure=False)
+    assert secure.verify_mode == ssl.CERT_REQUIRED
+    assert secure.check_hostname is True
+
+    opted_in = _tls_context(insecure=True)
+    assert opted_in.verify_mode == ssl.CERT_NONE
+    assert opted_in.check_hostname is False
+
+
+def test_s3_client_only_disables_verification_when_opted_in(monkeypatch: pytest.MonkeyPatch):
+    """A self-hosted S3-compatible endpoint (MinIO, Ceph) behind its own
+    certificate is the case this serves."""
+    from app.engines import cloud
+
+    captured: list[dict[str, Any]] = []
+
+    class _FakeBoto:
+        @staticmethod
+        def client(_name: str, **kwargs: Any) -> object:
+            captured.append(kwargs)
+            return object()
+
+    monkeypatch.setitem(__import__("sys").modules, "boto3", _FakeBoto)
+
+    cloud._s3_client("s3://bucket/key", None)
+    assert "verify" not in captured[-1]
+
+    cloud._s3_client("s3://bucket/key", None, insecure=True)
+    assert captured[-1]["verify"] is False
+
+
+def test_the_manager_hands_a_cloud_job_the_effective_policy(db: Database, dest: Path) -> None:
+    from app.engines.cloud import CloudDownload
+
+    manager = DownloadManager(db, max_concurrent=1)
+    try:
+        manager.settings.auto_start_downloads = False
+        job = manager.add_cloud("webdavs://box.test/f.bin", dest_dir=str(dest), filename="f.bin")
+        task = manager._create_task(job)
+        assert isinstance(task, CloudDownload) and task.insecure is False
+
+        manager.settings.insecure_ssl = True
+        assert manager._create_task(job).insecure is True  # type: ignore[attr-defined]
+    finally:
+        manager.shutdown()
+
+
+def test_a_torrent_fetch_verifies_by_default_and_can_be_opted_out(tls_server: MediaServer):
+    """A .torrent hosted over HTTPS: the fetch used to be a bare httpx.get with
+    no proxy, no User-Agent and no policy of its own."""
+    from app.core.errors import DownloadError
+    from app.engines.torrent import fetch_torrent_bytes
+
+    url = tls_server.add("/x.torrent", b"d4:infod4:name1:xee")
+
+    with pytest.raises(DownloadError) as caught:
+        fetch_torrent_bytes(url)
+    assert "certificate" in str(caught.value).lower()
+
+    assert fetch_torrent_bytes(url, insecure=True) == b"d4:infod4:name1:xee"
+    # ...and it now looks like a browser, like every other request the app makes.
+    assert tls_server.received_headers("/x.torrent")["user-agent"] == net.DEFAULT_USER_AGENT
+
+
+def test_the_torrent_session_validates_https_trackers_unless_opted_out(db: Database) -> None:
+    from app.engines.torrent import SESSION
+
+    settings = Settings(db)
+    assert SESSION._pack(settings)["validate_https_trackers"] is True
+    settings.insecure_ssl = True
+    assert SESSION._pack(settings)["validate_https_trackers"] is False
+
+
+# ------------------------------------------------- the shared TLS context
+
+
+def test_the_ssl_context_is_built_once_per_policy_and_is_correct() -> None:
+    """The context is cached because building it parses the whole CA bundle
+    (~30 ms). Same object back, and the right policy on it."""
+    first = net.ssl_context(verify=True)
+    assert net.ssl_context(verify=True) is first
+    assert first.verify_mode == ssl.CERT_REQUIRED
+    assert first.check_hostname is True
+
+    relaxed = net.ssl_context(verify=False)
+    assert relaxed is not first
+    assert net.ssl_context(verify=False) is relaxed
+    assert relaxed.verify_mode == ssl.CERT_NONE
+    assert relaxed.check_hostname is False
+
+
+def test_building_a_verifying_client_is_cheap_now() -> None:
+    """Regression guard on the cost, not just the behaviour: this used to be
+    ~30 ms per client, paid several times per add."""
+    import time
+
+    net.ssl_context(verify=True)  # warm the cache, as a running app would be
+    net.ipv6_broken()
+    start = time.perf_counter()
+    for _ in range(20):
+        net.build_client().close()
+    per_client = (time.perf_counter() - start) / 20
+    assert per_client < 0.010, (
+        f"{per_client * 1000:.1f} ms per client - the CA cache is not working"
+    )

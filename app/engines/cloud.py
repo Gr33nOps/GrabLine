@@ -21,6 +21,7 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 
+from app.core import net
 from app.core.credentials import CredentialStore
 from app.core.errors import DownloadError
 from app.core.models import Job, JobStatus
@@ -75,11 +76,22 @@ class CloudDownload:
     """Runs one cloud job. One-shot object, like the other engine tasks."""
 
     def __init__(
-        self, db: Database, job: Job, *, credentials: CredentialStore | None = None
+        self,
+        db: Database,
+        job: Job,
+        *,
+        credentials: CredentialStore | None = None,
+        insecure: bool = False,
     ) -> None:
         self.db = db
         self.job = job
         self.store = credentials
+        #: Accept an invalid/self-signed certificate for this job's transport
+        #: (the manager passes ``global setting OR this job's override``).
+        #: Applies to the TLS-bearing schemes - ftps, webdavs, s3 over https.
+        #: sftp/scp are SSH, not TLS: their trust model is host keys, which
+        #: this does not and must not touch.
+        self.insecure = insecure
         self._pause = threading.Event()
         self._cancel = threading.Event()
         self._downloaded = 0
@@ -177,7 +189,7 @@ class CloudDownload:
     def _run_ftp(self, *, secure: bool) -> JobStatus:
         parts = urlsplit(self.job.url)
         remote = unquote(parts.path)
-        ftp = _connect_ftp(self.job.url, self.store, secure=secure)
+        ftp = _connect_ftp(self.job.url, self.store, secure=secure, insecure=self.insecure)
         try:
             ftp.voidcmd("TYPE I")
             try:
@@ -245,7 +257,7 @@ class CloudDownload:
         parts = urlsplit(self.job.url)
         bucket = parts.netloc
         key = unquote(parts.path).lstrip("/")
-        client = _s3_client(self.job.url, self.store)
+        client = _s3_client(self.job.url, self.store, insecure=self.insecure)
         head = client.head_object(Bucket=bucket, Key=key)
         total = int(head.get("ContentLength") or 0)
         if total:
@@ -272,7 +284,12 @@ class CloudDownload:
         headers = {"Range": f"bytes={offset}-"} if offset else {}
         timeout = httpx.Timeout(30.0, connect=15.0)
         with (
-            httpx.Client(follow_redirects=True, timeout=timeout) as client,
+            # Through net.build_client, so WebDAV gets the same browser-like
+            # User-Agent, proxy support and certificate policy as every other
+            # HTTP client in the app instead of httpx's bare defaults.
+            net.build_client(
+                insecure=self.insecure, follow_redirects=True, timeout=timeout
+            ) as client,
             client.stream("GET", http_url, headers=headers, auth=auth) as response,
         ):
             if response.status_code not in (200, 206):
@@ -302,11 +319,29 @@ def _webdav_http_url(url: str) -> str:
 # ----------------------------------------------------- connection helpers
 
 
-def _connect_ftp(url: str, store: CredentialStore | None, *, secure: bool) -> ftplib.FTP:
+def _tls_context(*, insecure: bool) -> ssl.SSLContext:
+    """The TLS context for an FTPS control/data channel.
+
+    ``ftplib.FTP_TLS()`` with no context builds a verifying default, which is
+    right - this only relaxes it when the user asked, and states the secure
+    case explicitly so the policy is visible in one place.
+    """
+    context = ssl.create_default_context()
+    if insecure:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def _connect_ftp(
+    url: str, store: CredentialStore | None, *, secure: bool, insecure: bool = False
+) -> ftplib.FTP:
     parts = urlsplit(url)
     user, password = _creds(url, store)
     port = parts.port or _DEFAULT_PORTS["ftp"]
-    ftp: ftplib.FTP = ftplib.FTP_TLS() if secure else ftplib.FTP()
+    ftp: ftplib.FTP = (
+        ftplib.FTP_TLS(context=_tls_context(insecure=insecure)) if secure else ftplib.FTP()
+    )
     ftp.connect(parts.hostname or "", port, timeout=30)
     ftp.login(user or "anonymous", password or "anonymous@")
     if secure and isinstance(ftp, ftplib.FTP_TLS):
@@ -341,7 +376,7 @@ def _sftp_client(url: str, store: CredentialStore | None) -> tuple[Any, Any]:
     return client, client.open_sftp()
 
 
-def _s3_client(url: str, store: CredentialStore | None) -> Any:
+def _s3_client(url: str, store: CredentialStore | None, *, insecure: bool = False) -> Any:
     import boto3
 
     parts = urlsplit(url)
@@ -353,6 +388,12 @@ def _s3_client(url: str, store: CredentialStore | None) -> Any:
     if user and secret:
         kwargs["aws_access_key_id"] = user
         kwargs["aws_secret_access_key"] = secret
+    if insecure:
+        # botocore's spelling of "accept this certificate". Only reachable via
+        # the opt-in; without it botocore verifies against its own bundle, as
+        # it always has. Chiefly for a self-hosted S3-compatible endpoint
+        # (MinIO, Ceph) behind its own certificate.
+        kwargs["verify"] = False
     # No creds -> boto3 falls back to env/instance profile, or the bucket is
     # public. Either is a legitimate way to reach S3.
     return boto3.client("s3", **kwargs)
@@ -361,16 +402,22 @@ def _s3_client(url: str, store: CredentialStore | None) -> Any:
 # --------------------------------------------------------- folder listing
 
 
-def list_folder(url: str, store: CredentialStore | None = None) -> list[RemoteFile]:
+def list_folder(
+    url: str, store: CredentialStore | None = None, *, insecure: bool = False
+) -> list[RemoteFile]:
     """The files directly inside a remote folder (one level), for the
-    "download this whole folder" flow. FTP, SFTP and S3 are supported."""
+    "download this whole folder" flow. FTP, SFTP and S3 are supported.
+
+    ``insecure`` matches the download's own certificate policy: listing a
+    folder on a self-signed host the user has allowed must not fail where the
+    download from that same host would succeed."""
     scheme = urlsplit(url).scheme.lower()
     if scheme in ("ftp", "ftps"):
-        return _list_ftp(url, store, secure=scheme == "ftps")
+        return _list_ftp(url, store, secure=scheme == "ftps", insecure=insecure)
     if scheme in ("sftp", "scp"):
         return _list_sftp(url, store)
     if scheme == "s3":
-        return _list_s3(url, store)
+        return _list_s3(url, store, insecure=insecure)
     raise DownloadError(f"folder download is not supported for {scheme}:// yet")
 
 
@@ -385,8 +432,10 @@ def _base(url: str) -> str:
     return root
 
 
-def _list_ftp(url: str, store: CredentialStore | None, *, secure: bool) -> list[RemoteFile]:
-    ftp = _connect_ftp(url, store, secure=secure)
+def _list_ftp(
+    url: str, store: CredentialStore | None, *, secure: bool, insecure: bool = False
+) -> list[RemoteFile]:
+    ftp = _connect_ftp(url, store, secure=secure, insecure=insecure)
     base = _base(url)
     path = unquote(urlsplit(url).path).rstrip("/")
     files: list[RemoteFile] = []
@@ -422,11 +471,13 @@ def _list_sftp(url: str, store: CredentialStore | None) -> list[RemoteFile]:
     return files
 
 
-def _list_s3(url: str, store: CredentialStore | None) -> list[RemoteFile]:
+def _list_s3(
+    url: str, store: CredentialStore | None, *, insecure: bool = False
+) -> list[RemoteFile]:
     parts = urlsplit(url)
     bucket = parts.netloc
     prefix = unquote(parts.path).lstrip("/")
-    client = _s3_client(url, store)
+    client = _s3_client(url, store, insecure=insecure)
     result = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
     files: list[RemoteFile] = []
     for obj in result.get("Contents", []):

@@ -382,6 +382,10 @@ def main() -> int:
             from app.core import net
 
             net.ipv6_broken()
+            # Parsing the CA bundle costs ~30 ms; the context is then shared by
+            # every client in the app, so pay for it here rather than on the
+            # first add.
+            net.ssl_context(verify=True)
             # Through the engine the app actually uses, so its cached extractor
             # list is the one that gets built. Calling yt-dlp's
             # gen_extractor_classes() directly did the same seconds of work but

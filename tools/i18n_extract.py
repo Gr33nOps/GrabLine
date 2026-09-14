@@ -37,7 +37,11 @@ def source_strings() -> set[str]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _is_t_call(node.func) and node.args:
                 first = node.args[0]
-                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                # `and first.value`: a blank literal is a layout placeholder,
+                # not a phrase - the job list's icon column is spelled N_("")
+                # so the header tuple stays uniform. Counting it as
+                # translatable left every catalogue permanently one short.
+                if isinstance(first, ast.Constant) and isinstance(first.value, str) and first.value:
                     found.add(first.value)
     return found
 

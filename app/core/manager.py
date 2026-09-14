@@ -44,6 +44,10 @@ log = logging.getLogger(__name__)
 #: collide with a queue.
 AUTO_QUEUE = -1
 
+#: "every queue" for _pending_order - distinct from None, which is the real
+#: default queue. Same reasoning as AUTO_QUEUE.
+_ANY_QUEUE = -1
+
 #: Job option key for the per-download "ignore HTTPS certificate errors"
 #: override. Never written to Settings: it applies to this one job only.
 INSECURE_OPTION = "insecure_ssl"
@@ -790,10 +794,17 @@ class DownloadManager:
 
     # -------------------------------------------------------- queue priorities
 
-    def _pending_order(self) -> list[Job]:
+    def _pending_order(self, queue_id: int | None = _ANY_QUEUE) -> list[Job]:
         """Jobs waiting to run, in current run order (list_jobs is priority
-        sorted already)."""
-        return [j for j in self.db.list_jobs() if j.status in (JobStatus.QUEUED, JobStatus.PAUSED)]
+        sorted already). With a ``queue_id``, only that queue's jobs - the
+        scheduler picks each queue's next job from within the queue, so
+        "move up" has to mean up *this* queue, not up the whole list."""
+        pending = [
+            j for j in self.db.list_jobs() if j.status in (JobStatus.QUEUED, JobStatus.PAUSED)
+        ]
+        if queue_id == _ANY_QUEUE:
+            return pending
+        return [j for j in pending if j.queue_id == queue_id]
 
     def _reassign(self, order: list[Job]) -> None:
         # Dense, strictly-decreasing priorities so the order is unambiguous.
@@ -801,16 +812,42 @@ class DownloadManager:
             self.db.set_priority(job.id, len(order) - position)
         self._kick()
 
-    def _move(self, job_id: int, delta: int) -> None:
-        order = self._pending_order()
+    def _apply_within_queue(self, queue_id: int | None, reordered: list[Job]) -> None:
+        """Write ``reordered`` back as the run order of one queue.
+
+        Priorities are global, so rewriting only this queue's rows would shuffle
+        it against the other queues in the list as a side effect. Instead the
+        whole pending list is rewritten with every *other* job left in the slot
+        it already held, and this queue's jobs permuted among the slots they
+        already occupied. Net effect: exactly the intended move, nothing else.
+        """
+        everything = self._pending_order()
+        moving = iter(reordered)
+        rebuilt = [job if job.queue_id != queue_id else next(moving) for job in everything]
+        self._reassign(rebuilt)
+
+    def _queue_of(self, job_id: int) -> tuple[int | None, list[Job], int] | None:
+        """(queue id, that queue's pending jobs, this job's index in them), or
+        None when the job is not waiting to run."""
+        job = self.db.get_job(job_id)
+        if job is None:
+            return None
+        order = self._pending_order(job.queue_id)
         index = next((i for i, j in enumerate(order) if j.id == job_id), None)
         if index is None:
+            return None
+        return job.queue_id, order, index
+
+    def _move(self, job_id: int, delta: int) -> None:
+        found = self._queue_of(job_id)
+        if found is None:
             return
+        queue_id, order, index = found
         target = index + delta
         if not 0 <= target < len(order):
             return
         order[index], order[target] = order[target], order[index]
-        self._reassign(order)
+        self._apply_within_queue(queue_id, order)
 
     def move_up(self, job_id: int) -> None:
         self._move(job_id, -1)
@@ -819,16 +856,20 @@ class DownloadManager:
         self._move(job_id, 1)
 
     def move_to_top(self, job_id: int) -> None:
-        order = self._pending_order()
+        found = self._queue_of(job_id)
+        if found is None:
+            return
+        queue_id, order, _index = found
         picked = [j for j in order if j.id == job_id]
-        if picked:
-            self._reassign(picked + [j for j in order if j.id != job_id])
+        self._apply_within_queue(queue_id, picked + [j for j in order if j.id != job_id])
 
     def move_to_bottom(self, job_id: int) -> None:
-        order = self._pending_order()
+        found = self._queue_of(job_id)
+        if found is None:
+            return
+        queue_id, order, _index = found
         picked = [j for j in order if j.id == job_id]
-        if picked:
-            self._reassign([j for j in order if j.id != job_id] + picked)
+        self._apply_within_queue(queue_id, [j for j in order if j.id != job_id] + picked)
 
     # ------------------------------------------------------------- adding
 
@@ -1101,12 +1142,13 @@ class DownloadManager:
         self._kick()
         return job
 
-    def list_cloud_folder(self, url: str) -> list[Any]:
+    def list_cloud_folder(self, url: str, *, insecure: bool = False) -> list[Any]:
         """Files inside a remote folder (for the 'download whole folder'
-        flow). Returns cloud.RemoteFile entries."""
+        flow). Returns cloud.RemoteFile entries. The listing follows the same
+        certificate policy a download from that host would."""
         from app.engines.cloud import list_folder
 
-        return list_folder(url, self.credentials)
+        return list_folder(url, self.credentials, insecure=insecure or self.settings.insecure_ssl)
 
     # ------------------------------------------------------------ control
 
@@ -1293,7 +1335,7 @@ class DownloadManager:
         if job.kind is JobKind.TORRENT:
             return TorrentDownload(self.db, job, settings=self.settings)
         if job.kind is JobKind.CLOUD:
-            return CloudDownload(self.db, job, credentials=self.credentials)
+            return CloudDownload(self.db, job, credentials=self.credentials, insecure=insecure)
         # Fair sharing of the connection budget across simultaneous downloads.
         # TCP fairness is per-flow, so without this the first download's N flows
         # starve every later sibling. Each unpinned download instead runs its

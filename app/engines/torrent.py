@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 
+from app.core import net
 from app.core.errors import DownloadError
 from app.core.models import Job, JobStatus
 from app.core.settings import Settings
@@ -93,12 +94,20 @@ def magnet_display_name(magnet: str) -> str | None:
     return unquote(names[0]) if names else None
 
 
-def fetch_torrent_bytes(source: str, proxy: str | None = None) -> bytes:
-    """The raw .torrent contents for a local path or http(s) URL."""
+def fetch_torrent_bytes(source: str, proxy: str | None = None, *, insecure: bool = False) -> bytes:
+    """The raw .torrent contents for a local path or http(s) URL.
+
+    Goes through net.build_client so the fetch carries the same proxy,
+    browser-like User-Agent and certificate policy as every other HTTP request
+    the app makes - a .torrent hosted on a self-signed tracker the user has
+    allowed should not be the one request that still refuses to load."""
     if source.lower().startswith(("http://", "https://")):
         try:
-            response = httpx.get(source, follow_redirects=True, timeout=30, proxy=proxy or None)
-            response.raise_for_status()
+            with net.build_client(
+                proxy=proxy or None, insecure=insecure, follow_redirects=True, timeout=30
+            ) as client:
+                response = client.get(source)
+                response.raise_for_status()
         except httpx.HTTPError as exc:
             raise DownloadError(f"could not fetch the .torrent file ({exc})") from exc
         return response.content
@@ -250,6 +259,12 @@ class TorrentSession:
             "upload_rate_limit": settings.torrent_upload_kbps * 1024,
             "dht_bootstrap_nodes": _DHT_ROUTERS,
             "user_agent": "GrabLine",
+            # HTTPS trackers and web seeds get the same answer as the rest of
+            # the app: verified, unless the user turned that off in
+            # Settings -> Security. (Per-download overrides do not reach here -
+            # the session is shared by every torrent, so only the global
+            # setting can safely apply to it.)
+            "validate_https_trackers": not settings.insecure_ssl,
         }
         # Peer encryption (Settings -> Torrent): prefer = enabled either way,
         # require = encrypted peers only, off = plaintext only.
@@ -470,7 +485,15 @@ class TorrentDownload:
                 raise DownloadError(f"not a valid magnet link ({exc})") from exc
         else:
             params = lt.add_torrent_params()
-            params.ti = lt.torrent_info(lt.bdecode(fetch_torrent_bytes(source)))
+            params.ti = lt.torrent_info(
+                lt.bdecode(
+                    fetch_torrent_bytes(
+                        source,
+                        self.settings.proxy,
+                        insecure=self.settings.insecure_ssl,
+                    )
+                )
+            )
         params.save_path = self.job.dest_dir
         return params
 
