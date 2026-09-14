@@ -346,7 +346,7 @@ def _connect_ftp(
     ftp: ftplib.FTP = (
         ftplib.FTP_TLS(context=_tls_context(insecure=insecure))
         if secure
-        else ftplib.FTP()  # NOSONAR(python:S5332) - ftp:// is a scheme the user chose
+        else ftplib.FTP()  # NOSONAR - ftp:// is a scheme the user chose
     )
     ftp.connect(parts.hostname or "", port, timeout=30)
     ftp.login(user or "anonymous", password or "anonymous@")
