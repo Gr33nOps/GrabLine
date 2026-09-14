@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="../icons/icon32.png" alt="" width="20" height="20" />
+      <strong>GrabLine</strong>
+      <span id="ext-version" class="version"></span>
+      <span id="status" class="status">checking…</span>
+    </header>
+
+    <section id="pairing-help" class="help" hidden>
+      Not paired with the desktop app. Run
+      <code>python -m app.native_host.install</code>, then reload this
+      extension.
+    </section>
+
+    <section>
+      <div class="actions">
+        <button id="open-app" class="primary">Open GrabLine</button>
+        <button id="grab-tab">Grab this tab</button>
+      </div>
+      <div class="paste-row">
+        <input id="paste-url" type="url" placeholder="Paste a link to download" />
+        <button id="paste-send">Send</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Media in this tab</h2>
+      <ul id="media-list">
+        <li class="empty">No media detected in this tab yet.</li>
+      </ul>
+    </section>
+
+    <section id="recent-section" hidden>
+      <h2>Recent downloads</h2>
+      <ul id="recent-list"></ul>
+    </section>
+
+    <footer>
+      <label>
+        <input type="checkbox" id="toggle-intercept" checked />
+        Take over browser downloads
+      </label>
+      <label>
+        <input type="checkbox" id="toggle-hover" checked />
+        Show hover download buttons
+      </label>
+      <label>
+        <input type="checkbox" id="toggle-overlay" checked />
+        Hover button on this site
+      </label>
+      <label>
+        <input type="checkbox" id="toggle-images" />
+        Hover button on images too
+      </label>
+      <label>
+        <input type="checkbox" id="toggle-pill" />
+        Show download progress on the page
+      </label>
+      <label class="field">
+        Button position
+        <select id="button-corner">
+          <option value="top-right">Top right</option>
+          <option value="top-left">Top left</option>
+          <option value="bottom-right">Bottom right</option>
+          <option value="bottom-left">Bottom left</option>
+        </select>
+      </label>
+    </footer>
+
+    <div class="settings-link">
+      <a id="open-settings">Open GrabLine settings</a>
+    </div>
+
+    <script src="../content/lib/messaging.js"></script>
+    <script src="../content/lib/format.js"></script>
+    <script src="../content/lib/naming.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

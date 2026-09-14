@@ -1,0 +1,295 @@
+/* GrabLine Connect popup - colors mirror the desktop app's design tokens
+   (app/ui/design.py) so the extension and app read as one product. */
+:root {
+  --bg: #f3f5f9;
+  --surface: #ffffff;
+  --surface2: #f5f7fa;
+  --border: #dbe0ea;
+  --text: #161b24;
+  --text2: #5a6473;
+  --text3: #98a1b2;
+  --accent: #0170fd;
+  --accent-hover: #015bd3;
+  --accent-dim: rgba(1, 112, 253, 0.12);
+  --accent-on: #ffffff;
+  --ok: #1f9d55;
+  --caution: #d29922;
+  --warn: #cf222e;
+  --row-hover: #eef3fb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181a1f;
+    --surface: #1f2228;
+    --surface2: #262a31;
+    --border: #333944;
+    --text: #dfe3ea;
+    --text2: #9aa3b2;
+    --text3: #6b7280;
+    --accent: #3d8dfd;
+    --accent-hover: #66a6ff;
+    --accent-dim: rgba(61, 141, 253, 0.18);
+    --ok: #3fb950;
+    --caution: #d29922;
+    --warn: #f85149;
+    --row-hover: #2a2f38;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html {
+  /* Reserve the scrollbar's width so it never sits on top of the content
+     (which was clipping the recent-download status and the controls). */
+  scrollbar-gutter: stable;
+  background: var(--bg);
+}
+body {
+  width: 340px;
+  margin: 0;
+  font: 13px/1.45 system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+header strong {
+  font-weight: 600;
+}
+.version {
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: 500;
+}
+.status {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text3);
+}
+.status.ok {
+  color: var(--ok);
+}
+.status.warn {
+  color: var(--caution);
+}
+.status.bad {
+  color: var(--warn);
+}
+
+.help {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text2);
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+}
+.help code {
+  font-size: 11px;
+  color: var(--text);
+}
+
+section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+h2 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+
+/* quick actions */
+.actions {
+  display: flex;
+  gap: 6px;
+}
+.actions button {
+  flex: 1;
+}
+.paste-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.paste-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.paste-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* lists (media + recent) */
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+li:last-child {
+  border-bottom: none;
+}
+li.empty {
+  color: var(--text3);
+  border: none;
+  padding: 4px 0;
+}
+.kind {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.size {
+  flex: none;
+  font-size: 11px;
+  color: var(--text3);
+}
+
+/* recent-download rows: name + thin progress bar + percent */
+.recent-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  cursor: pointer;
+}
+.recent-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.recent-status {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+}
+.bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* buttons */
+button {
+  flex: none;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover {
+  background: var(--row-hover);
+  border-color: var(--accent);
+}
+button.primary,
+li button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+button.primary:hover,
+li button:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+button:disabled {
+  color: var(--text3);
+  background: var(--surface2);
+  border-color: var(--border);
+  cursor: default;
+}
+li button.done {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--accent-on);
+}
+
+/* footer preferences */
+footer {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  font-size: 12px;
+}
+label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+label.field {
+  justify-content: space-between;
+}
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+.settings-link {
+  padding: 10px 12px;
+  text-align: center;
+}
+.settings-link a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-link a:hover {
+  text-decoration: underline;
+}
