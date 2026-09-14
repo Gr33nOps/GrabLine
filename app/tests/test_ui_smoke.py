@@ -519,7 +519,9 @@ def test_dupes_dialog_keeps_one_copy(db: Database, tmp_path: Path):
     # Even if every row gets checked, one copy always survives.
     top = dialog.tree.topLevelItem(0)
     assert top is not None
-    top.child(0).setCheckState(0, Qt.CheckState.Checked)
+    first_child = top.child(0)
+    assert first_child is not None
+    first_child.setCheckState(0, Qt.CheckState.Checked)
     assert dialog.selected_paths() == [b, c]
 
 
