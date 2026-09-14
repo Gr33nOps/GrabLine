@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    # Apt mirrors and a hung test must not burn a runner for half an hour+.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Qt runtime libraries (offscreen) and FFmpeg
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          # Bounded apt: stuck mirrors were holding the whole job for 30+ minutes.
+          sudo apt-get \
+            -o Acquire:Retries=3 \
+            -o Acquire:http:Timeout=30 \
+            -o Acquire:https:Timeout=30 \
+            -o Acquire:ftp:Timeout=30 \
+            update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire:Retries=3 \
+            -o Acquire:http:Timeout=30 \
+            -o Acquire:https:Timeout=30 \
+            install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 ffmpeg
+
+      - name: Install project
+        timeout-minutes: 5
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: "Shell-surface gate (S1: no shell=True anywhere)"
+        run: |
+          if grep -rn --include='*.py' 'shell=True' app packaging extension 2>/dev/null; then
+            echo ":error:shell=True is forbidden by security requirement S1"
+            exit 1
+          fi
+          echo "S1 gate passed"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Type check (mypy, strict on core)
+        timeout-minutes: 5
+        run: mypy app
+
+      - name: Tests (segmenter, resume, kill -9 milestone)
+        timeout-minutes: 12
+        run: pytest --timeout=90 --timeout-method=thread -m "not network"
+        env:
+          QT_QPA_PLATFORM: offscreen

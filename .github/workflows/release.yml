@@ -1,0 +1,185 @@
+name: Release
+
+# Build the desktop installers for Windows, macOS, and Linux on native
+# runners, and (on a version tag) attach them to a GitHub Release.
+#
+#   git tag v1.3.5 && git push origin v1.3.5      # -> builds + publishes
+#   or run manually from the Actions tab           # -> builds artifacts only
+#
+# Installers are UNSIGNED: Windows SmartScreen and macOS Gatekeeper will warn
+# on first launch. Signing needs paid certificates and can be added later.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Use bash on every runner (Windows included) so steps behave identically and
+# don't hit PowerShell's error-handling quirks.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: macos-latest
+            mac_arch: applesilicon
+          - os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Linux system libraries (Qt icon render + libs bundled into the app)
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libdbus-1-3 libglib2.0-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-util1 libxcb-xkb1
+
+      - name: Install app and build tools
+        timeout-minutes: 10
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller pillow
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="$(python -c 'import app; print(app.__version__)')"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Building Grabline $V"
+
+      - name: Render icons
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python packaging/make_icons.py
+
+      - name: Build macOS .icns
+        if: runner.os == 'macOS'
+        run: iconutil -c icns packaging/grabline.iconset -o packaging/grabline.icns
+
+      - name: Freeze with PyInstaller
+        run: pyinstaller packaging/grabline.spec --noconfirm --distpath dist --workpath build
+
+      - name: Package Windows installer + portable zip
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          choco install innosetup --no-progress -y
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+            "//DAppVersion=$V" \
+            packaging/windows/grabline.iss
+          # Portable: the same bundle, zipped, for USB sticks and machines
+          # where the user has no administrator rights.
+          cp packaging/windows/PORTABLE-README.txt dist/grabline/README.txt
+          (cd dist && powershell -NoProfile -Command \
+            "Compress-Archive -Path grabline -DestinationPath Grabline-$V-windows-portable.zip -Force")
+          echo "built dist/Grabline-$V-windows-portable.zip"
+
+      - name: Package macOS .dmg
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          ARCH="${{ matrix.mac_arch }}"
+          STAGE=dist/dmg
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          test -d dist/Grabline.app
+          cp -R dist/Grabline.app "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          OUT="dist/Grabline-$V-$ARCH.dmg"
+          rm -f "$OUT"
+          # Build the final compressed image in one shot. The old UDRW → attach
+          # → Finder layout → convert pipeline is what failed on macos-latest
+          # (Apple Silicon): attach/detach races leave the volume busy and the
+          # convert step exits 1 with no usable .dmg. A plain UDZO from the
+          # folder is what every other open-source mac app ships from CI, and
+          # users still drag Grabline.app onto Applications themselves.
+          hdiutil create \
+            -volname Grabline \
+            -srcfolder "$STAGE" \
+            -ov \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            "$OUT"
+          test -f "$OUT"
+          echo "built $OUT ($(du -h "$OUT" | awk '{print $1}'))"
+
+      - name: Package Linux AppImage + tarball + .deb
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          bash packaging/linux/build_appimage.sh "$V"   # also bundles Qt/xcb libs into dist/grabline
+          # A plain tarball for anyone whose system lacks FUSE (Mint/Ubuntu ship
+          # FUSE3, AppImages want FUSE2): extract and run ./grabline/grabline.
+          tar -C dist -czf "dist/Grabline-$V-linux-x86_64.tar.gz" grabline
+          echo "built dist/Grabline-$V-linux-x86_64.tar.gz"
+          # .deb for Debian/Ubuntu/Mint: menu entry, icons and a launcher on
+          # PATH, removable with apt.
+          bash packaging/linux/build_deb.sh "$V"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # One artifact per matrix entry, keyed by its runner OS.
+          name: grabline-${{ matrix.os }}
+          path: |
+            dist/Grabline-Setup-*.exe
+            dist/Grabline-*-windows-portable.zip
+            dist/Grabline-*.dmg
+            dist/Grabline-*-x86_64.AppImage
+            dist/Grabline-*-linux-x86_64.tar.gz
+            dist/grabline_*_amd64.deb
+          if-no-files-found: error
+
+  release:
+    # The three platform builds gate the release. always() lets it publish even
+    # if one leg fails, and download-artifact attaches whatever built.
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ always() && github.ref_type == 'tag' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
