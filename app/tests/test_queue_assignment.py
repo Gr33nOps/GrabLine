@@ -740,3 +740,211 @@ def test_a_sequential_queue_starts_jobs_in_the_order_its_own_moves_produced(
         assert watcher.start_order == expected
     finally:
         manager.shutdown()
+
+
+# ============================================ the live view the manager shows
+
+
+def test_queue_stats_count_every_state_and_include_the_default_queue(db: Database, dest: Path):
+    """The Queue Manager page reads this. It has to cover the default queue
+    too, or downloads in no named queue are invisible on the page that is
+    supposed to explain where downloads are."""
+    manager = DownloadManager(db, max_concurrent=0)  # scheduler idle
+    try:
+        queue = manager.create_queue("Watched")
+        empty = manager.create_queue("Empty")
+        jobs = [
+            db.create_job(f"http://x.test/{i}.bin", str(dest), f"{i}.bin", queue_id=queue.id)
+            for i in range(4)
+        ]
+        db.set_job_status(jobs[0].id, JobStatus.DOWNLOADING)
+        db.set_job_status(jobs[1].id, JobStatus.PAUSED)
+        db.set_job_status(jobs[2].id, JobStatus.COMPLETED)
+        db.set_job_status(jobs[3].id, JobStatus.FAILED, "nope")
+        db.create_job("http://x.test/loose.bin", str(dest), "loose.bin")  # no queue
+
+        stats = manager.queue_stats()
+        watched = stats[queue.id]
+        assert watched.downloading == 1
+        assert watched.paused == 1
+        assert watched.completed == 1
+        assert watched.failed == 1
+        assert watched.queued == 0
+        assert watched.total == 4
+
+        assert stats[None].queued == 1  # the default queue is present...
+        assert stats[empty.id].total == 0  # ...and so is a queue with nothing in it
+    finally:
+        manager.shutdown()
+
+
+def test_queue_stats_progress_covers_only_unfinished_work(db: Database, dest: Path):
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        queue = manager.create_queue("Progress")
+        running = db.create_job("http://x.test/a.bin", str(dest), "a.bin", queue_id=queue.id)
+        db.set_job_status(running.id, JobStatus.DOWNLOADING)
+        db.update_job_total(running.id, 1000)
+        db.update_job_downloaded(running.id, 250)
+
+        stats = manager.queue_stats()[queue.id]
+        assert stats.total_bytes == 1000
+        assert stats.downloaded_bytes == 250
+        assert stats.percent == 25
+        assert stats.active == ("a.bin",)
+    finally:
+        manager.shutdown()
+
+
+def test_queue_stats_percent_is_zero_rather_than_misleading_when_sizes_are_unknown(
+    db: Database, dest: Path
+):
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        queue = manager.create_queue("Unknown")
+        job = db.create_job("http://x.test/a.bin", str(dest), "a.bin", queue_id=queue.id)
+        db.set_job_status(job.id, JobStatus.DOWNLOADING)
+        assert manager.queue_stats()[queue.id].percent == 0
+    finally:
+        manager.shutdown()
+
+
+def test_pausing_a_queue_from_the_card_stops_new_jobs_and_resuming_releases_them(
+    server: MediaServer, db: Database, dest: Path
+):
+    """The one-click toggle is a real scheduler control, not a UI flag."""
+    urls = [server.add(f"/tog{i}.bin", payload(300_000, 110 + i), **_SLOW) for i in range(2)]
+    queue = db.create_queue("Toggle")
+    _edit(db, queue, max_concurrent=1, paused=True)
+    ids = [
+        db.create_job(
+            url, str(dest), f"tog{i}.bin", queue_id=queue.id, options={"connections": 1}
+        ).id
+        for i, url in enumerate(urls)
+    ]
+    manager = DownloadManager(db, max_concurrent=4)
+    try:
+        time.sleep(0.8)
+        assert all(_status(db, i) is JobStatus.QUEUED for i in ids)
+
+        manager.set_queue_paused(queue.id, False)
+        wait_for(lambda: _status(db, ids[0]) is JobStatus.DOWNLOADING, timeout=30)
+
+        manager.set_queue_paused(queue.id, True)  # pause again mid-flight
+        wait_for(lambda: _status(db, ids[0]) is JobStatus.COMPLETED, timeout=60)
+        time.sleep(0.8)
+        # The running one was allowed to finish; the next one does not start.
+        assert _status(db, ids[1]) is JobStatus.QUEUED
+
+        manager.set_queue_paused(queue.id, False)
+        wait_for(lambda: _status(db, ids[1]) is JobStatus.COMPLETED, timeout=60)
+    finally:
+        manager.shutdown()
+
+
+def test_moving_a_queue_changes_which_queue_gets_the_next_free_slot(
+    server: MediaServer, db: Database, dest: Path
+):
+    """Queue position is a scheduling control: with one global slot free, the
+    queue nearer the top runs first. Moving it must change that."""
+    slow = server.add("/first.bin", payload(400_000, 120), **_SLOW)
+    other = server.add("/second.bin", payload(400_000, 121), **_SLOW)
+    first = db.create_queue("First")
+    second = db.create_queue("Second")
+    a = db.create_job(slow, str(dest), "first.bin", queue_id=first.id, options={"connections": 1})
+    b = db.create_job(
+        other, str(dest), "second.bin", queue_id=second.id, options={"connections": 1}
+    )
+
+    # Reordered before any scheduler exists, so the very first pass sees both
+    # queues eligible and has to choose between them on position alone.
+    # (Unpausing them one after the other instead would just hand the slot to
+    # whichever was released first, and prove nothing.)
+    idle = DownloadManager(db, max_concurrent=0)
+    try:
+        assert [q.name for q in idle.list_queues()] == ["First", "Second"]
+        idle.move_queue(second.id, -1)
+        assert [q.name for q in idle.list_queues()] == ["Second", "First"]
+    finally:
+        idle.shutdown()
+
+    manager = DownloadManager(db, max_concurrent=1)  # exactly one slot
+    try:
+        with _ConcurrencyWatcher(db, [a.id, b.id]) as watcher:
+            wait_for(
+                lambda: all(_status(db, i) is JobStatus.COMPLETED for i in (a.id, b.id)),
+                timeout=120,
+            )
+        assert watcher.peak == 1
+        assert watcher.start_order == [b.id, a.id]  # the promoted queue went first
+    finally:
+        manager.shutdown()
+
+
+def test_moving_a_queue_at_the_edge_does_nothing(db: Database):
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        first = manager.create_queue("A")
+        manager.create_queue("B")
+        manager.move_queue(first.id, -1)
+        assert [q.name for q in manager.list_queues()] == ["A", "B"]
+        manager.move_queue(first.id, 5)
+        assert [q.name for q in manager.list_queues()] == ["A", "B"]
+    finally:
+        manager.shutdown()
+
+
+def test_the_queue_page_shows_a_card_per_queue_plus_the_default_one(db: Database, dest: Path):
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.queue_view import QueueView
+
+    if not isinstance(QApplication.instance(), QApplication):
+        QApplication([])
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        first = manager.create_queue("Sequential Test")
+        second = manager.create_queue("Big files")
+        db.create_job("http://x.test/a.bin", str(dest), "a.bin", queue_id=first.id)
+        db.create_job("http://x.test/loose.bin", str(dest), "loose.bin")
+
+        view = QueueView(manager)
+        view.show()
+        # A live slot for each named queue AND for the default queue.
+        assert set(view._live) == {first.id, second.id, None}
+        assert view._timer.isActive()  # live while visible
+        view._tick()  # must not raise with real stats
+
+        view.hide()
+        assert not view._timer.isActive()  # and idle behind another page
+        view.deleteLater()
+    finally:
+        manager.shutdown()
+
+
+def test_the_torrent_dialog_offers_and_returns_a_queue(db: Database, tmp_path: Path):
+    """The reported gap: no way to choose a queue before a torrent starts."""
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.add_download_dialog import queue_choices
+    from app.ui.torrent_dialog import AddTorrentDialog
+
+    if not isinstance(QApplication.instance(), QApplication):
+        QApplication([])
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        queue = manager.create_queue("Torrents")
+        dialog = AddTorrentDialog("ubuntu.iso", None, tmp_path, queues=queue_choices(manager))
+        assert dialog.chosen_queue() is None  # Default until chosen
+        dialog._queue.setCurrentIndex(dialog._queue.findData(queue.id))
+        assert dialog.chosen_queue() == queue.id
+
+        # A queue chosen earlier in the flow opens preselected, not reset.
+        preselected = AddTorrentDialog(
+            "ubuntu.iso", None, tmp_path, queues=queue_choices(manager), selected_queue=queue.id
+        )
+        assert preselected.chosen_queue() == queue.id
+        dialog.deleteLater()
+        preselected.deleteLater()
+    finally:
+        manager.shutdown()

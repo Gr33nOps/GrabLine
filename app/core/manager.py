@@ -10,7 +10,7 @@ import shutil
 import threading
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -177,6 +177,49 @@ class JobView:
     @property
     def display_name(self) -> str:
         return self.title or self.filename
+
+
+@dataclass(frozen=True)
+class QueueStats:
+    """What a queue is doing right now, for the Queue Manager's live view.
+
+    ``queue_id`` None is the default queue - the downloads that belong to no
+    named queue. They are as real as any other and the manager shows them, so
+    "where did my download go?" always has an answer on screen.
+    """
+
+    queue_id: int | None
+    downloading: int = 0
+    queued: int = 0
+    paused: int = 0
+    completed: int = 0
+    failed: int = 0
+    #: Bytes across every unfinished job in the queue (0 when sizes are unknown).
+    total_bytes: int = 0
+    downloaded_bytes: int = 0
+    #: Display names of the jobs actually running, in start order.
+    active: tuple[str, ...] = ()
+
+    @property
+    def waiting(self) -> int:
+        """Jobs in this queue that have not started yet."""
+        return self.queued + self.paused
+
+    @property
+    def unfinished(self) -> int:
+        return self.downloading + self.queued + self.paused
+
+    @property
+    def total(self) -> int:
+        return self.unfinished + self.completed + self.failed
+
+    @property
+    def percent(self) -> int:
+        """Progress across the queue's unfinished work, 0-100. 0 when nothing
+        in flight has reported a size yet (rather than a misleading 100)."""
+        if self.total_bytes <= 0:
+            return 0
+        return max(0, min(100, round(self.downloaded_bytes * 100 / self.total_bytes)))
 
 
 class DownloadManager:
@@ -685,6 +728,85 @@ class DownloadManager:
     def delete_queue(self, queue_id: int) -> None:
         self.db.delete_queue(queue_id)
         self._kick()
+
+    def set_queue_paused(self, queue_id: int, paused: bool) -> None:
+        """Pause or resume a whole queue (the card's one-click toggle).
+
+        Pausing stops *new* jobs from starting; a download already running is
+        left to finish, which is what a queue pause means in every download
+        manager and avoids losing partial progress on a mis-click."""
+        queue = self.db.get_queue(queue_id)
+        if queue is None or queue.paused == paused:
+            return
+        self.db.update_queue(replace(queue, paused=paused))
+        self._kick()
+
+    def move_queue(self, queue_id: int, delta: int) -> None:
+        """Move a queue up or down the running order.
+
+        Queue position decides which queue gets the next free global slot when
+        several have work waiting, so this is a real scheduling control, not
+        just a list reordering."""
+        queues = self.db.list_queues()  # already ordered by position, id
+        index = next((i for i, q in enumerate(queues) if q.id == queue_id), None)
+        if index is None:
+            return
+        target = index + delta
+        if not 0 <= target < len(queues):
+            return
+        queues[index], queues[target] = queues[target], queues[index]
+        for position, queue in enumerate(queues, start=1):
+            if queue.position != position:
+                self.db.update_queue(replace(queue, position=position))
+        self._kick()
+
+    def queue_stats(self) -> dict[int | None, QueueStats]:
+        """Live per-queue counts and progress, keyed by queue id (None = the
+        default queue). One pass over the snapshot the UI already builds, so
+        polling this costs nothing on top of the job list."""
+        running = {
+            JobStatus.DOWNLOADING: "downloading",
+            JobStatus.QUEUED: "queued",
+            JobStatus.PAUSED: "paused",
+            JobStatus.COMPLETED: "completed",
+            JobStatus.FAILED: "failed",
+        }
+        counts: dict[int | None, dict[str, int]] = {}
+        totals: dict[int | None, list[int]] = {}
+        active: dict[int | None, list[str]] = {}
+        for view in self.snapshot():
+            field = running.get(view.status)
+            if field is None:  # cancelled: not part of any queue's workload
+                continue
+            bucket = counts.setdefault(view.queue_id, {})
+            bucket[field] = bucket.get(field, 0) + 1
+            if view.status in (JobStatus.DOWNLOADING, JobStatus.QUEUED, JobStatus.PAUSED):
+                pair = totals.setdefault(view.queue_id, [0, 0])
+                pair[0] += view.total_size or 0
+                pair[1] += min(view.downloaded, view.total_size or view.downloaded)
+            if view.status is JobStatus.DOWNLOADING:
+                active.setdefault(view.queue_id, []).append(view.display_name)
+        # Every existing queue appears, even an empty one - a queue you made
+        # and cannot see the state of is worse than no queue at all.
+        keys: set[int | None] = {queue.id for queue in self.db.list_queues()}
+        keys.add(None)
+        keys.update(counts)
+        stats: dict[int | None, QueueStats] = {}
+        for key in keys:
+            bucket = counts.get(key, {})
+            total, done = totals.get(key, [0, 0])
+            stats[key] = QueueStats(
+                queue_id=key,
+                downloading=bucket.get("downloading", 0),
+                queued=bucket.get("queued", 0),
+                paused=bucket.get("paused", 0),
+                completed=bucket.get("completed", 0),
+                failed=bucket.get("failed", 0),
+                total_bytes=total,
+                downloaded_bytes=done,
+                active=tuple(active.get(key, ())),
+            )
+        return stats
 
     def set_job_queue(self, job_id: int, queue_id: int | None) -> None:
         """Move a download into a named queue / group (None = default)."""

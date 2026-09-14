@@ -4,12 +4,14 @@ create (share a file or folder as a new .torrent).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
@@ -42,6 +44,8 @@ class AddTorrentDialog(chrome.Dialog):
         default_dir: Path,
         *,
         sequential_default: bool = False,
+        queues: Sequence[tuple[int | None, str]] | None = None,
+        selected_queue: int | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -73,6 +77,15 @@ class AddTorrentDialog(chrome.Dialog):
         dir_row.addWidget(self.dir_edit, 1)
         dir_row.addWidget(browse)
         form.addRow(t("Save to:"), dir_row)
+
+        # Which queue this torrent joins, chosen before it starts - not after,
+        # by dragging it in the list once it is already eating the line.
+        self._queue = QComboBox()
+        for queue_id, name in queues if queues is not None else [(None, t("Default"))]:
+            self._queue.addItem(name, queue_id)
+        if selected_queue is not None:
+            self._queue.setCurrentIndex(max(0, self._queue.findData(selected_queue)))
+        form.addRow(t("Queue:"), self._queue)
         layout.addLayout(form)
 
         self.tree: QTreeWidget | None = None
@@ -111,6 +124,11 @@ class AddTorrentDialog(chrome.Dialog):
 
     def dest_dir(self) -> str:
         return self.dir_edit.text().strip()
+
+    def chosen_queue(self) -> int | None:
+        """The queue id picked in the dialog, or None for the default queue."""
+        data = self._queue.currentData()
+        return int(data) if data is not None else None
 
     def options(self) -> dict[str, Any]:
         options: dict[str, Any] = {}

@@ -188,9 +188,18 @@ def _segment_from_row(row: sqlite3.Row) -> Segment:
 
 class Database:
     def __init__(self, path: str | Path) -> None:
-        self._path = Path(path)
+        # Resolved up front: the path can come from the command line
+        # (``--data-dir``), and resolving collapses ``..`` and symlinks so the
+        # file this object opens is the file its ``path`` reports - no second,
+        # different interpretation later. It is the user's own machine and
+        # their own data directory, so any location they name is legitimate;
+        # what matters is that it is unambiguous.
+        self._path = Path(path).expanduser().resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        # NOSONAR(pythonsecurity:S8706,pythonsecurity:S8707) - the "injection"
+        # source is this app's own --data-dir argument, typed by the person
+        # running it; there is no privilege boundary between them and the file.
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         # The DB holds API keys and browser-session cookies. Lock the file to
         # the owner on POSIX (defense in depth behind the 0700 data dir);

@@ -2876,21 +2876,30 @@ class MainWindow(QMainWindow):
         *,
         queue_id: int | None = AUTO_QUEUE,
     ) -> None:
+        from app.ui.add_download_dialog import queue_choices
+
         dialog = AddTorrentDialog(
             name,
             cast("torrent_engine.TorrentMeta | None", meta),
             default_dir,
             sequential_default=self.settings.torrent_sequential,
+            queues=queue_choices(self.manager),
+            # A .torrent URL routed here from an add that already picked a
+            # queue opens with that queue preselected, rather than silently
+            # reverting to Default.
+            selected_queue=None if queue_id == AUTO_QUEUE else queue_id,
             parent=self,
         )
         if dialog.exec() != AddTorrentDialog.DialogCode.Accepted:
             return
+        # Whatever the dialog shows is what the user agreed to, including an
+        # explicit "Default" - so it is taken as-is, never second-guessed.
         self.manager.add_torrent(
             source,
             dest_dir=dialog.dest_dir() or default_dir,
             name=name,
             options=dialog.options(),
-            queue_id=queue_id,
+            queue_id=dialog.chosen_queue(),
         )
         self.statusBar().showMessage(t("Queued torrent {name}", name=name), 5000)
         self.refresh()

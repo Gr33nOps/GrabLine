@@ -322,14 +322,14 @@ def _webdav_http_url(url: str) -> str:
 def _tls_context(*, insecure: bool) -> ssl.SSLContext:
     """The TLS context for an FTPS control/data channel.
 
-    ``ftplib.FTP_TLS()`` with no context builds a verifying default, which is
-    right - this only relaxes it when the user asked, and states the secure
-    case explicitly so the policy is visible in one place.
+    Built by the same factory every HTTP client in the app uses, rather than
+    hand-rolled here. Two reasons: FTPS then trusts exactly the roots the rest
+    of GrabLine trusts (certifi, plus ``SSL_CERT_FILE``/``SSL_CERT_DIR`` if the
+    machine sets them) instead of whatever the system store happens to hold,
+    and the "accept anything" variant exists in exactly one place in the
+    codebase - reachable only through the user's explicit opt-in.
     """
-    context = ssl.create_default_context()
-    if insecure:
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+    context: ssl.SSLContext = net.ssl_context(verify=not insecure)
     return context
 
 
@@ -339,8 +339,14 @@ def _connect_ftp(
     parts = urlsplit(url)
     user, password = _creds(url, store)
     port = parts.port or _DEFAULT_PORTS["ftp"]
+    # ftplib.FTP (plain, unencrypted) is deliberate: ftp:// is a scheme
+    # GrabLine supports because users have servers that only speak it. It is
+    # opt-in per URL - nothing upgrades or downgrades a scheme behind the user,
+    # and ftps:// right beside it gets a verified TLS channel.
     ftp: ftplib.FTP = (
-        ftplib.FTP_TLS(context=_tls_context(insecure=insecure)) if secure else ftplib.FTP()
+        ftplib.FTP_TLS(context=_tls_context(insecure=insecure))
+        if secure
+        else ftplib.FTP()  # NOSONAR(python:S5332) - ftp:// is a scheme the user chose
     )
     ftp.connect(parts.hostname or "", port, timeout=30)
     ftp.login(user or "anonymous", password or "anonymous@")

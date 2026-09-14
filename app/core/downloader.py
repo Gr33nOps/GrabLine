@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import logging
 import os
-import random
 import re
+import secrets
 import shutil
 import threading
 from collections.abc import Callable
@@ -37,6 +37,12 @@ from app.core.ratelimit import RateLimiter
 from app.db.database import Database
 
 log = logging.getLogger(__name__)
+
+#: Randomness for retry jitter. A CSPRNG rather than ``random`` - not because
+#: jitter is a secret, but because a download manager has no use for a second,
+#: weaker random source, and the cost (a handful of calls per failed segment)
+#: is nothing next to the retry it is spacing out.
+_JITTER = secrets.SystemRandom()
 
 MIN_SEGMENT_SIZE = 256 * 1024
 DEFAULT_CONNECTIONS = 8
@@ -672,7 +678,7 @@ class SegmentedDownload:
                 # Exponential backoff with jitter: spreads out retries
                 # so many segments failing at once don't hammer in sync.
                 capped = min(self.retry_backoff * 2 ** (attempts - 1), 5.0)
-                delay = capped * (0.5 + random.random() * 0.5)
+                delay = capped * (0.5 + _JITTER.random() * 0.5)
                 self._stop_event.wait(delay)
 
     def _pushback_delay(self, exc: _Pushback, attempt: int) -> float:
@@ -682,7 +688,7 @@ class SegmentedDownload:
         if exc.retry_after is not None:
             return exc.retry_after
         capped: float = min(self.retry_backoff * 2**attempt, 20.0)
-        return capped * (0.5 + random.random() * 0.5)
+        return capped * (0.5 + _JITTER.random() * 0.5)
 
     #: A segment must have at least this much left to be worth splitting; each
     #: half then stays above MIN_SEGMENT_SIZE.
