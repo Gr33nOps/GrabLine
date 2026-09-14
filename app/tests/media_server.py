@@ -1,13 +1,22 @@
 """A local HTTP server that simulates every failure mode the segmenter must
 survive: no range support, redirects, mid-transfer connection drops, unknown
 content length, and slow (throttleable) transfers.
+
+It also speaks HTTPS with a freshly generated self-signed certificate
+(``MediaServer(tls=True)``), which is how the certificate tests exercise a real
+TLS handshake against a real untrusted chain instead of mocking httpx.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
+import ipaddress
+import pathlib
 import random
 import re
+import ssl
+import tempfile
 import threading
 import time
 from collections import Counter
@@ -17,6 +26,53 @@ from typing import Any
 from urllib.parse import urlsplit
 
 _RANGE = re.compile(r"bytes=(\d+)-(\d*)$")
+
+
+def self_signed_cert(directory: str, host: str = "127.0.0.1") -> tuple[str, str]:
+    """Write a throwaway self-signed certificate + key for ``host`` into
+    ``directory`` and return their paths.
+
+    Self-signed by construction and signed by nobody, so any client doing
+    normal verification rejects it - which is precisely the condition the
+    "allow invalid/self-signed certificates" setting exists for. It carries a
+    SAN for the IP so the only thing wrong with it is that it is untrusted,
+    not that it fails hostname matching for an unrelated reason.
+    """
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)])
+    now = _dt.datetime.now(_dt.UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)  # self-signed: issuer is itself
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - _dt.timedelta(minutes=5))
+        .not_valid_after(now + _dt.timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(host))]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = str(pathlib.Path(directory) / "self-signed.pem")
+    key_path = str(pathlib.Path(directory) / "self-signed.key")
+    with open(cert_path, "wb") as handle:
+        handle.write(certificate.public_bytes(serialization.Encoding.PEM))
+    with open(key_path, "wb") as handle:
+        handle.write(
+            key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
+    return cert_path, key_path
 
 
 def payload(size: int, seed: int = 0) -> bytes:
@@ -176,7 +232,12 @@ class _Server(ThreadingHTTPServer):
 
 
 class MediaServer:
-    def __init__(self) -> None:
+    def __init__(self, *, tls: bool = False) -> None:
+        #: Serve over HTTPS with a self-signed certificate (untrusted on
+        #: purpose - see self_signed_cert).
+        self.tls = tls
+        self._tls_dir: tempfile.TemporaryDirectory[str] | None = None
+        self.cert_path: str | None = None
         self.resources: dict[str, Resource] = {}
         self._counts: Counter[str] = Counter()
         self._served: Counter[str] = Counter()
@@ -188,6 +249,12 @@ class MediaServer:
     def start(self) -> None:
         self._httpd = _Server(("127.0.0.1", 0), _Handler)
         self._httpd.owner = self
+        if self.tls:
+            self._tls_dir = tempfile.TemporaryDirectory()
+            self.cert_path, key_path = self_signed_cert(self._tls_dir.name)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(self.cert_path, key_path)
+            self._httpd.socket = context.wrap_socket(self._httpd.socket, server_side=True)
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="media-server", daemon=True
         )
@@ -199,6 +266,9 @@ class MediaServer:
             self._httpd.server_close()
         if self._thread is not None:
             self._thread.join(timeout=5)
+        if self._tls_dir is not None:
+            self._tls_dir.cleanup()
+            self._tls_dir = None
 
     def add(self, path: str, data: bytes = b"", **options: Any) -> str:
         resource = Resource(data=data, **options)
@@ -210,7 +280,8 @@ class MediaServer:
     def url(self, path: str) -> str:
         assert self._httpd is not None, "server not started"
         port = self._httpd.server_address[1]
-        return f"http://127.0.0.1:{port}{path}"
+        scheme = "https" if self.tls else "http"
+        return f"{scheme}://127.0.0.1:{port}{path}"
 
     def bump(self, path: str) -> int:
         with self._lock:

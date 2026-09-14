@@ -879,6 +879,25 @@ class SettingsDialog(chrome.Dialog):
         security_form.addRow(self.scan_downloads_check)
         self.enforce_https_check = QCheckBox(t("Warn before downloading over unencrypted HTTP"))
         security_form.addRow(self.enforce_https_check)
+        self.insecure_ssl_check = QCheckBox(t("Allow invalid/self-signed HTTPS certificates"))
+        security_form.addRow(self.insecure_ssl_check)
+        insecure_warning = components.role_label(
+            t(
+                "Warning: this turns off HTTPS certificate verification for every "
+                "download. Nothing then proves a server is who its address says it "
+                "is, so someone on the network can serve you a different file. Leave "
+                "it off unless you are downloading from a machine whose own "
+                "certificate you already trust - a NAS, a lab box, an internal "
+                "server. A single download can be allowed on its own instead, from "
+                "the Add Download dialog."
+            ),
+            "muted",
+        )
+        insecure_warning.setWordWrap(True)
+        insecure_warning.setStyleSheet(f"color: {theme.current().warn};")
+        insecure_warning.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        insecure_warning.setMinimumWidth(0)
+        security_form.addRow(insecure_warning)
         self.virustotal_edit = QLineEdit()
         self.virustotal_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.virustotal_edit.setPlaceholderText(t("your VirusTotal API key (optional)"))
@@ -902,8 +921,9 @@ class SettingsDialog(chrome.Dialog):
         security_form.addRow(t("File types to scan:"), self.scan_ext_edit)
         security_form.addRow(
             _note(
-                "Checksums support MD5, SHA-1, SHA-256, SHA-512, and CRC32. TLS is always "
-                "validated. Nothing is ever quarantined or deleted."
+                "Checksums support MD5, SHA-1, SHA-256, SHA-512, and CRC32. TLS is "
+                "validated unless you turn that off above. Nothing is ever quarantined "
+                "or deleted."
             )
         )
 
@@ -1584,6 +1604,7 @@ class SettingsDialog(chrome.Dialog):
         # Security.
         self.scan_downloads_check.setChecked(s.scan_downloads)
         self.enforce_https_check.setChecked(s.enforce_https)
+        self.insecure_ssl_check.setChecked(s.insecure_ssl)
         self.virustotal_edit.setText(s.virustotal_key)
         self.safebrowsing_edit.setText(s.safebrowsing_key)
         self.scanner_combo.setCurrentIndex(max(0, self.scanner_combo.findData(s.scanner_pref)))
@@ -1680,6 +1701,7 @@ class SettingsDialog(chrome.Dialog):
         self.settings.scan_before_extract = self.scan_check.isChecked()
         self.settings.scan_downloads = self.scan_downloads_check.isChecked()
         self.settings.enforce_https = self.enforce_https_check.isChecked()
+        self.settings.insecure_ssl = self.insecure_ssl_check.isChecked()
         self.settings.virustotal_key = self.virustotal_edit.text()
         self.settings.safebrowsing_key = self.safebrowsing_edit.text()
         self.settings.archive_passwords = self.passwords_edit.toPlainText().splitlines()

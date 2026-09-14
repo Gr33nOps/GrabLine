@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from app.core import naming
 from app.core.batch import expand_all, extract_urls
 from app.core.i18n import t
-from app.core.manager import DownloadManager
+from app.core.manager import AUTO_QUEUE, DownloadManager
 from app.core.models import JobKind
 from app.core.resolver import Resolver
 from app.core.settings import Settings
@@ -35,11 +35,23 @@ class BatchImportThread(QThread):
     progress = Signal(int, int)  # done, total
     summary = Signal(int, object)  # queued count, list[(url, reason)]
 
-    def __init__(self, manager: DownloadManager, settings: Settings, urls: list[str]) -> None:
+    def __init__(
+        self,
+        manager: DownloadManager,
+        settings: Settings,
+        urls: list[str],
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
+    ) -> None:
         super().__init__()
         self._manager = manager
         self._settings = settings
         self._urls = urls
+        # Every URL of this import joins the queue picked once, up front - an
+        # expanded file[1-20].jpg pattern must not scatter across queues.
+        self._queue_id = queue_id
+        self._insecure = insecure
 
     def start_tracked(self) -> None:
         threads.retain(self)  # owned until finished; see app/ui/threads
@@ -67,6 +79,7 @@ class BatchImportThread(QThread):
             use_session=self._settings.use_browser_session,
             session_browser=self._settings.session_browser,
             proxy=self._settings.proxy,
+            insecure=self._insecure or self._settings.insecure_ssl,
         )
         if resolution.kind is None:
             return resolution.message or "nothing downloadable"
@@ -82,11 +95,15 @@ class BatchImportThread(QThread):
                 resolution.media.options[0],  # Best
                 use_session=self._settings.use_browser_session,
                 session_browser=self._settings.session_browser,
+                queue_id=self._queue_id,
+                insecure=self._insecure,
             )
             return None
         if resolution.kind is JobKind.HLS:
             variant = resolution.variants[0] if resolution.variants else None
-            self._manager.add_hls(url, variant=variant)
+            self._manager.add_hls(
+                url, variant=variant, queue_id=self._queue_id, insecure=self._insecure
+            )
             return None
         probe = resolution.probe
         filename = (
@@ -96,7 +113,13 @@ class BatchImportThread(QThread):
                 url, None, probe.content_type if probe is not None else None
             )
         )
-        self._manager.add_url(url, filename=filename, probe=probe)
+        self._manager.add_url(
+            url,
+            filename=filename,
+            probe=probe,
+            queue_id=self._queue_id,
+            insecure=self._insecure,
+        )
         return None
 
 

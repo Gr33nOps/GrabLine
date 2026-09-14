@@ -87,7 +87,11 @@ class Resolution:
 
 
 def _hls_variants(
-    url: str, proxy: str | None = None, headers: dict[str, str] | None = None
+    url: str,
+    proxy: str | None = None,
+    headers: dict[str, str] | None = None,
+    *,
+    insecure: bool = False,
 ) -> tuple[HlsVariant, ...]:
     """Quality choices from a master playlist; empty for media playlists
     or when the manifest cannot be fetched (FFmpeg reports the real error).
@@ -102,7 +106,9 @@ def _hls_variants(
     if referer:
         request_headers.setdefault("Referer", referer)
     try:
-        with net.build_client(proxy=proxy, follow_redirects=True, http2=True, timeout=10) as client:
+        with net.build_client(
+            proxy=proxy, insecure=insecure, follow_redirects=True, http2=True, timeout=10
+        ) as client:
             response = client.get(url, headers=request_headers or None)
             if response.status_code != 200:
                 return ()
@@ -123,6 +129,7 @@ class Resolver:
         session_browser: str = "chrome",
         proxy: str | None = None,
         headers: dict[str, str] | None = None,
+        insecure: bool = False,
     ) -> Resolution:
         url = url.strip()
         scheme = urlsplit(url).scheme.lower()
@@ -165,6 +172,7 @@ class Resolver:
                     session_browser=session_browser,
                     proxy=proxy,
                     headers=headers,
+                    insecure=insecure,
                 )
             except DownloadError as exc:
                 # A site extractor claimed the URL; its verdict is final -
@@ -176,7 +184,11 @@ class Resolver:
 
         path = urlsplit(url).path.lower()
         if path.endswith(_MANIFEST_SUFFIXES):
-            variants = _hls_variants(url, proxy, headers) if path.endswith(".m3u8") else ()
+            variants = (
+                _hls_variants(url, proxy, headers, insecure=insecure)
+                if path.endswith(".m3u8")
+                else ()
+            )
             return Resolution(url=url, kind=JobKind.HLS, variants=variants)
 
         probe_headers = dict(headers or {})
@@ -186,6 +198,10 @@ class Resolver:
         try:
             with net.build_client(
                 proxy=proxy,
+                # The resolve-time probe must follow the same TLS policy the
+                # download will: otherwise an opted-in self-signed host is
+                # rejected here and the download never gets to start.
+                insecure=insecure,
                 follow_redirects=True,
                 http2=True,
                 timeout=httpx.Timeout(20.0, connect=10.0),
@@ -202,7 +218,9 @@ class Resolver:
             return Resolution(url=url, kind=JobKind.TORRENT)
         if content_type in _MANIFEST_CONTENT_TYPES:
             variants = (
-                _hls_variants(url, proxy, headers) if content_type in _HLS_CONTENT_TYPES else ()
+                _hls_variants(url, proxy, headers, insecure=insecure)
+                if content_type in _HLS_CONTENT_TYPES
+                else ()
             )
             return Resolution(url=url, kind=JobKind.HLS, probe=result, variants=variants)
         if content_type in _HTML_CONTENT_TYPES:
@@ -216,6 +234,7 @@ class Resolver:
                 session_browser=session_browser,
                 proxy=proxy,
                 headers=headers,
+                insecure=insecure,
             )
             if scraped is not None:
                 return scraped
@@ -231,6 +250,7 @@ class Resolver:
         session_browser: str,
         proxy: str | None,
         headers: dict[str, str] | None = None,
+        insecure: bool = False,
     ) -> Resolution | None:
         """Best-effort scrape of an unsupported page. None when nothing usable
         turns up, so the caller falls back to its plain 'this is a web page'
@@ -243,6 +263,7 @@ class Resolver:
                 proxy=proxy,
                 force_generic=True,
                 headers=headers,
+                insecure=insecure,
             )
         except DownloadError:
             return None

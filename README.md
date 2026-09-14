@@ -60,8 +60,12 @@ GrabLine is built in spare time. If it saves you hassle, [buy me a coffee][suppo
 * **Video and audio:** yt dlp in process: quality picks, playlists, SponsorBlock, chapters, clip trim.
 * **Torrents:** libtorrent (same engine family as qBittorrent): magnets, DHT, sequential streaming, seed ratios, RSS.
 * **Cloud:** SFTP, FTP, S3, WebDAV with OS keychain secrets; Drive and Dropbox share links as direct downloads.
-* **Queue control:** named queues, schedules, priorities, dependencies, category auto sort.
+* **Queue control:** named queues picked when you add a download, schedules, priorities,
+  dependencies, category auto sort; set a queue to one download at a time for a strictly
+  sequential run.
 * **Network:** HTTP, HTTPS and SOCKS proxies for downloads and torrents; global, per job and per host caps.
+* **Self-signed HTTPS:** off by default; allow it globally in Settings → Security, or for a
+  single download from the Add Download dialog, for a NAS or an internal server.
 * **Dashboard:** live speed, totals, graphs for download, upload, CPU, disk and network.
 * **Advisory security:** checksums and optional scans warn; they never quarantine your file.
 

@@ -37,6 +37,8 @@ class ResolveThread(QThread):
         fallbacks: tuple[str, ...] = (),
         headers: dict[str, str] | None = None,
         parent: QObject | None = None,
+        *,
+        insecure: bool = False,
     ) -> None:
         super().__init__(parent)
         self._resolver = resolver
@@ -56,6 +58,11 @@ class ResolveThread(QThread):
         self._use_session = settings.use_browser_session
         self._browser = settings.session_browser
         self._proxy = settings.proxy
+        # Resolution must run under the same certificate policy the download
+        # will: global setting OR this add's own override. Otherwise a
+        # self-signed host is rejected during analysis and never gets as far
+        # as the download that was allowed to accept it.
+        self._insecure = bool(insecure or settings.insecure_ssl)
 
     def run(self) -> None:
         try:
@@ -65,6 +72,7 @@ class ResolveThread(QThread):
                 session_browser=self._browser,
                 proxy=self._proxy,
                 headers=self._headers or None,
+                insecure=self._insecure,
             )
         except Exception as exc:
             # Any escape here would leave the window stuck on "Analyzing…"

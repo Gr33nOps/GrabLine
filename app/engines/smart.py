@@ -173,7 +173,9 @@ _RUNTIME_MARKERS = (
 )
 
 
-def _apply_network_guards(opts: dict[str, Any], proxy: str | None) -> None:
+def _apply_network_guards(
+    opts: dict[str, Any], proxy: str | None, *, insecure: bool = False
+) -> None:
     """Bound and route every yt-dlp network operation.
 
     ``socket_timeout`` turns a dead connection into a retryable error instead
@@ -186,6 +188,12 @@ def _apply_network_guards(opts: dict[str, Any], proxy: str | None) -> None:
     opts["socket_timeout"] = 20
     if not proxy and net.ipv6_broken():
         opts["source_address"] = "0.0.0.0"  # how --force-ipv4 is spelled internally
+    if insecure:
+        # yt-dlp's spelling of --no-check-certificates. Set only when the user
+        # opted in (Settings -> Security, or this download's own override); it
+        # covers yt-dlp's own requests *and* the external downloaders it may
+        # hand a URL to. Never set as a retry after a certificate failure.
+        opts["nocheckcertificate"] = True
 
 
 def _handoff_headers(raw: Any, *, has_cookie_source: bool) -> dict[str, str]:
@@ -628,6 +636,7 @@ def prefetch_download_ready(
     proxy: str | None = None,
     session_browser: str | None = None,
     headers: dict[str, str] | None = None,
+    insecure: bool = False,
 ) -> None:
     """Start a background download-shaped extract for ``url`` (idempotent).
 
@@ -667,6 +676,7 @@ def prefetch_download_ready(
                 proxy=proxy,
                 force_generic=False,
                 headers=headers,
+                insecure=insecure,
             )
             if cancel.is_set():
                 return
@@ -792,6 +802,7 @@ class SmartEngine:
         proxy: str | None = None,
         force_generic: bool = False,
         headers: dict[str, str] | None = None,
+        insecure: bool = False,
     ) -> MediaInfo | PlaylistInfo:
         """Metadata for a URL, reusing a recent analysis of the same URL.
 
@@ -810,7 +821,10 @@ class SmartEngine:
 
             session_browser = detect_cookie_browser() or "chrome"
         header_key = tuple(sorted((headers or {}).items()))
-        key = (url, use_session, session_browser, proxy or "", force_generic, header_key)
+        # ``insecure`` is part of the key on purpose: a verified and an
+        # unverified analysis of the same URL are different requests, and one
+        # must never serve the other's answer out of this cache.
+        key = (url, use_session, session_browser, proxy or "", force_generic, header_key, insecure)
         now = time.monotonic()
         with self._lock:
             hit = self._inspected.get(key)
@@ -823,6 +837,7 @@ class SmartEngine:
             proxy=proxy,
             force_generic=force_generic,
             headers=headers,
+            insecure=insecure,
         )
         log.info("analyzed %s in %.1fs", url, time.monotonic() - now)
         with self._lock:
@@ -842,6 +857,7 @@ class SmartEngine:
         proxy: str | None = None,
         force_generic: bool = False,
         headers: dict[str, str] | None = None,
+        insecure: bool = False,
     ) -> MediaInfo | PlaylistInfo:
         """Metadata for a single video, or a fast flat listing for a playlist.
 
@@ -869,6 +885,7 @@ class SmartEngine:
                 proxy=proxy,
                 force_generic=force_generic,
                 headers=headers,
+                insecure=insecure,
             )
         except DownloadError as exc:
             # _extract_info already mapped to a friendly sentence; recover the
@@ -886,6 +903,7 @@ class SmartEngine:
                     proxy=proxy,
                     force_generic=force_generic,
                     headers=headers,
+                    insecure=insecure,
                     previous=exc,
                 )
             elif not (want_login or want_runtime):
@@ -907,6 +925,7 @@ class SmartEngine:
                         proxy=proxy,
                         force_generic=force_generic,
                         headers=headers,
+                        insecure=insecure,
                     )
                 except DownloadError as retry_exc:
                     raw_retry = str(retry_exc.__cause__ or retry_exc)
@@ -918,6 +937,7 @@ class SmartEngine:
                             proxy=proxy,
                             force_generic=force_generic,
                             headers=headers,
+                            insecure=insecure,
                             previous=retry_exc,
                         )
                     else:
@@ -937,6 +957,7 @@ class SmartEngine:
                 proxy=proxy,
                 force_generic=force_generic,
                 headers=headers,
+                insecure=insecure,
             )
             result = self._parse_inspected(
                 url, info, use_session=use_session, session_browser=session_browser, proxy=proxy
@@ -953,6 +974,7 @@ class SmartEngine:
         force_generic: bool,
         headers: dict[str, str] | None,
         previous: DownloadError,
+        insecure: bool = False,
     ) -> dict[str, Any]:
         """Retry analysis with other installed browser cookie stores."""
         from app.core.browser_setup import cookie_browser_candidates
@@ -976,6 +998,7 @@ class SmartEngine:
                     proxy=proxy,
                     force_generic=force_generic,
                     headers=headers,
+                    insecure=insecure,
                 )
             except DownloadError as exc:
                 last = exc
@@ -993,6 +1016,7 @@ class SmartEngine:
         proxy: str | None,
         force_generic: bool,
         headers: dict[str, str] | None = None,
+        insecure: bool = False,
     ) -> dict[str, Any]:
         """One yt-dlp metadata extraction. ``noplaylist`` keeps watch-URLs-
         with-a-list-param as single videos; pure playlist URLs still come back
@@ -1007,7 +1031,7 @@ class SmartEngine:
             "extract_flat": "in_playlist",
             "skip_download": True,
         }
-        _apply_network_guards(opts, proxy)
+        _apply_network_guards(opts, proxy, insecure=insecure)
         if force_generic:
             # Scrape the page itself for <video>/og:video/JSON-LD/m3u8 links.
             opts["force_generic_extractor"] = True
@@ -1234,6 +1258,7 @@ class SmartDownload:
         ratelimit: int | None = None,
         fair_limiter: Any = None,
         proxy: str | None = None,
+        insecure: bool = False,
     ) -> None:
         self.db = db
         self.job = job
@@ -1244,6 +1269,9 @@ class SmartDownload:
         # start, so fair-speed sleeps here on each progress delta instead.
         self.fair_limiter = fair_limiter
         self.proxy = proxy
+        #: Accept invalid/self-signed certificates for this job only (the
+        #: manager passes ``global setting OR this job's override``).
+        self.insecure = insecure
         self._stop_event = threading.Event()
         self._cancelled = False
         self._live = _LiveProgress()
@@ -1348,7 +1376,7 @@ class SmartDownload:
             # start transferring sooner and keep the socket busy.
             "http_chunk_size": 10 * 1024 * 1024,
         }
-        _apply_network_guards(ydl_opts, self.proxy)
+        _apply_network_guards(ydl_opts, self.proxy, insecure=self.insecure)
         if self.ffmpeg_path:
             ydl_opts["ffmpeg_location"] = self.ffmpeg_path
         if with_runtime and self._js_runtime:

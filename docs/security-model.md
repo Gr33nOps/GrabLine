@@ -31,11 +31,11 @@ what comes back over the wire.
 |---|---|---|---|---|
 | B1 | Remote server → downloader | body, `Content-Disposition` filename, redirects, sizes, content-type | arbitrary file write, crash | `sanitize_filename` on every derived name; sizes are advisory; redirects confined (B7) |
 | B2 | Web page → extension → native host → handoffs table → app | URLs, page titles, cookies/referer, quality | queue hostile URL, header injection, UI/filename poisoning, flooding | scheme allow-list, CRLF stripping, length caps, 1 MB message cap, JSON-object enforcement |
-| B3 | Pasted URL → resolver → engines | the URL itself | drive an engine at a bad target (SSRF, local read) | scheme routing; FFmpeg protocol allow-list; TLS enforced |
+| B3 | Pasted URL → resolver → engines | the URL itself | drive an engine at a bad target (SSRF, local read) | scheme routing; FFmpeg protocol allow-list; TLS verified by default |
 | B4 | Downloaded archive → extractor | member paths, symlinks, declared sizes | write outside the folder, fill the disk | `_is_within` guard (zip/tar/external), tar `data` filter, decompression-bomb cap |
 | B5 | Subprocess → FFmpeg / 7-Zip / script / power | the command line | shell injection, argument injection | argument lists only, never a shell string; paths passed as discrete args |
 | B6 | Secrets at rest → DB, exports, logs, keychain | proxy creds, cookies, API keys | credential theft | keychain for cloud logins; API keys and cookies stripped from exports; DB 0600 on POSIX; no secrets logged |
-| B7 | Network → redirects, TLS, decompression | redirect targets, certificates, gzip | MITM, SSRF, decompression bomb | TLS verification always on and never silently disabled |
+| B7 | Network → redirects, TLS, decompression | redirect targets, certificates, gzip | MITM, SSRF, decompression bomb | TLS verification on by default, off only on an explicit user opt-in, never silently |
 
 ## What is enforced (and where)
 
@@ -70,8 +70,17 @@ what comes back over the wire.
   them, and the protocol list is narrowed to `file,crypto,data`, so `file` can
   only reach the app's own temp directory, never a path the remote manifest
   chose.
-- **TLS**: certificate verification is on for every HTTP client and is never
-  disabled anywhere in the tree. A self-signed host fails closed.
+- **TLS**: certificate verification is on for every HTTP client by default, and
+  a self-signed host fails closed. It is turned off **only** where the user
+  explicitly asked for it - Settings → Security ("Allow invalid/self-signed
+  HTTPS certificates", off by default, shown with a warning) or the Add
+  Download dialog's per-download tick. The effective policy for a job is
+  `global OR per-download`, decided once in `DownloadManager.insecure_for` and
+  handed to the engine that runs it. Nothing in the tree turns verification off
+  as a *consequence* of anything: a certificate failure is reported and never
+  retried unverified, and a per-download tick never writes to Settings. When
+  the policy is on it is applied to the transport as well as the client, so a
+  proxy or the IPv4-bind path cannot silently re-enable or re-disable it.
 - **Provisioning**: the fetched FFmpeg and Deno binaries are verified against
   hardcoded SHA-256 pins and downloaded over HTTPS from their expected hosts.
 
@@ -126,7 +135,9 @@ desktop app, not a server.
   every write routes through it. (B1)
 - **Subprocesses**: argument lists throughout; the completion script appends
   the path as a discrete argument. (B5)
-- **TLS**: never disabled; self-signed fails closed. (B7)
+- **TLS**: verified by default; self-signed fails closed. Only a deliberate,
+  per-user opt-in (global setting or one download's own tick) relaxes it, and a
+  failure is never auto-retried unverified. (B7)
 - **Provisioning**: FFmpeg and Deno fetched over HTTPS against hardcoded
   SHA-256 pins. (B3)
 - **No dangerous eval**: no `eval`/`exec`/`pickle`/`yaml.load`/`marshal`/

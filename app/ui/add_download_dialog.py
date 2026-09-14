@@ -7,6 +7,7 @@ time) so it feels as quick as clicking Download in IDM.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -42,6 +43,20 @@ CATEGORIES = [
 #: "Best" is a word to translate; the format names are shown as-is.
 VIDEO_QUALITIES = [N_("Best"), "1080p", "720p", "480p", "MP3", "M4A", "FLAC"]
 
+#: What the "no named queue" choice is called in the Queue picker. Picking it
+#: is an explicit choice (manager.AUTO_QUEUE is what "nothing was chosen"
+#: means), so a download sent here is never re-routed by the category rules.
+DEFAULT_QUEUE_LABEL = N_("Default")
+
+
+def queue_choices(manager: object) -> list[tuple[int | None, str]]:
+    """(queue id, name) pairs for the picker: Default first, then the user's
+    own queues in their Queue Manager order. Takes the manager duck-typed so
+    the dialog keeps no import edge into the core package."""
+    listed = getattr(manager, "list_queues", None)
+    queues = list(listed()) if callable(listed) else []
+    return [(None, t(DEFAULT_QUEUE_LABEL)), *((q.id, q.name) for q in queues)]
+
 
 class AddDownloadDialog(chrome.Dialog):
     def __init__(
@@ -52,6 +67,7 @@ class AddDownloadDialog(chrome.Dialog):
         category: str,
         download_dir: str,
         with_quality: bool = False,
+        queues: Sequence[tuple[int | None, str]] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -105,7 +121,27 @@ class AddDownloadDialog(chrome.Dialog):
             for quality in VIDEO_QUALITIES:
                 self._quality.addItem(t(quality), quality)
             form.addRow(t("Quality"), self._quality)
+
+        # Which queue this download joins. Always shown - with no custom queues
+        # it is simply "Default", which is what the scheduler already does -
+        # so there is one consistent place to answer "where does this go?".
+        self._queue = QComboBox()
+        for queue_id, name in queues if queues is not None else [(None, t(DEFAULT_QUEUE_LABEL))]:
+            self._queue.addItem(name, queue_id)
+        form.addRow(t("Queue"), self._queue)
         layout.addLayout(form)
+
+        # Per-download HTTPS escape hatch. Off by default and never sticky: it
+        # applies to this download alone and does not touch Settings.
+        self._insecure = QCheckBox(t("Ignore HTTPS certificate errors for this download"))
+        self._insecure.setToolTip(
+            t(
+                "Only for a server whose certificate you already trust (a NAS, a "
+                "lab machine). With this on, nothing proves the server is who the "
+                "address says it is."
+            )
+        )
+        layout.addWidget(self._insecure)
 
         self._dont_ask = QCheckBox(
             t("Start downloads immediately from now on (change in Settings)")
@@ -162,3 +198,78 @@ class AddDownloadDialog(chrome.Dialog):
 
     def dont_ask_again(self) -> bool:
         return self._dont_ask.isChecked()
+
+    def chosen_queue(self) -> int | None:
+        """The queue id the user picked, or None for the default queue. Always
+        an explicit answer - the caller passes it straight to the manager."""
+        data = self._queue.currentData()
+        return int(data) if data is not None else None
+
+    def ignore_certificate_errors(self) -> bool:
+        """True when this one download may accept an invalid HTTPS certificate.
+        Deliberately has no setter side effect: the global Settings value is
+        untouched either way."""
+        return self._insecure.isChecked()
+
+
+class AddUrlDialog(chrome.Dialog):
+    """The toolbar's "Add download" prompt.
+
+    It used to be a bare ``QInputDialog.getText``, which is why a URL typed or
+    pasted into GrabLine had no way to say which queue it belonged to - the
+    queue picker existed only on the browser-handoff dialog. Same one-line
+    prompt, plus the two per-download choices, so every normal entry path can
+    answer "which queue?" before the job is created.
+    """
+
+    def __init__(
+        self,
+        *,
+        queues: Sequence[tuple[int | None, str]] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(t("Add download"))
+        self.setMinimumWidth(520)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(
+            components.role_label(t("Add download"), "strong", size=design.FONT["h1"], bold=True)
+        )
+
+        form = QFormLayout()
+        self._url = QLineEdit()
+        self._url.setPlaceholderText("https://…")
+        form.addRow(t("URL (ranges like file[1-20].jpg expand):"), self._url)
+
+        self._queue = QComboBox()
+        for queue_id, name in queues if queues is not None else [(None, t(DEFAULT_QUEUE_LABEL))]:
+            self._queue.addItem(name, queue_id)
+        form.addRow(t("Queue"), self._queue)
+        layout.addLayout(form)
+
+        self._insecure = QCheckBox(t("Ignore HTTPS certificate errors for this download"))
+        layout.addWidget(self._insecure)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = QPushButton(t("Cancel"))
+        cancel.clicked.connect(self.reject)
+        add = components.accent_button(t("Add"))
+        add.setDefault(True)
+        add.clicked.connect(self.accept)
+        buttons.addWidget(cancel)
+        buttons.addWidget(add)
+        layout.addLayout(buttons)
+        self._url.returnPressed.connect(self.accept)
+        components.cap_field_widths(self, width=380)
+
+    def url(self) -> str:
+        return self._url.text().strip()
+
+    def chosen_queue(self) -> int | None:
+        data = self._queue.currentData()
+        return int(data) if data is not None else None
+
+    def ignore_certificate_errors(self) -> bool:
+        return self._insecure.isChecked()

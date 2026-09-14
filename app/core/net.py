@@ -208,16 +208,24 @@ def redact_credentials(url: str) -> str:
     return parts._replace(netloc=host).geturl()
 
 
-def _client_kwargs(proxy: str | None) -> dict[str, Any]:
+def _client_kwargs(proxy: str | None, verify: bool) -> dict[str, Any]:
     """httpx.Client kwargs that apply ``proxy``. SOCKS4/4a get an httpx-socks
-    transport; everything else uses httpx's own proxy support."""
+    transport; everything else uses httpx's own proxy support.
+
+    ``verify`` has to be threaded into the transport, not just left on the
+    Client: a Client-level ``verify`` is only consulted when httpx builds the
+    transport itself. Hand it an explicit one (SOCKS4, the IPv4 bind, a bypass
+    mount) and that transport owns the TLS context - which is exactly how a
+    "certificate errors are ignored" setting silently stops working the moment
+    a proxy or a v6-black-holed network is in play.
+    """
     if not proxy:
         return {}
     scheme = urlsplit(proxy).scheme
     if scheme in _SOCKS4:
         from httpx_socks import SyncProxyTransport
 
-        return {"transport": SyncProxyTransport.from_url(proxy)}
+        return {"transport": SyncProxyTransport.from_url(proxy, verify=verify)}
     return {"proxy": proxy}
 
 
@@ -226,26 +234,38 @@ def build_client(
     proxy: str | None = None,
     bypass_hosts: tuple[str, ...] = (),
     user_agent: str | None = None,
+    insecure: bool = False,
     **kwargs: Any,
 ) -> httpx.Client:
     """An httpx.Client honoring ``proxy`` for any supported scheme.
 
     ``bypass_hosts`` connect directly even with a proxy set; ``user_agent``
-    overrides the default UA header for every request from this client."""
-    client_kwargs = _client_kwargs(proxy)
+    overrides the default UA header for every request from this client.
+
+    ``insecure`` turns off HTTPS certificate verification **for this client
+    only** - the opt-in "allow invalid/self-signed certificates" choice, global
+    (Settings -> Security) or per download. It is never set as a side effect of
+    a failure: nothing in the app retries a certificate error with verification
+    off. Default is, and stays, full verification.
+    """
+    verify = not insecure
+    client_kwargs = _client_kwargs(proxy, verify)
     if proxy and bypass_hosts:
         mounts = dict(client_kwargs.get("mounts") or {})
         for host in bypass_hosts:
-            mounts[f"all://{host}"] = httpx.HTTPTransport()
-            mounts[f"all://*.{host}"] = httpx.HTTPTransport()
+            mounts[f"all://{host}"] = httpx.HTTPTransport(verify=verify)
+            mounts[f"all://*.{host}"] = httpx.HTTPTransport(verify=verify)
         client_kwargs["mounts"] = mounts
     if not proxy and ipv6_broken():
         # Direct connections on a black-holed-v6 network: bind IPv4 so no
         # request waits out a v6 timeout first. (With a proxy, the proxy does
         # the onward connecting and this is its problem, not ours.)
         client_kwargs["transport"] = httpx.HTTPTransport(
-            local_address="0.0.0.0", http2=bool(kwargs.pop("http2", False))
+            local_address="0.0.0.0", http2=bool(kwargs.pop("http2", False)), verify=verify
         )
+    # Redirects, range/segment requests, retries and resumes all reuse this one
+    # client, so the policy set here is the policy for the whole download.
+    kwargs.setdefault("verify", verify)
     # Always present a browser-like User-Agent. A caller-supplied one (Settings
     # -> Network) or a User-Agent already inside ``headers`` (the browser
     # handoff's real UA) still wins via setdefault; only when neither exists do

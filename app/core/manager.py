@@ -37,6 +37,17 @@ from app.engines.torrent import TorrentDownload, TorrentStats
 
 log = logging.getLogger(__name__)
 
+#: "No queue was chosen for this add - apply the automatic rules" (a category
+#: queue, else the configured default queue, else the global default).
+#: Distinct from ``None``, which is a real, explicit choice meaning "the
+#: default queue, no named queue". SQLite row ids start at 1, so -1 can never
+#: collide with a queue.
+AUTO_QUEUE = -1
+
+#: Job option key for the per-download "ignore HTTPS certificate errors"
+#: override. Never written to Settings: it applies to this one job only.
+INSECURE_OPTION = "insecure_ssl"
+
 
 class DownloadTask(Protocol):
     """What every engine's one-shot download object provides."""
@@ -717,6 +728,27 @@ class DownloadManager:
             return default
         return None
 
+    def _resolve_queue(self, filename: str, queue_id: int | None) -> int | None:
+        """The queue a new download belongs to.
+
+        ``AUTO_QUEUE`` (the default for every add path) means "decide for me"
+        and keeps the long-standing behaviour: a category queue, else the
+        configured default queue, else no named queue. Anything else is an
+        explicit choice made by the user in the Add Download dialog - including
+        ``None`` for "Default" - and is obeyed exactly, never overridden by the
+        category rules. This is the step that was missing: without it a queue
+        picked in the dialog could only ever be advisory.
+        """
+        if queue_id == AUTO_QUEUE:
+            return self._queue_for(filename)
+        if queue_id is None:
+            return None
+        if not any(q.id == queue_id for q in self.db.list_queues()):
+            # The queue was deleted between opening the dialog and confirming.
+            log.info("queue %s no longer exists; adding to the default queue", queue_id)
+            return None
+        return queue_id
+
     def _apply_add_defaults(self, job: Job) -> Job:
         """Post-create defaults for every add path: hold the job when
         auto-start is off, and stamp the configured default tags."""
@@ -820,23 +852,30 @@ class DownloadManager:
         headers: Mapping[str, str] | None = None,
         mirrors: Sequence[str] | None = None,
         probe: ProbeResult | None = None,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> Job:
         """Queue a direct (segmented) download. ``headers`` (cookies/referer
         from the browser) let a login-gated file download too; ``mirrors`` are
         alternate URLs tried in order if this one fails for good. ``probe`` is
         the resolve-time Range probe - when provided, the downloader skips a
-        second identical round-trip and starts workers immediately."""
+        second identical round-trip and starts workers immediately.
+        ``queue_id`` is the named queue the user picked (``AUTO_QUEUE`` = apply
+        the category/default rules); ``insecure`` accepts an invalid HTTPS
+        certificate for this download only, leaving the global setting alone."""
         name = naming.sanitize_filename(filename) if filename else naming.filename_from_url(url)
         name = naming.apply_rename_rules(name, self.settings.rename_rules)
         options: dict[str, Any] = {"http_headers": dict(headers)} if headers else {}
         if mirrors:
             options["mirrors"] = [m for m in mirrors if m and m != url]
+        if insecure:
+            options[INSECURE_OPTION] = True
         job = self.db.create_job(
             url,
             self._dest_for(name, dest_dir),
             name,
             options=options,
-            queue_id=self._queue_for(name),
+            queue_id=self._resolve_queue(name, queue_id),
         )
         job = self._apply_add_defaults(job)
         if probe is not None:
@@ -865,6 +904,8 @@ class DownloadManager:
         use_session: bool = False,
         session_browser: str = "chrome",
         headers: Mapping[str, str] | None = None,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> Job:
         """Queue a Smart Engine (yt-dlp) download with a chosen quality option."""
         return self.add_smart_entry(
@@ -878,6 +919,8 @@ class DownloadManager:
             use_session=use_session,
             session_browser=session_browser,
             headers=headers,
+            queue_id=queue_id,
+            insecure=insecure,
         )
 
     def add_smart_entry(
@@ -893,6 +936,8 @@ class DownloadManager:
         use_session: bool = False,
         session_browser: str = "chrome",
         headers: Mapping[str, str] | None = None,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> Job:
         """Queue one Smart Engine job from just a URL and title - the playlist
         path (F1.7), where entries were listed flat and formats resolve at
@@ -932,6 +977,8 @@ class DownloadManager:
             options["http_headers"] = dict(headers)
         if extras:
             options.update(extras)
+        if insecure:
+            options[INSECURE_OPTION] = True
         job = self.db.create_job(
             url,
             self._dest_for(filename, dest_dir),
@@ -939,7 +986,7 @@ class DownloadManager:
             kind=JobKind.SMART,
             title=title,
             options=options,
-            queue_id=self._queue_for(filename),
+            queue_id=self._resolve_queue(filename, queue_id),
         )
         job = self._apply_add_defaults(job)
         # Show an estimated size in the list immediately when analysis already
@@ -958,6 +1005,8 @@ class DownloadManager:
         title: str | None = None,
         variant: HlsVariant | None = None,
         headers: Mapping[str, str] | None = None,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> Job:
         """Queue an HLS/DASH stream for FFmpeg reassembly; ``variant`` pins a
         quality picked from the master playlist (F2.1). ``headers``
@@ -977,6 +1026,8 @@ class DownloadManager:
             }
         if headers:
             options["http_headers"] = dict(headers)
+        if insecure:
+            options[INSECURE_OPTION] = True
         job = self.db.create_job(
             url,
             self._dest_for(filename, dest_dir),
@@ -984,7 +1035,7 @@ class DownloadManager:
             kind=JobKind.HLS,
             title=title,
             options=options,
-            queue_id=self._queue_for(filename),
+            queue_id=self._resolve_queue(filename, queue_id),
         )
         job = self._apply_add_defaults(job)
         self._kick()
@@ -997,6 +1048,7 @@ class DownloadManager:
         dest_dir: str | Path | None = None,
         name: str | None = None,
         options: Mapping[str, Any] | None = None,
+        queue_id: int | None = AUTO_QUEUE,
     ) -> Job:
         """Queue a torrent: a magnet link, a local .torrent path, or an
         http(s) .torrent URL. ``name`` is the display name until metadata
@@ -1017,7 +1069,7 @@ class DownloadManager:
             kind=JobKind.TORRENT,
             title=name,
             options=dict(options or {}),
-            queue_id=self._queue_for(name),
+            queue_id=self._resolve_queue(name, queue_id),
         )
         job = self._apply_add_defaults(job)
         self._kick()
@@ -1029,6 +1081,7 @@ class DownloadManager:
         *,
         dest_dir: str | Path | None = None,
         filename: str | None = None,
+        queue_id: int | None = AUTO_QUEUE,
     ) -> Job:
         """Queue a cloud protocol download (ftp/ftps/sftp/scp/s3/webdav).
         Credentials are looked up from the store by host at run time."""
@@ -1042,7 +1095,7 @@ class DownloadManager:
             name,
             kind=JobKind.CLOUD,
             options={},
-            queue_id=self._queue_for(name),
+            queue_id=self._resolve_queue(name, queue_id),
         )
         job = self._apply_add_defaults(job)
         self._kick()
@@ -1199,9 +1252,21 @@ class DownloadManager:
 
     # ---------------------------------------------------------- scheduler
 
+    def insecure_for(self, job: Job) -> bool:
+        """The effective certificate policy for ``job``:
+        ``global setting OR this download's own override``.
+
+        Both are opt-in and neither is ever set automatically - a certificate
+        failure is reported, never retried with verification off.
+        """
+        return bool(self.settings.insecure_ssl or job.options.get(INSECURE_OPTION))
+
     def _create_task(self, job: Job) -> DownloadTask:
         job_kbps = int(job.options.get("speed_limit_kbps") or 0)
         proxy = self.settings.proxy
+        # Recomputed on every start - so a resumed, retried or mirrored job
+        # picks up the policy in force now, not the one it was created under.
+        insecure = self.insecure_for(job)
         fair_limiter = self._fair_limiter_for(job.id)
         if job.kind is JobKind.SMART:
             # yt-dlp takes one number: the tighter of the global and per-job cap.
@@ -1214,10 +1279,17 @@ class DownloadManager:
                 ratelimit=min(rates) if rates else None,
                 fair_limiter=fair_limiter,
                 proxy=proxy,
+                insecure=insecure,
             )
         if job.kind is JobKind.HLS:
             # FFmpeg-driven jobs are not rate-limited (Phase 3 polish).
-            return HlsDownload(self.db, job, ffmpeg_path=find_ffmpeg(self.settings), proxy=proxy)
+            return HlsDownload(
+                self.db,
+                job,
+                ffmpeg_path=find_ffmpeg(self.settings),
+                proxy=proxy,
+                insecure=insecure,
+            )
         if job.kind is JobKind.TORRENT:
             return TorrentDownload(self.db, job, settings=self.settings)
         if job.kind is JobKind.CLOUD:
@@ -1256,6 +1328,7 @@ class DownloadManager:
             headers=job.options.get("http_headers") or None,
             bypass_hosts=self.settings.proxy_bypass,
             user_agent=self.settings.user_agent or None,
+            insecure=insecure,
         )
 
     def _fair_share_connections(self, job_id: int) -> int:

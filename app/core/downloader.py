@@ -221,9 +221,13 @@ class SegmentedDownload:
         headers: dict[str, str] | None = None,
         bypass_hosts: tuple[str, ...] = (),
         user_agent: str | None = None,
+        insecure: bool = False,
     ) -> None:
         self.db = db
         self.job = job
+        #: Accept an invalid/self-signed certificate for this download only
+        #: (the manager passes ``global setting OR this job's override``).
+        self.insecure = insecure
         self.connections = connections
         self.max_retries = max_retries
         self.max_pushback_retries = max_pushback_retries
@@ -264,6 +268,10 @@ class SegmentedDownload:
             proxy=proxy,
             bypass_hosts=bypass_hosts,
             user_agent=user_agent,
+            # One client for the whole download: the probe, every redirect,
+            # every range/segment request, every retry and every resume run on
+            # it, so this TLS policy is the download's TLS policy throughout.
+            insecure=insecure,
             follow_redirects=True,
             # HTTP/1.1 on purpose. This is a segmented downloader: its whole
             # point is N range requests carried on N *separate* TCP connections,

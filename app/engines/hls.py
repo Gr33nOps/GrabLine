@@ -76,6 +76,7 @@ class HlsDownload:
         stall_timeout: float = 90.0,
         max_attempts: int = 2,
         proxy: str | None = None,
+        insecure: bool = False,
     ) -> None:
         self.db = db
         self.job = job
@@ -84,6 +85,9 @@ class HlsDownload:
         self.stall_timeout = stall_timeout
         self.max_attempts = max_attempts
         self.proxy = proxy
+        #: Accept an invalid/self-signed certificate for this stream's manifest
+        #: and key/segment fetches (global setting OR this job's own override).
+        self.insecure = insecure
         self._stop_event = threading.Event()
         self._cancelled = False
         self._downloaded = 0
@@ -211,6 +215,14 @@ class HlsDownload:
             "-protocol_whitelist",
             _INPUT_PROTOCOLS,
         ]
+        if self.insecure:
+            # Only ever added when the user opted in (globally or for this
+            # download): FFmpeg 8 verifies certificates by default, so a
+            # self-signed stream host fails there exactly as httpx does. The
+            # secure path deliberately passes nothing and keeps FFmpeg's own
+            # default - turning verification *on* explicitly would need a CA
+            # bundle path we cannot guarantee on every platform.
+            command += ["-tls_verify", "0"]
         if header_block:
             # Per-input option, like -protocol_whitelist: must precede each -i
             # it applies to, or FFmpeg attaches it to the wrong stream.
@@ -218,6 +230,8 @@ class HlsDownload:
         command += ["-i", self._input_url]
         if self._audio_url:
             command += ["-protocol_whitelist", _INPUT_PROTOCOLS]
+            if self.insecure:
+                command += ["-tls_verify", "0"]
             if header_block:
                 command += ["-headers", header_block]
             command += ["-i", self._audio_url, "-map", "0", "-map", "1"]
@@ -389,7 +403,11 @@ class HlsDownload:
     def _fetch_url_text(self, url: str) -> tuple[str, str] | None:
         try:
             with net.build_client(
-                proxy=self.proxy, follow_redirects=True, http2=False, timeout=15
+                proxy=self.proxy,
+                insecure=self.insecure,
+                follow_redirects=True,
+                http2=False,
+                timeout=15,
             ) as client:
                 response = client.get(url, headers=self._headers or None)
                 if response.status_code != 200:
@@ -607,6 +625,7 @@ class HlsDownload:
         with (
             net.build_client(
                 proxy=self.proxy,
+                insecure=self.insecure,
                 follow_redirects=True,
                 # HTTP/1.1 so the segment workers are real parallel TCP flows,
                 # not multiplexed onto one h2 socket - the latter throttled the

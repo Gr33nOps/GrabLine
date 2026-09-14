@@ -523,6 +523,27 @@ class Settings:
         self._set_bool("enforce_https", value)
 
     @property
+    def insecure_ssl(self) -> bool:
+        """Accept invalid / self-signed HTTPS certificates for every download.
+
+        Off by default, and deliberately hard to turn on by accident: with it
+        on, nothing proves the server on the other end is who the URL says it
+        is, so an attacker on the path can substitute the file. It exists for
+        the real cases GrabLine could not serve at all before - a NAS, a lab
+        box, or an internal server with its own (untrusted) certificate.
+
+        A single download can opt in on its own instead, without touching this
+        (see the Add Download dialog); the effective policy for a job is
+        ``global OR per-download``. Nothing ever flips this on automatically:
+        a certificate failure is reported, never retried unverified.
+        """
+        return self._get_bool("insecure_ssl", False)
+
+    @insecure_ssl.setter
+    def insecure_ssl(self, value: bool) -> None:
+        self._set_bool("insecure_ssl", value)
+
+    @property
     def virustotal_key(self) -> str:
         """The user's own VirusTotal API key. Empty = the VirusTotal check is
         off. Only the file's hash is ever sent, never its contents."""

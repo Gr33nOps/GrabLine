@@ -101,3 +101,188 @@ def test_open_folder_reports_failure_when_no_manager_exists(
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(shutil, "which", lambda name: None)
     assert reveal.open_folder(tmp_path) is False
+
+
+# --------------------------------------------------- Linux manager selection
+#
+# The reported bug: "Open in Folder" opened Brave and showed the folder as a
+# web page. xdg-open was tried first, and on a desktop where a browser has
+# claimed inode/directory that is exactly what happens. These pin the fix:
+# a real file manager is always preferred over any generic URL handler.
+
+
+def _installed(*tools: str):
+    """A shutil.which stand-in where exactly ``tools`` exist at /usr/bin."""
+    available = set(tools)
+    return lambda name: f"/usr/bin/{name}" if name in available else None
+
+
+def _desktop(name: str) -> dict[str, str]:
+    return {"XDG_CURRENT_DESKTOP": name}
+
+
+@pytest.mark.parametrize(
+    ("desktop", "manager"),
+    [
+        ("X-Cinnamon", "nemo"),  # Linux Mint / Cinnamon
+        ("Cinnamon", "nemo"),
+        ("KDE", "dolphin"),
+        ("plasma", "dolphin"),
+        ("GNOME", "nautilus"),
+        ("ubuntu:GNOME", "nautilus"),  # colon-separated, as Ubuntu sets it
+        ("XFCE", "thunar"),
+        ("MATE", "caja"),
+        ("LXQt", "pcmanfm-qt"),
+        ("LXDE", "pcmanfm"),
+        ("Deepin", "dde-file-manager"),
+        ("Pantheon", "io.elementary.files"),
+    ],
+)
+def test_each_desktop_gets_its_own_file_manager(desktop: str, manager: str):
+    # Every manager is installed *and* so is xdg-open: the desktop's own must
+    # still win, and xdg-open must not be chosen.
+    command = reveal.unix_command(
+        Path("/home/u/Downloads"),
+        "linux",
+        which=_installed(*reveal._FILE_MANAGERS, "xdg-open", "gio"),
+        environ=_desktop(desktop),
+    )
+    assert command is not None
+    assert command[0] == f"/usr/bin/{manager}"
+    assert "xdg-open" not in command[0] and "gio" not in command[0]
+
+
+def test_desktop_session_is_read_when_xdg_current_desktop_is_missing():
+    # Some session managers only set DESKTOP_SESSION, sometimes as a path.
+    command = reveal.unix_command(
+        Path("/home/u/Downloads"),
+        "linux",
+        which=_installed("nemo", "nautilus", "xdg-open"),
+        environ={"DESKTOP_SESSION": "/usr/share/xsessions/cinnamon"},
+    )
+    assert command == ["/usr/bin/nemo", "/home/u/Downloads"]
+
+
+def test_falls_back_to_another_real_manager_when_the_desktops_own_is_missing():
+    # KDE without Dolphin installed: still a real file manager, not xdg-open.
+    command = reveal.unix_command(
+        Path("/home/u/Downloads"),
+        "linux",
+        which=_installed("thunar", "xdg-open", "gio"),
+        environ=_desktop("KDE"),
+    )
+    assert command == ["/usr/bin/thunar", "/home/u/Downloads"]
+
+
+def test_generic_opener_is_only_used_when_no_file_manager_exists():
+    command = reveal.unix_command(
+        Path("/home/u/Downloads"),
+        "linux",
+        which=_installed("xdg-open", "gio"),
+        environ=_desktop("KDE"),
+    )
+    # gio resolves inode/directory through GIO rather than the scheme-handler
+    # chain, so it is the better of the two last resorts.
+    assert command == ["/usr/bin/gio", "open", "/home/u/Downloads"]
+
+
+def test_a_browser_is_never_chosen_as_the_file_manager():
+    browsers = ("brave", "brave-browser", "firefox", "google-chrome", "chromium", "vivaldi")
+    # A machine with browsers and one real file manager.
+    command = reveal.unix_command(
+        Path("/home/u/Downloads"),
+        "linux",
+        which=_installed(*browsers, "nemo"),
+        environ=_desktop("X-Cinnamon"),
+    )
+    assert command == ["/usr/bin/nemo", "/home/u/Downloads"]
+    # And nothing browser-shaped is even a candidate.
+    assert not set(browsers) & set(reveal._FILE_MANAGERS)
+    assert not set(browsers) & set(reveal._GENERIC_OPENERS)
+    for candidates in reveal._DESKTOP_PREFERENCE.values():
+        assert not set(browsers) & set(candidates)
+
+
+def test_managers_that_support_it_select_the_file():
+    a_file = Path("/home/u/Downloads/ubuntu.iso")
+    nautilus = reveal.unix_command(
+        a_file.parent,
+        "linux",
+        reveal=a_file,
+        which=_installed("nautilus"),
+        environ=_desktop("GNOME"),
+    )
+    assert nautilus == ["/usr/bin/nautilus", "--select", str(a_file)]
+    dolphin = reveal.unix_command(
+        a_file.parent, "linux", reveal=a_file, which=_installed("dolphin"), environ=_desktop("KDE")
+    )
+    assert dolphin == ["/usr/bin/dolphin", "--select", str(a_file)]
+
+
+def test_managers_without_a_select_flag_open_the_directory_not_the_file():
+    # Nemo, Thunar and Caja have no documented select flag. Handing them the
+    # *file* would open it in its default application (a video player) rather
+    # than showing it in its folder - so the directory is the right answer.
+    a_file = Path("/home/u/Downloads/clip.mp4")
+    for desktop, manager in (("X-Cinnamon", "nemo"), ("XFCE", "thunar"), ("MATE", "caja")):
+        command = reveal.unix_command(
+            a_file.parent,
+            "linux",
+            reveal=a_file,
+            which=_installed(manager),
+            environ=_desktop(desktop),
+        )
+        assert command == [f"/usr/bin/{manager}", str(a_file.parent)]
+        assert str(a_file) not in command
+
+
+def test_an_unknown_desktop_still_finds_an_installed_manager():
+    command = reveal.unix_command(
+        Path("/srv/files"),
+        "linux",
+        which=_installed("dolphin", "xdg-open"),
+        environ={"XDG_CURRENT_DESKTOP": "some-wm-nobody-has-heard-of"},
+    )
+    assert command == ["/usr/bin/dolphin", "/srv/files"]
+
+
+def test_no_desktop_environment_at_all_still_avoids_the_generic_opener():
+    command = reveal.unix_command(
+        Path("/srv/files"), "linux", which=_installed("caja", "xdg-open"), environ={}
+    )
+    assert command == ["/usr/bin/caja", "/srv/files"]
+
+
+def test_open_folder_prefers_the_real_manager_over_xdg_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """End to end through open_folder: the bug, reproduced and fixed. On a
+    Cinnamon box with both Nemo and xdg-open installed, Nemo is launched."""
+    launched: list[list[str]] = []
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "X-Cinnamon")
+    monkeypatch.setattr(shutil, "which", _installed("nemo", "xdg-open", "brave-browser"))
+    monkeypatch.setattr(subprocess, "Popen", lambda command, **kw: launched.append(command))
+    a_file = tmp_path / "video.mp4"
+    a_file.write_bytes(b"x")
+
+    assert reveal.open_folder(a_file) is True
+    assert launched == [["/usr/bin/nemo", str(tmp_path)]]
+
+
+def test_open_folder_never_uses_shell_and_passes_an_argv_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
+    monkeypatch.setattr(shutil, "which", _installed("nautilus"))
+
+    def _record(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(subprocess, "Popen", _record)
+    assert reveal.open_folder(tmp_path) is True
+    (args, kwargs) = calls[0]
+    assert isinstance(args[0], list)  # argv, never one shell string
+    assert kwargs.get("shell") in (None, False)

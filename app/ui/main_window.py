@@ -81,7 +81,7 @@ from app.core.batch import expand_all, expand_pattern, extract_urls
 from app.core.errors import DownloadError
 from app.core.ffmpeg import find_ffmpeg
 from app.core.i18n import N_, t
-from app.core.manager import DownloadManager, JobView
+from app.core.manager import AUTO_QUEUE, DownloadManager, JobView
 from app.core.models import JobKind, JobStatus
 from app.core.resolver import Resolution, Resolver
 from app.core.settings import MAX_CONNECTIONS, Settings
@@ -1014,16 +1014,19 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- actions
 
     def _add_url(self) -> None:
-        url, accepted = QInputDialog.getText(
-            self, t("Add download"), t("URL (ranges like file[1-20].jpg expand):")
-        )
-        if not (accepted and url.strip()):
+        from app.ui.add_download_dialog import AddUrlDialog, queue_choices
+
+        dialog = AddUrlDialog(queues=queue_choices(self.manager), parent=self)
+        if dialog.exec() != AddUrlDialog.DialogCode.Accepted or not dialog.url():
             return
-        expanded = expand_pattern(url.strip())
+        queue_id = dialog.chosen_queue()
+        insecure = dialog.ignore_certificate_errors()
+        expanded = expand_pattern(dialog.url())
         if len(expanded) > 1:
-            self._run_batch(expanded)  # a pattern: queue them all at defaults
+            # A pattern expands into many jobs; they all join the chosen queue.
+            self._run_batch(expanded, queue_id=queue_id, insecure=insecure)
         else:
-            self.begin_add_url(expanded[0])
+            self.begin_add_url(expanded[0], queue_id=queue_id, insecure=insecure)
 
     def _import_links(self) -> None:
         """F2.4: paste/load many URLs; they queue at defaults, no panels."""
@@ -1243,11 +1246,19 @@ class MainWindow(QMainWindow):
             failed,
         )
 
-    def _run_batch(self, urls: list[str]) -> None:
+    def _run_batch(
+        self,
+        urls: list[str],
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
+    ) -> None:
         """Queue many URLs through the resolver at sensible defaults."""
         if not urls:
             return
-        thread = BatchImportThread(self.manager, self.settings, urls)
+        thread = BatchImportThread(
+            self.manager, self.settings, urls, queue_id=queue_id, insecure=insecure
+        )
         self._busy_begin()
         thread.progress.connect(
             lambda done, total: self.statusBar().showMessage(
@@ -1280,6 +1291,8 @@ class MainWindow(QMainWindow):
         headers: dict[str, str] | None = None,
         allow_duplicate: bool = False,
         from_browser: bool = False,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> None:
         """Entry point shared by the toolbar, tray, clipboard, and extension.
         A ``quality`` label (F1.3 in-page panel) skips the quality dialog;
@@ -1358,9 +1371,9 @@ class MainWindow(QMainWindow):
             return
         args = (page_title, quality, fallbacks, headers, from_browser)
         if self.settings.safebrowsing_key and scheme in ("http", "https"):
-            self._safebrowsing_then_resolve(url, args)
+            self._safebrowsing_then_resolve(url, args, queue_id=queue_id, insecure=insecure)
             return
-        self._finish_add(url, *args)
+        self._finish_add(url, *args, queue_id=queue_id, insecure=insecure)
 
     def _finish_add(
         self,
@@ -1370,13 +1383,18 @@ class MainWindow(QMainWindow):
         fallbacks: tuple[str, ...],
         headers: dict[str, str] | None,
         from_browser: bool,
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> None:
         # A download started in the browser opens the Download Info dialog; a
         # paste/import goes straight through the resolver as before.
         if from_browser:
             self._browser_add(url, page_title, fallbacks, headers)
         else:
-            self._resolve_and_queue(url, page_title, quality, fallbacks, headers)
+            self._resolve_and_queue(
+                url, page_title, quality, fallbacks, headers, queue_id=queue_id, insecure=insecure
+            )
 
     def _confirm_insecure(self, url: str) -> bool:
         answer = QMessageBox.warning(
@@ -1396,6 +1414,9 @@ class MainWindow(QMainWindow):
         self,
         url: str,
         args: tuple[str | None, str | None, tuple[str, ...], dict[str, str] | None, bool],
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> None:
         key = self.settings.safebrowsing_key
         proxy = self.settings.proxy
@@ -1418,12 +1439,13 @@ class MainWindow(QMainWindow):
                 if answer != QMessageBox.StandardButton.Yes:
                     self.statusBar().showMessage(t("Ready"))
                     return
-            self._finish_add(url, *args)
+            self._finish_add(url, *args, queue_id=queue_id, insecure=insecure)
 
         self._run_file_op(
             lambda: reputation.safebrowsing_check(url, key, proxy=proxy),
             done,
-            lambda _e: self._finish_add(url, *args),  # a failed check never blocks
+            # A failed check never blocks - and never loses the chosen queue.
+            lambda _e: self._finish_add(url, *args, queue_id=queue_id, insecure=insecure),
         )
 
     def _raise_to_front(self) -> None:
@@ -1496,11 +1518,14 @@ class MainWindow(QMainWindow):
             category = categories.category_for(name) or "Documents"
 
         if not self.settings.confirm_downloads:
+            # Confirmation is deliberately off: no dialog, and the add keeps the
+            # existing default behaviour (AUTO_QUEUE -> category queue, else the
+            # configured default queue) rather than inventing a prompt.
             dest = str(categories.dest_dir_for(self.settings.download_dir, name, enabled=True))
             self._queue_download(url, name, dest, None, False, is_stream, headers, False)
             return
 
-        from app.ui.add_download_dialog import AddDownloadDialog
+        from app.ui.add_download_dialog import AddDownloadDialog, queue_choices
 
         dialog = AddDownloadDialog(
             url,
@@ -1508,6 +1533,7 @@ class MainWindow(QMainWindow):
             category=category,
             download_dir=str(self.settings.download_dir),
             with_quality=False,
+            queues=queue_choices(self.manager),
             parent=self,
         )
         self._raise_to_front()
@@ -1525,6 +1551,8 @@ class MainWindow(QMainWindow):
             is_stream,
             headers,
             dialog.outcome() == "later",
+            queue_id=dialog.chosen_queue(),
+            insecure=dialog.ignore_certificate_errors(),
         )
 
     def _queue_download(
@@ -1537,7 +1565,14 @@ class MainWindow(QMainWindow):
         is_stream: bool,
         headers: dict[str, str] | None,
         paused: bool,
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> None:
+        """Hand the add straight to the manager. ``queue_id`` is whatever the
+        Add Download dialog returned (AUTO_QUEUE when there was no dialog), and
+        it reaches ``Job.queue_id`` unchanged - nothing downstream re-routes
+        it, which is what made the picker meaningful rather than decorative."""
         if is_video:
             option = option_for_label(quality or "Best") or generic_quality_options()[0]
             job = self.manager.add_smart_entry(
@@ -1548,11 +1583,27 @@ class MainWindow(QMainWindow):
                 use_session=self.settings.use_browser_session,
                 session_browser=self.settings.session_browser,
                 headers=headers,
+                queue_id=queue_id,
+                insecure=insecure,
             )
         elif is_stream:
-            job = self.manager.add_hls(url, dest_dir=dest, title=name or None, headers=headers)
+            job = self.manager.add_hls(
+                url,
+                dest_dir=dest,
+                title=name or None,
+                headers=headers,
+                queue_id=queue_id,
+                insecure=insecure,
+            )
         else:
-            job = self.manager.add_url(url, dest_dir=dest, filename=name or None, headers=headers)
+            job = self.manager.add_url(
+                url,
+                dest_dir=dest,
+                filename=name or None,
+                headers=headers,
+                queue_id=queue_id,
+                insecure=insecure,
+            )
         if paused:
             self.manager.pause(job.id)
         message = t("Queued {name}", name=name) if name else t("Queued")
@@ -1585,6 +1636,9 @@ class MainWindow(QMainWindow):
         quality: str | None,
         fallbacks: tuple[str, ...],
         headers: dict[str, str] | None,
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> None:
         # The in-page quality panel already chose - skip analysis entirely and
         # let the download's single extraction do everything (formats resolve
@@ -1596,7 +1650,15 @@ class MainWindow(QMainWindow):
             # building it on the GUI thread is a multi-second freeze. Warm it
             # behind the window and come straight back here.
             self._when_smart_ready(
-                lambda: self._resolve_and_queue(url, page_title, quality, fallbacks, headers)
+                lambda: self._resolve_and_queue(
+                    url,
+                    page_title,
+                    quality,
+                    fallbacks,
+                    headers,
+                    queue_id=queue_id,
+                    insecure=insecure,
+                )
             )
             return
         if quality and self.resolver.smart.matches(url):
@@ -1614,6 +1676,8 @@ class MainWindow(QMainWindow):
                     session_browser=self.settings.session_browser,
                     extras={"name_from_metadata": True},
                     headers=headers,
+                    queue_id=queue_id,
+                    insecure=insecure,
                 )
                 self.statusBar().showMessage(t("Queued ({label})", label=option.label), 5000)
                 self.refresh()
@@ -1628,7 +1692,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(t("Analyzing {url} …", url=url))
         self._busy_begin()
         thread = work_threads.ResolveThread(
-            self.resolver, url, self.settings, page_title, quality, fallbacks, headers, self
+            self.resolver,
+            url,
+            self.settings,
+            page_title,
+            quality,
+            fallbacks,
+            headers,
+            self,
+            insecure=insecure,
         )
 
         def _resolve_finished() -> None:
@@ -1641,9 +1713,24 @@ class MainWindow(QMainWindow):
         if instant:
             # Starts the thread itself, then blocks on the modal picker while
             # the analysis runs behind it.
-            self._instant_quality_panel(thread, url, page_title, fallbacks, headers)
+            self._instant_quality_panel(
+                thread, url, page_title, fallbacks, headers, queue_id=queue_id, insecure=insecure
+            )
             return
-        thread.resolved.connect(self._on_resolved)
+        # The queue picked before analysis has to survive the trip through the
+        # resolve thread, or the choice is silently dropped for every URL that
+        # needs analysing (i.e. every video).
+        thread.resolved.connect(
+            lambda resolution, title_, quality_, fallbacks_, headers_: self._on_resolved(
+                resolution,
+                title_,
+                quality_,
+                fallbacks_,
+                headers_,
+                queue_id=queue_id,
+                insecure=insecure,
+            )
+        )
         thread.start()
 
     def _instant_quality_panel(
@@ -1653,6 +1740,9 @@ class MainWindow(QMainWindow):
         page_title: str | None,
         fallbacks: tuple[str, ...],
         headers: dict[str, str] | None,
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> None:
         """Put the quality picker on screen now and let analysis catch up.
 
@@ -1692,6 +1782,7 @@ class MainWindow(QMainWindow):
                     proxy=self.settings.proxy,
                     session_browser=self.settings.session_browser or None,
                     headers=hdrs,
+                    insecure=insecure or self.settings.insecure_ssl,
                 )
                 return
             # Not a single video after all - hand it back to the full router.
@@ -1706,7 +1797,9 @@ class MainWindow(QMainWindow):
         accepted = panel.exec() == QualityPanel.DialogCode.Accepted
         other = landed.get("other")
         if other is not None:
-            self._on_resolved(other, page_title, None, fallbacks, headers)
+            self._on_resolved(
+                other, page_title, None, fallbacks, headers, queue_id=queue_id, insecure=insecure
+            )
             return
         resolution = landed.get("resolution")
         if not accepted:
@@ -1729,6 +1822,8 @@ class MainWindow(QMainWindow):
             "use_session": self.settings.use_browser_session,
             "session_browser": self.settings.session_browser,
             "headers": headers,
+            "queue_id": queue_id,
+            "insecure": insecure,
         }
         if resolution is not None and resolution.media is not None:
             self.manager.add_smart(resolution.url, resolution.media, option, **common)
@@ -1785,6 +1880,9 @@ class MainWindow(QMainWindow):
         quality: str | None = None,
         fallbacks: tuple[str, ...] = (),
         headers: dict[str, str] | None = None,
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+        insecure: bool = False,
     ) -> None:
         self.statusBar().showMessage(t("Ready"))
         if resolution.kind is None:
@@ -1797,15 +1895,17 @@ class MainWindow(QMainWindow):
                     quality=quality,
                     fallbacks=tuple(fallbacks[1:]),
                     headers=headers,
+                    queue_id=queue_id,
+                    insecure=insecure,
                 )
                 return
             QMessageBox.information(self, "GrabLine", resolution.message or t("No media found."))
             return
         if resolution.kind is JobKind.TORRENT:
-            self.add_torrent_source(resolution.url)
+            self.add_torrent_source(resolution.url, queue_id=queue_id)
             return
         if resolution.kind is JobKind.CLOUD:
-            self.add_cloud_source(resolution.url)
+            self.add_cloud_source(resolution.url, queue_id=queue_id)
             return
         if (
             quality
@@ -1825,6 +1925,8 @@ class MainWindow(QMainWindow):
                 use_session=self.settings.use_browser_session,
                 session_browser=self.settings.session_browser,
                 headers=headers,
+                queue_id=queue_id,
+                insecure=insecure,
             )
             self.statusBar().showMessage(
                 t("Queued {name} ({label})", name=resolution.media.title, label=option.label),
@@ -1840,6 +1942,7 @@ class MainWindow(QMainWindow):
                 proxy=self.settings.proxy,
                 session_browser=self.settings.session_browser or None,
                 headers=headers,
+                insecure=insecure or self.settings.insecure_ssl,
             )
         dest = self._ask_dest()
         if dest is None:
@@ -1864,6 +1967,8 @@ class MainWindow(QMainWindow):
                     use_session=self.settings.use_browser_session,
                     session_browser=self.settings.session_browser,
                     headers=headers,
+                    queue_id=queue_id,
+                    insecure=insecure,
                 )
         elif resolution.kind is JobKind.SMART and resolution.media is not None:
             quality_panel = QualityPanel(
@@ -1887,6 +1992,8 @@ class MainWindow(QMainWindow):
                 use_session=self.settings.use_browser_session,
                 session_browser=self.settings.session_browser,
                 headers=headers,
+                queue_id=queue_id,
+                insecure=insecure,
             )
         elif resolution.kind is JobKind.HLS:
             variant = None
@@ -1918,6 +2025,8 @@ class MainWindow(QMainWindow):
                 title=page_title,
                 variant=variant,
                 headers=headers,
+                queue_id=queue_id,
+                insecure=insecure,
             )
         else:
             # F1.8 name fixer: prefer Content-Disposition, then rescue ugly
@@ -1941,6 +2050,8 @@ class MainWindow(QMainWindow):
                 headers=headers or None,
                 mirrors=list(fallbacks) or None,
                 probe=probe,
+                queue_id=queue_id,
+                insecure=insecure,
             )
         self.refresh()
 
@@ -2662,7 +2773,7 @@ class MainWindow(QMainWindow):
         if url:
             self.add_cloud_source(url)
 
-    def add_cloud_source(self, url: str) -> None:
+    def add_cloud_source(self, url: str, *, queue_id: int | None = AUTO_QUEUE) -> None:
         """Queue a cloud protocol download. A URL ending in '/' is treated as a
         folder: its files are listed and offered in a picker."""
         if url.rstrip().endswith("/"):
@@ -2678,7 +2789,7 @@ class MainWindow(QMainWindow):
                 if dialog.exec() != CloudFolderDialog.DialogCode.Accepted:
                     return
                 for file_url in dialog.selected_urls():
-                    self.manager.add_cloud(file_url)
+                    self.manager.add_cloud(file_url, queue_id=queue_id)
                 self.statusBar().showMessage(
                     t("Queued {count} file(s)", count=len(dialog.selected_urls())), 5000
                 )
@@ -2686,7 +2797,7 @@ class MainWindow(QMainWindow):
 
             self._run_file_op(lambda: self.manager.list_cloud_folder(url), listed)
             return
-        self.manager.add_cloud(url)
+        self.manager.add_cloud(url, queue_id=queue_id)
         self.statusBar().showMessage(t("Queued cloud download"), 5000)
         self.refresh()
 
@@ -2722,21 +2833,21 @@ class MainWindow(QMainWindow):
         if chosen:
             self.add_torrent_source(chosen)
 
-    def add_torrent_source(self, source: str) -> None:
+    def add_torrent_source(self, source: str, *, queue_id: int | None = AUTO_QUEUE) -> None:
         """Open the add-torrent dialog for a magnet link, a local .torrent
         path, or an http(s) .torrent URL - the one entry point used by the
         menu, the resolver, drag-and-drop, and 'open with GrabLine'."""
         default_dir = self.settings.torrent_dir or self.settings.download_dir
         if source.lower().startswith("magnet:"):
             name = torrent_engine.magnet_display_name(source) or t("Magnet link")
-            self._open_add_torrent(source, name, None, default_dir)
+            self._open_add_torrent(source, name, None, default_dir, queue_id=queue_id)
             return
         self.statusBar().showMessage(t("Reading torrent …"))
 
         def loaded(result: object) -> None:
             self.statusBar().clearMessage()
             meta = cast("torrent_engine.TorrentMeta", result)
-            self._open_add_torrent(source, meta.name, meta, default_dir)
+            self._open_add_torrent(source, meta.name, meta, default_dir, queue_id=queue_id)
 
         self._run_file_op(
             lambda: torrent_engine.parse_torrent(
@@ -2745,7 +2856,15 @@ class MainWindow(QMainWindow):
             loaded,
         )
 
-    def _open_add_torrent(self, source: str, name: str, meta: object, default_dir: Path) -> None:
+    def _open_add_torrent(
+        self,
+        source: str,
+        name: str,
+        meta: object,
+        default_dir: Path,
+        *,
+        queue_id: int | None = AUTO_QUEUE,
+    ) -> None:
         dialog = AddTorrentDialog(
             name,
             cast("torrent_engine.TorrentMeta | None", meta),
@@ -2756,7 +2875,11 @@ class MainWindow(QMainWindow):
         if dialog.exec() != AddTorrentDialog.DialogCode.Accepted:
             return
         self.manager.add_torrent(
-            source, dest_dir=dialog.dest_dir() or default_dir, name=name, options=dialog.options()
+            source,
+            dest_dir=dialog.dest_dir() or default_dir,
+            name=name,
+            options=dialog.options(),
+            queue_id=queue_id,
         )
         self.statusBar().showMessage(t("Queued torrent {name}", name=name), 5000)
         self.refresh()
