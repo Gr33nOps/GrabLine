@@ -350,8 +350,19 @@ def test_disk_space_needed_is_measured_from_progress_not_apparent_size(db: Datab
         handle.truncate(10_000_000)
     assert part.stat().st_size == 10_000_000
 
-    # No segments have progress, so essentially the whole file is still to come.
-    assert task._bytes_still_needed(part, 10_000_000) > 9_000_000
+    # Nothing is recorded as written, so the whole file is still to come -
+    # on every platform. (Windows has no st_blocks to ask about the real
+    # allocation, so anything derived from the part file's own size is wrong
+    # there too; only recorded progress is trustworthy.)
+    assert task._bytes_still_needed(part, 10_000_000) == 10_000_000
+
+    # Once segments carry progress, that is what counts.
+    from app.core.models import Segment
+
+    task._segments = [
+        Segment(id=1, job_id=job.id, index=0, start=0, end=9_999_999, downloaded=4_000_000)
+    ]
+    assert task._bytes_still_needed(part, 10_000_000) == 6_000_000
 
 
 # ----------------------------------------- #12 cloud resume and remote identity
