@@ -39,11 +39,16 @@ jobs:
             install -y --no-install-recommends \
             libegl1 libgl1 libxkbcommon0 ffmpeg
 
+      # NOSONAR on the pip lines: S8541 wants --only-binary :all:, which
+      # forbids the build an editable install performs, and S8544 wants a
+      # resolved lockfile this project does not keep. What is pinned instead:
+      # every Action is a commit SHA, the release build tools are exact
+      # versions, and each release attaches the pip freeze of its build.
       - name: Install project
         timeout-minutes: 5
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          python -m pip install --upgrade pip  # NOSONAR
+          pip install -e ".[dev]"  # NOSONAR
 
       - name: "Shell-surface gate (S1: no shell=True anywhere)"
         run: |
@@ -95,8 +100,8 @@ jobs:
         timeout-minutes: 10
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          python -m pip install --upgrade pip  # NOSONAR
+          pip install -e ".[dev]"  # NOSONAR
 
       - name: Platform-sensitive tests
         timeout-minutes: 12
