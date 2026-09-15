@@ -13,6 +13,8 @@ import os
 import socket
 import threading
 import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any
 from urllib.parse import urlsplit
@@ -97,8 +99,12 @@ _V6_RECHECK = 600.0  # networks change (wifi roaming, VPN up/down)
 #: wait at all - they use the cached answer while a refresh runs behind them.
 _V6_FIRST_WAIT = 2.0
 _v6_lock = threading.Lock()
-_v6_state: tuple[float, bool] | None = None  # (checked at, force IPv4?)
-_v6_probe_done: threading.Event | None = None  # set when an in-flight probe lands
+#: host -> (checked at, force IPv4?). Per host on purpose: v6 brokenness is a
+#: property of the *route*, so "YouTube's v6 is black-holed" says nothing about
+#: the NAS on the LAN or the CDN a file is on. Keyed answers are what stop one
+#: site's bad route from taking IPv6 away from every other download.
+_v6_state: dict[str, tuple[float, bool]] = {}
+_v6_probe_done: dict[str, threading.Event] = {}
 
 
 def _handshakes(host: str, family: socket.AddressFamily) -> bool:
@@ -113,25 +119,22 @@ def _handshakes(host: str, family: socket.AddressFamily) -> bool:
         return False
 
 
-def _run_v6_probe(done: threading.Event) -> None:
-    global _v6_state
+def _run_v6_probe(host: str, done: threading.Event) -> None:
     try:
-        broken = not _handshakes(_V6_PROBE_HOST, socket.AF_INET6) and _handshakes(
-            _V6_PROBE_HOST, socket.AF_INET
-        )
+        broken = not _handshakes(host, socket.AF_INET6) and _handshakes(host, socket.AF_INET)
     except Exception:  # a probe must never take a thread down with it
         log.debug("IPv6 probe failed", exc_info=True)
         broken = False
     else:
         if broken:
-            log.info("IPv6 to %s is unusable - forcing IPv4 connections", _V6_PROBE_HOST)
+            log.info("IPv6 to %s is unusable - forcing IPv4 for it", host)
     with _v6_lock:
-        _v6_state = (time.monotonic(), broken)
+        _v6_state[host] = (time.monotonic(), broken)
     done.set()
 
 
-def ipv6_broken() -> bool:
-    """True when connections should be forced onto IPv4.
+def ipv6_broken(host: str = _V6_PROBE_HOST) -> bool:
+    """True when connections *to this host* should be forced onto IPv4.
 
     The failure this exists for: the OS resolves AAAA records and routes v6,
     but the v6 SYNs to a host vanish into a black hole. Neither httpx nor
@@ -151,28 +154,50 @@ def ipv6_broken() -> bool:
     client build - i.e. every download and every analysis. Callers get the last
     known answer (or "not broken") instead of inheriting that stall.
     """
+    host = (host or "").strip().lower()
+    if not host:
+        return False
     with _v6_lock:
-        state = _v6_state
+        state = _v6_state.get(host)
         if state is not None and time.monotonic() - state[0] < _V6_RECHECK:
             return state[1]
-        done = _start_v6_probe_locked()
+        done = _start_v6_probe_locked(host)
     if state is not None:
         return state[1]  # stale but serviceable; the refresh lands behind us
     done.wait(_V6_FIRST_WAIT)
     with _v6_lock:
-        return _v6_state[1] if _v6_state is not None else False
+        cached = _v6_state.get(host)
+        return cached[1] if cached is not None else False
 
 
-def _start_v6_probe_locked() -> threading.Event:
-    """Start a probe unless one is already in flight. Caller holds _v6_lock."""
-    global _v6_probe_done
-    done = _v6_probe_done
+def _start_v6_probe_locked(host: str) -> threading.Event:
+    """Start a probe for ``host`` unless one is in flight. Caller holds the lock."""
+    done = _v6_probe_done.get(host)
     if done is not None and not done.is_set():
         return done
     done = threading.Event()
-    _v6_probe_done = done
-    threading.Thread(target=_run_v6_probe, args=(done,), name="gl-v6probe", daemon=True).start()
+    _v6_probe_done[host] = done
+    threading.Thread(
+        target=_run_v6_probe, args=(host, done), name="gl-v6probe", daemon=True
+    ).start()
     return done
+
+
+def host_of(url: str) -> str | None:
+    """A URL's lower-cased hostname, or None when it has none/is malformed."""
+    try:
+        return (urlsplit(url).hostname or "").lower() or None
+    except ValueError:
+        return None
+
+
+def force_ipv4_for(url: str) -> bool:
+    """Should connections for ``url`` bind IPv4? Probes that URL's own host."""
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:
+        return False
+    return ipv6_broken(host) if host else False
 
 
 def validate_proxy(url: str) -> str | None:
@@ -200,14 +225,42 @@ def redact_credentials(url: str) -> str:
         return url
     try:
         parts = urlsplit(url)
+        username = parts.username
     except ValueError:
-        return url
-    if not parts.username:
+        return _blind_redact(url)
+    if not username:
         return url
     host = parts.hostname or ""
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    return parts._replace(netloc=host).geturl()
+    try:
+        # .port parses lazily and raises on a non-numeric or out-of-range port
+        # ("h:abc", "h:99999") - urlsplit itself accepts both. This function is
+        # called from logging and diagnostics paths, so it raising is not a
+        # cosmetic bug: it turns "report an error safely" into a second error,
+        # and the fallback below is what keeps the secret out of the report.
+        port = parts.port
+    except ValueError:
+        return _blind_redact(url)
+    if port:
+        host = f"{host}:{port}"
+    try:
+        return parts._replace(netloc=host).geturl()
+    except ValueError:  # pragma: no cover - defensive; geturl() re-parses
+        return _blind_redact(url)
+
+
+def _blind_redact(url: str) -> str:
+    """Drop everything between ``//`` and the last ``@`` without parsing.
+
+    The safe answer for a URL too malformed to parse: the userinfo is whatever
+    precedes the ``@``, so removing it cannot leak the secret even if the rest
+    of the string is nonsense.
+    """
+    marker = url.find("//")
+    start = marker + 2 if marker >= 0 else 0
+    at = url.rfind("@")
+    if at <= start:
+        return url
+    return url[:start] + url[at + 1 :]
 
 
 @lru_cache(maxsize=8)
@@ -277,12 +330,23 @@ def build_client(
     bypass_hosts: tuple[str, ...] = (),
     user_agent: str | None = None,
     insecure: bool = False,
+    trusted_host: str | None = None,
+    force_ipv4: bool | None = None,
     **kwargs: Any,
 ) -> httpx.Client:
     """An httpx.Client honoring ``proxy`` for any supported scheme.
 
     ``bypass_hosts`` connect directly even with a proxy set; ``user_agent``
     overrides the default UA header for every request from this client.
+
+    ``force_ipv4`` binds outgoing sockets to IPv4. It defaults to *off*: the
+    IPv6 health probe it used to consult targets one host (YouTube), and a
+    single site's broken v6 route is no reason to take v6 away from every
+    unrelated download on the machine. The Smart engine, whose sites the probe
+    actually measures, opts in explicitly.
+
+    ``trusted_host`` narrows ``insecure`` to that host and its subdomains, so a
+    redirect off it is verified normally.
 
     ``insecure`` turns off HTTPS certificate verification **for this client
     only** - the opt-in "allow invalid/self-signed certificates" choice, global
@@ -292,6 +356,8 @@ def build_client(
     """
     # One shared context per policy instead of re-parsing the CA bundle for
     # every client (see _ssl_context).
+    if force_ipv4 is None:
+        force_ipv4 = False
     verify = ssl_context(verify=not insecure)
     client_kwargs = _client_kwargs(proxy, verify)
     if proxy and bypass_hosts:
@@ -300,7 +366,22 @@ def build_client(
             mounts[f"all://{host}"] = httpx.HTTPTransport(verify=verify)
             mounts[f"all://*.{host}"] = httpx.HTTPTransport(verify=verify)
         client_kwargs["mounts"] = mounts
-    if not proxy and ipv6_broken():
+    if insecure and trusted_host and not proxy:
+        # Scope the exemption to the host the user actually approved. Without
+        # this, "ignore the certificate for this download" also covers wherever
+        # a redirect points - so a box with a self-signed certificate could
+        # bounce the download to any host at all and have that host's
+        # certificate skipped too. Everything off the approved host verifies
+        # normally, which is what makes this an exemption rather than a switch
+        # that turns HTTPS off. (With a proxy, httpx owns the mounts for
+        # proxying; the exemption then applies client-wide as before.)
+        mounts = dict(client_kwargs.get("mounts") or {})
+        mounts["https://"] = httpx.HTTPTransport(verify=ssl_context(verify=True))
+        relaxed = httpx.HTTPTransport(verify=verify)
+        mounts[f"https://{trusted_host}"] = relaxed
+        mounts[f"https://*.{trusted_host}"] = relaxed
+        client_kwargs["mounts"] = mounts
+    if not proxy and force_ipv4:
         # Direct connections on a black-holed-v6 network: bind IPv4 so no
         # request waits out a v6 timeout first. (With a proxy, the proxy does
         # the onward connecting and this is its problem, not ours.)
@@ -338,3 +419,146 @@ def active_vpn_interfaces() -> list[str]:
         for name, info in stats.items()
         if getattr(info, "isup", False) and any(h in name.lower() for h in _VPN_HINTS)
     ]
+
+
+#: Request headers that authenticate the *user*, not the request. They are the
+#: browser handoff's session: whoever receives them can act as that user on the
+#: origin that issued them. Everything else a handoff carries (User-Agent,
+#: Referer, Accept-*) identifies the request and is safe to send anywhere - a
+#: browser sends those cross-origin too.
+CREDENTIAL_HEADERS = frozenset({"cookie", "authorization", "proxy-authorization"})
+
+#: How many hops a scoped fetch will follow before giving up.
+MAX_REDIRECTS = 10
+
+
+def same_origin(url: str, origin: str) -> bool:
+    """Is ``url`` within ``origin``'s credential scope?
+
+    The rule: the same host (or a subdomain of it), on the same port, without
+    downgrading https to http - a credential sent in the clear is a credential
+    given away.
+
+    The port is part of it even though cookies themselves are not port-scoped.
+    This is a credential-forwarding decision, not a cookie-jar lookup, and on a
+    machine where several services share one hostname - a NAS on :5000 and
+    :8080, anything behind localhost - a different port is a different
+    application. Treating those as one origin would hand one service's session
+    to another.
+    """
+    try:
+        target, source = urlsplit(url), urlsplit(origin)
+        target_port, source_port = _effective_port(target), _effective_port(source)
+    except ValueError:
+        return False
+    host = (target.hostname or "").lower().rstrip(".")
+    origin_host = (source.hostname or "").lower().rstrip(".")
+    if not host or not origin_host:
+        return False
+    if source.scheme == "https" and target.scheme != "https":
+        return False
+    if target_port != source_port:
+        return False
+    return host == origin_host or host.endswith(f".{origin_host}")
+
+
+def _effective_port(parts: Any) -> int | None:
+    """A URL's port, with the scheme default filled in so ``https://h`` and
+    ``https://h:443`` compare equal."""
+    return parts.port or {"http": 80, "https": 443}.get(parts.scheme)
+
+
+def scoped_headers(headers: Mapping[str, str] | None, url: str, origin: str) -> dict[str, str]:
+    """``headers`` with the user's credentials removed when ``url`` is off
+    ``origin``.
+
+    This is what stops a remote document choosing where GrabLine sends the
+    browser's session. An HLS playlist, for instance, is attacker-controllable
+    content: it can name an absolute segment URL on any host, and every one of
+    those URLs used to be fetched with the original page's Cookie attached.
+    """
+    if not headers:
+        return {}
+    if same_origin(url, origin):
+        return dict(headers)
+    return {k: v for k, v in headers.items() if k.lower() not in CREDENTIAL_HEADERS}
+
+
+def redirect_target(response: httpx.Response) -> str | None:
+    """The absolute URL a redirect response points at, or None if it is not a
+    redirect (or names somewhere we will not follow)."""
+    if response.status_code not in (301, 302, 303, 307, 308):
+        return None
+    location = response.headers.get("location")
+    if not location:
+        return None
+    try:
+        target = str(response.url.join(location))
+    except (ValueError, httpx.InvalidURL):
+        return None
+    return target if urlsplit(target).scheme in ("http", "https") else None
+
+
+@contextmanager
+def stream_scoped(
+    client: httpx.Client,
+    url: str,
+    *,
+    headers: Mapping[str, str] | None,
+    origin: str,
+    method: str = "GET",
+    extra_headers: Mapping[str, str] | None = None,
+) -> Iterator[httpx.Response]:
+    """Stream ``url``, following redirects ourselves so credentials are
+    re-scoped at every hop.
+
+    httpx's own ``follow_redirects`` carries the request headers to wherever it
+    lands. It does drop ``Authorization`` when the host changes, but it keeps an
+    explicitly-set ``Cookie`` - so a 302 to another origin would hand over the
+    session that a same-origin check on the first URL had just protected.
+    Following the chain here means every hop gets its own decision.
+    """
+    current = url
+    for hop in range(MAX_REDIRECTS + 1):
+        if hop:  # the first URL is the caller's own; later ones were chosen for us
+            refuse_if_link_local(current, what="a redirect")
+        request_headers = scoped_headers(headers, current, origin)
+        if extra_headers:
+            request_headers.update(extra_headers)
+        with client.stream(
+            method, current, headers=request_headers or None, follow_redirects=False
+        ) as response:
+            target = redirect_target(response)
+            if target is None:
+                yield response
+                return
+            response.close()
+            current = target
+    raise httpx.TooManyRedirects(f"too many redirects fetching {url}")
+
+
+#: Address blocks that a *remote document* may not send GrabLine to. Only
+#: link-local: 169.254.0.0/16 and fe80::/10 are where cloud instance-metadata
+#: services answer (169.254.169.254 on AWS/GCP/Azure), and nothing a playlist
+#: legitimately references lives there. Ordinary private ranges are NOT here on
+#: purpose - localhost, a NAS and a LAN server are exactly the things people
+#: buy a download manager to reach, and the user's own URL is never checked at
+#: all. The boundary is "who chose this address", not "is it routable".
+def is_link_local(host: str) -> bool:
+    """Is ``host`` a literal link-local address? (A name is not resolved here:
+    this is a cheap guard against a redirect to a metadata endpoint, not a
+    DNS-rebinding defence - see the security model.)"""
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return address.is_link_local
+
+
+def refuse_if_link_local(url: str, *, what: str = "this address") -> None:
+    """Raise when a remotely-chosen URL points at link-local space."""
+    host = host_of(url) or ""
+    if is_link_local(host):
+        raise ValueError(f"refusing to follow {what} to a link-local address ({host})")

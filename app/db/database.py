@@ -671,16 +671,21 @@ class Database:
                 "SELECT * FROM handoffs WHERE claimed = 0 ORDER BY id"
             ).fetchall()
             if rows:
+                # Delete rather than mark-claimed. A handoff's `headers` hold the
+                # browser's Cookie / Authorization for the page it came from:
+                # live session credentials. Once they have been read into memory
+                # here the row has served its entire purpose, and leaving it on
+                # disk only decides how long those credentials outlive the click
+                # that produced them. Marking them claimed left the most recent
+                # batch sitting in the database until some *future* download
+                # happened to sweep it - which on a profile that downloads once
+                # a week means a week.
                 self._conn.executemany(
-                    "UPDATE handoffs SET claimed = 1 WHERE id = ?",
-                    [(row["id"],) for row in rows],
+                    "DELETE FROM handoffs WHERE id = ?", [(row["id"],) for row in rows]
                 )
-                # A claimed row has done its job. They were kept forever, so
-                # this table grew by one row per browser download for the life
-                # of the profile - and every poll scanned past all of them.
-                self._conn.execute(
-                    "DELETE FROM handoffs WHERE claimed = 1 AND id < ?", (rows[0]["id"],)
-                )
+            # Any older row that a previous version marked claimed instead of
+            # deleting still holds its credentials; clear those out too.
+            self._conn.execute("DELETE FROM handoffs WHERE claimed = 1")
         return [
             Handoff(
                 id=row["id"],

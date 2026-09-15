@@ -73,7 +73,7 @@ GrabLine is built in spare time. If it saves you hassle, [buy me a coffee][suppo
 <summary><b>Engine and network detail</b></summary>
 
 * Dynamic segmentation: a free connection steals work from the slowest one.
-* Checkpointed progress across power loss and VPN reconnects; retry forever option.
+* Checkpointed progress: a crash, a kill, or a VPN reconnect resumes from where it stopped; retry forever option.
 * Per host speed buckets so one greedy site cannot starve the rest.
 * Polite mode eases off when you need the link for something else.
 * Battery pause and “shut down when done” for overnight batches.

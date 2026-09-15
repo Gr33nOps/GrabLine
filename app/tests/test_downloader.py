@@ -694,12 +694,18 @@ def test_rate_limit_ceiling_is_remembered_for_the_next_run(
     assert 0 < learned < 8
 
 
-def test_a_hard_403_on_every_request_still_fails_as_rate_limiting(
+def test_a_403_before_any_data_fails_fast_with_a_usable_message(
     server: MediaServer, db: Database, dest: Path
 ):
-    """When even one connection is refused, the job does fail - but with the
-    marker that makes the manager treat it as transient and retry, rather than
-    the bare "HTTP 403" that reads as permanent and strands it forever."""
+    """403 is ambiguous, and which meaning applies is decided by whether this
+    download ever moved a byte.
+
+    Refused from the very first request, it is a wall - an expired signed URL,
+    hotlink protection, a bot check - not back-pressure. Treating it as a rate
+    limit spent the whole back-off budget re-asking a server that was saying no,
+    turning an instant, actionable answer into minutes of retries and then a
+    message about parallelism that had nothing to do with the cause.
+    """
     from app.core.downloader import RATE_LIMIT_MARKER
     from app.core.manager import _is_transient_error
 
@@ -707,15 +713,23 @@ def test_a_hard_403_on_every_request_still_fails_as_rate_limiting(
     url = server.add("/blocked.bin", data, fail_status=403, fail_from=2, fail_until=10_000)
     job = db.create_job(url, str(dest), "blocked.bin")
 
+    started = time.monotonic()
     status = SegmentedDownload(
         db, job, connections=4, retry_backoff=0.01, max_pushback_retries=2
     ).run()
+    elapsed = time.monotonic() - started
 
     assert status is JobStatus.FAILED
     failed = db.get_job(job.id)
     assert failed is not None and failed.error is not None
-    assert RATE_LIMIT_MARKER in failed.error
-    assert _is_transient_error(failed.error)  # so the manager schedules a retry
+    # Says what actually happened, and what to do about it...
+    assert "403" in failed.error
+    assert "expired" in failed.error or "login" in failed.error
+    # ...rather than blaming parallelism.
+    assert RATE_LIMIT_MARKER not in failed.error
+    # Permanent, so the manager reports it instead of retrying forever.
+    assert not _is_transient_error(failed.error)
+    assert elapsed < 10  # no pushback back-off was spent on a wall
 
 
 def test_retry_after_header_is_honored(server: MediaServer, db: Database, dest: Path):

@@ -29,7 +29,7 @@ what comes back over the wire.
 
 | # | Boundary | What crosses | Attacker's goal | What stops it |
 |---|---|---|---|---|
-| B1 | Remote server → downloader | body, `Content-Disposition` filename, redirects, sizes, content-type | arbitrary file write, crash | `sanitize_filename` on every derived name; sizes are advisory; redirects confined (B7) |
+| B1 | Remote server → downloader | body, `Content-Disposition` filename, redirects, sizes, content-type | arbitrary file write, crash | `sanitize_filename` on every derived name; sizes are advisory; `Content-Range` validated on every 206; credentials re-scoped per redirect hop (B7) |
 | B2 | Web page → extension → native host → handoffs table → app | URLs, page titles, cookies/referer, quality | queue hostile URL, header injection, UI/filename poisoning, flooding | scheme allow-list, CRLF stripping, length caps, 1 MB message cap, JSON-object enforcement |
 | B3 | Pasted URL → resolver → engines | the URL itself | drive an engine at a bad target (SSRF, local read) | scheme routing; FFmpeg protocol allow-list; TLS verified by default |
 | B4 | Downloaded archive → extractor | member paths, symlinks, declared sizes | write outside the folder, fill the disk | `_is_within` guard (zip/tar/external), tar `data` filter, decompression-bomb cap |
@@ -49,7 +49,8 @@ what comes back over the wire.
   resolved path leaves the destination (`_is_within`), for zip, tar **and** the
   external-tool formats; tar additionally uses Python 3.12's `data` filter,
   which strips setuid bits, device nodes, and symlinks pointing outside the
-  tree. Total declared and streamed output is capped, so a small archive can't
+  tree. Declared and streamed output is capped for the formats extracted
+  in-process, so a small archive can't
   expand to fill the disk.
 - **Native messaging**: `app/native_host/` validates every field before it
   reaches the handoffs table: URLs must be `http(s)` (or a `magnet:` carrying
@@ -70,6 +71,38 @@ what comes back over the wire.
   them, and the protocol list is narrowed to `file,crypto,data`, so `file` can
   only reach the app's own temp directory, never a path the remote manifest
   chose.
+- **Credential scope**: the browser handoff's `Cookie`, `Authorization` and
+  `Proxy-Authorization` are the user's session, and remote documents get to
+  choose URLs. An HLS playlist can name an absolute segment, key or init-map
+  URL on any host it likes, so every such fetch is re-scoped through
+  `net.scoped_headers`: those three headers travel only to the origin the user
+  approved (same host or a subdomain, same port, never downgraded to http).
+  Redirects are followed by `net.stream_scoped` rather than by httpx, so the
+  decision is remade at every hop instead of the first one. Identifying
+  headers (`Referer`, `User-Agent`) still travel everywhere, which is what
+  keeps hotlink-protected CDNs working. FFmpeg takes one header block for a
+  whole input and resolves the playlist itself, so it is given the credentials
+  only once a manifest has been read and every URI in it proved on-origin.
+- **Resume identity**: a partial file is only a valid head of the resource it
+  was started against. Direct downloads send `If-Range` and restart when the
+  validator they began with has changed or disappeared; cloud downloads record
+  a per-protocol object identity (FTP `SIZE`+`MDTM`, SFTP size+mtime, S3
+  ETag/VersionId/LastModified) and restart when it moves. A WebDAV resume that
+  is answered with `200` (server ignored `Range`) restarts rather than
+  appending a whole file onto a partial one, and a `416` only finalises when
+  `Content-Range: bytes */TOTAL` actually equals the bytes on disk.
+- **Automatically-followed URLs**: a URL GrabLine reaches because a *remote
+  document* named it (an HLS segment, key or init map, a redirect target) is
+  not the same as one the user typed. Those are refused when they point at
+  link-local space - 169.254.0.0/16 and fe80::/10, which is where cloud
+  instance-metadata services live. Ordinary private addresses (localhost, a
+  NAS, a LAN server) stay allowed: GrabLine is a desktop download manager and
+  self-hosted downloads are a normal thing to want. The user's own URL is
+  never restricted.
+- **SSH**: sftp/scp verify host keys. The user's own `known_hosts` is honoured,
+  otherwise the key is trusted on first use and **written down**; a later
+  mismatch fails the download with the fingerprints rather than being accepted
+  silently.
 - **TLS**: certificate verification is on for every HTTP client by default, and
   a self-signed host fails closed. It is turned off **only** where the user
   explicitly asked for it - Settings → Security ("Allow invalid/self-signed
@@ -80,7 +113,9 @@ what comes back over the wire.
   as a *consequence* of anything: a certificate failure is reported and never
   retried unverified, and a per-download tick never writes to Settings. When
   the policy is on it is applied to the transport as well as the client, so a
-  proxy or the IPv4-bind path cannot silently re-enable or re-disable it.
+  proxy or the IPv4-bind path cannot silently re-enable or re-disable it, and
+  it is pinned to the approved host: a redirect off that host is verified
+  normally, so the exemption cannot be carried somewhere the user never chose.
   Every TLS-bearing engine is covered, not just httpx: yt-dlp
   (`nocheckcertificate`), FFmpeg (`-tls_verify`, with certifi's roots passed as
   `-ca_file` so the verifying case does not depend on which ffmpeg build is
