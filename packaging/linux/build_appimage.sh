@@ -47,7 +47,7 @@ chmod +x "$APPDIR/AppRun"
 
 TOOL="$ROOT/build/appimagetool"
 if [ ! -x "$TOOL" ]; then
-  curl -fsSL -o "$TOOL" \
+  curl --proto '=https' --tlsv1.2 -fsSL -o "$TOOL" \
     "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
   chmod +x "$TOOL"
 fi

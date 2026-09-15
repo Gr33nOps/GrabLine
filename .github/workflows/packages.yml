@@ -36,7 +36,7 @@ jobs:
             if [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
               TAG="v${{ github.ref_name }}"
               # Fall back to reading version from this commit when no release yet.
-              VER="$(curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/app/__init__.py" \
+              VER="$(curl --proto '=https' --tlsv1.2 -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/app/__init__.py" \
                 | sed -n 's/^__version__ = \"\(.*\)\"/\1/p' || true)"
               if [ -n "${VER}" ]; then
                 TAG="v${VER}"
