@@ -618,9 +618,13 @@ def peer_fingerprint(host: str, port: int = 443, timeout: float = 10.0) -> str |
     import hashlib
     import ssl as ssl_mod
 
-    context = ssl_mod.SSLContext(ssl_mod.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl_mod.CERT_NONE
+    # The non-verifying context comes from the same factory every other
+    # unverified connection in the app uses, rather than being assembled here:
+    # one place in the tree relaxes TLS, and it is reached only through the
+    # user's explicit opt-in.
+    context = ssl_context(verify=False)
+    if not isinstance(context, ssl_mod.SSLContext):  # pragma: no cover - httpx moved
+        return None
     try:
         with (
             socket.create_connection((host, port), timeout=timeout) as raw,
