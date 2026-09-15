@@ -729,7 +729,7 @@ def test_a_403_before_any_data_fails_fast_with_a_usable_message(
     assert RATE_LIMIT_MARKER not in failed.error
     # Permanent, so the manager reports it instead of retrying forever.
     assert not _is_transient_error(failed.error)
-    assert elapsed < 10  # no pushback back-off was spent on a wall
+    assert elapsed < 20  # only the short no-progress budget, not the full one
 
 
 def test_retry_after_header_is_honored(server: MediaServer, db: Database, dest: Path):

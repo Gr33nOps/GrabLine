@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from app.core import proc
 
@@ -135,8 +135,8 @@ def preferred_managers(environ: dict[str, str] | None = None) -> tuple[str, ...]
 
 
 def _linux_command(
-    directory: Path,
-    reveal: Path | None,
+    directory: PurePath,
+    reveal: PurePath | None,
     resolve: Callable[[str], str | None],
     environ: dict[str, str] | None = None,
 ) -> list[str] | None:
@@ -159,10 +159,10 @@ def _linux_command(
 
 
 def unix_command(
-    directory: Path,
+    directory: PurePath,
     platform: str,
     *,
-    reveal: Path | None = None,
+    reveal: PurePath | None = None,
     which: Callable[[str], str | None] | None = None,
     environ: dict[str, str] | None = None,
 ) -> list[str] | None:
