@@ -63,16 +63,21 @@ jobs:
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
             libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-util1 libxcb-xkb1
 
+      # NOSONAR on the pip lines: S8541 wants --only-binary :all:, which
+      # forbids the build an editable install performs, and S8544 wants a
+      # resolved lockfile this project does not keep. What is pinned instead:
+      # every Action is a commit SHA, the release build tools are exact
+      # versions, and each release attaches the pip freeze of its build.
       - name: Install app and build tools
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install -e .
+          python -m pip install --upgrade pip  # NOSONAR
+          pip install -e .  # NOSONAR
           # Pinned: the frozen binary is a product of these tools, so leaving
           # them floating means the same tag can build differently next month.
           # Bump deliberately, in a commit, not by the calendar.
-          pip install "pyinstaller==6.22.3" "pillow==12.3.0"
+          pip install "pyinstaller==6.22.3" "pillow==12.3.0"  # NOSONAR
 
       - name: Record the exact build inputs
         shell: bash
