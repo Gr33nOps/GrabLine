@@ -898,6 +898,18 @@ class SettingsDialog(chrome.Dialog):
         insecure_warning.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         insecure_warning.setMinimumWidth(0)
         security_form.addRow(insecure_warning)
+
+        # A host whose certificate was accepted unverified gets that exact
+        # certificate remembered, and a later change is refused. This is how a
+        # deliberate replacement (a renewed self-signed certificate on your own
+        # NAS) is told apart from someone standing in the middle of it.
+        certs_row = _inline_row()
+        self.trusted_certs_label = components.role_label("", "muted")
+        self.forget_certs_button = QPushButton(t("Forget trusted certificates"))
+        self.forget_certs_button.clicked.connect(self._forget_certificates)
+        certs_row.addWidget(self.trusted_certs_label, 1)
+        certs_row.addWidget(self.forget_certs_button)
+        security_form.addRow(t("Accepted certificates:"), certs_row)
         self.virustotal_edit = QLineEdit()
         self.virustotal_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.virustotal_edit.setPlaceholderText(t("your VirusTotal API key (optional)"))
@@ -1361,6 +1373,26 @@ class SettingsDialog(chrome.Dialog):
         QGuiApplication.clipboard().setText("\n".join(lines))
         QMessageBox.information(self, "GrabLine", t("Diagnostics copied to the clipboard."))
 
+    def _refresh_trusted_certificates(self) -> None:
+        pinned = self.settings.trusted_certificates
+        if pinned:
+            self.trusted_certs_label.setText(
+                t(
+                    "{count} host(s) remembered: {hosts}",
+                    count=len(pinned),
+                    hosts=", ".join(sorted(pinned)[:3]),
+                )
+            )
+        else:
+            self.trusted_certs_label.setText(t("None remembered"))
+        self.forget_certs_button.setEnabled(bool(pinned))
+
+    def _forget_certificates(self) -> None:
+        """Clear every pinned certificate, so the next connection to each host
+        accepts (and re-remembers) whatever it presents."""
+        self.settings.trusted_certificates = {}
+        self._refresh_trusted_certificates()
+
     def _browse_sound(self) -> None:
         chosen, _ = QFileDialog.getOpenFileName(
             self,
@@ -1605,6 +1637,7 @@ class SettingsDialog(chrome.Dialog):
         self.scan_downloads_check.setChecked(s.scan_downloads)
         self.enforce_https_check.setChecked(s.enforce_https)
         self.insecure_ssl_check.setChecked(s.insecure_ssl)
+        self._refresh_trusted_certificates()
         self.virustotal_edit.setText(s.virustotal_key)
         self.safebrowsing_edit.setText(s.safebrowsing_key)
         self.scanner_combo.setCurrentIndex(max(0, self.scanner_combo.findData(s.scanner_pref)))

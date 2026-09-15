@@ -95,7 +95,10 @@ what comes back over the wire.
   document* named it (an HLS segment, key or init map, a redirect target) is
   not the same as one the user typed. Those are refused when they point at
   link-local space - 169.254.0.0/16 and fe80::/10, which is where cloud
-  instance-metadata services live. Ordinary private addresses (localhost, a
+  instance-metadata services live. The hostname is resolved before the check,
+  so a name pointed at a metadata address is caught too (not a complete
+  DNS-rebinding defence: the address could still change between the lookup and
+  the connection). Ordinary private addresses (localhost, a
   NAS, a LAN server) stay allowed: GrabLine is a desktop download manager and
   self-hosted downloads are a normal thing to want. The user's own URL is
   never restricted.
@@ -116,6 +119,11 @@ what comes back over the wire.
   proxy or the IPv4-bind path cannot silently re-enable or re-disable it, and
   it is pinned to the approved host: a redirect off that host is verified
   normally, so the exemption cannot be carried somewhere the user never chose.
+  The certificate that host presented is also recorded, and a later *change* is
+  refused with both fingerprints - trust-on-first-use, the same shape as the
+  SSH host keys, because with verification off the accepted certificate is the
+  only thing left vouching for the server. Settings -> Security lists what is
+  remembered and clears it.
   Every TLS-bearing engine is covered, not just httpx: yt-dlp
   (`nocheckcertificate`), FFmpeg (`-tls_verify`, with certifi's roots passed as
   `-ca_file` so the verifying case does not depend on which ffmpeg build is

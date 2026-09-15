@@ -544,6 +544,43 @@ class Settings:
         self._set_bool("insecure_ssl", value)
 
     @property
+    def trusted_certificates(self) -> dict[str, str]:
+        """host -> the certificate fingerprint the user accepted for it.
+
+        Only hosts a download was explicitly allowed to skip verification for
+        appear here. Recording the fingerprint is what turns "ignore the
+        certificate" from a permanent blind spot into a one-time decision: the
+        next time that host answers with a *different* certificate, GrabLine
+        can say so instead of accepting it just as silently as the first.
+        """
+        raw = self._db.get_setting("trusted_certificates")
+        if not raw:
+            return {}
+        try:
+            loaded = json.loads(raw)
+        except ValueError:
+            return {}
+        if not isinstance(loaded, dict):
+            return {}
+        return {str(k): str(v) for k, v in loaded.items() if k and v}
+
+    @trusted_certificates.setter
+    def trusted_certificates(self, value: Mapping[str, str]) -> None:
+        self._db.set_setting("trusted_certificates", json.dumps(dict(value)))
+
+    def remember_certificate(self, host: str, fingerprint: str) -> None:
+        """Record the fingerprint accepted for ``host`` (first sighting)."""
+        known = self.trusted_certificates
+        known[host.lower()] = fingerprint
+        self.trusted_certificates = known
+
+    def forget_certificate(self, host: str) -> None:
+        """Drop a pinned fingerprint, so the next connection re-pins."""
+        known = self.trusted_certificates
+        if known.pop(host.lower(), None) is not None:
+            self.trusted_certificates = known
+
+    @property
     def virustotal_key(self) -> str:
         """The user's own VirusTotal API key. Empty = the VirusTotal check is
         off. Only the file's hash is ever sent, never its contents."""

@@ -19,6 +19,23 @@ from app.db.database import Database
 from app.tests.conftest import sha256_file
 from app.tests.media_server import MediaServer, payload, sha256
 
+
+@pytest.fixture()
+def tls_server_pair():
+    """Two HTTPS servers with *different* self-signed certificates, standing in
+    for one host whose certificate changed between sessions."""
+    first, second = MediaServer(tls=True), MediaServer(tls=True)
+    first.start()
+    second.start()
+    first.add("/f.bin", payload(64, 1))
+    second.add("/f.bin", payload(64, 2))
+    try:
+        yield first, second
+    finally:
+        first.stop()
+        second.stop()
+
+
 # ------------------------------------------------ #3 HLS credential scoping
 
 
@@ -436,3 +453,121 @@ def test_link_local_detection():
     assert net.is_link_local("192.168.1.1") is False  # a LAN box is fine
     assert net.is_link_local("127.0.0.1") is False  # so is localhost
     assert net.is_link_local("example.com") is False  # a name, not an address
+
+
+def test_a_hostname_pointed_at_metadata_is_caught_too(monkeypatch: pytest.MonkeyPatch):
+    """A literal-only check is trivially sidestepped: a name can carry an A
+    record of 169.254.169.254 and nothing in the URL says so."""
+    import socket
+
+    net._resolves_link_local.cache_clear()
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, *a, **k: (
+            [(2, 1, 6, "", ("169.254.169.254", 0))]
+            if host == "metadata.evil.test"
+            else [(2, 1, 6, "", ("93.184.216.34", 0))]
+        ),
+    )
+    assert net.is_link_local("metadata.evil.test", resolve=True) is True
+    assert net.is_link_local("cdn.example.com", resolve=True) is False
+    # Without resolution it still only sees the spelling.
+    net._resolves_link_local.cache_clear()
+    assert net.is_link_local("metadata.evil.test") is False
+
+    net._resolves_link_local.cache_clear()
+    with pytest.raises(ValueError, match="link-local"):
+        net.refuse_if_link_local("https://metadata.evil.test/latest/", what="a playlist entry")
+    net.refuse_if_link_local("https://cdn.example.com/seg.ts")  # must not raise
+    net._resolves_link_local.cache_clear()
+
+
+def test_a_name_that_does_not_resolve_is_not_treated_as_hostile(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A failed lookup cannot reach a metadata service either; the connection
+    that follows gives a clearer error than this guard could."""
+    import socket
+
+    net._resolves_link_local.cache_clear()
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert net.is_link_local("gone.invalid", resolve=True) is False
+    net._resolves_link_local.cache_clear()
+
+
+# ------------------------------- #30 a trusted certificate that later changes
+
+
+def test_a_self_signed_certificate_is_pinned_and_a_change_is_refused(
+    tls_server_pair, db: Database, dest: Path
+):
+    """Skipping verification means nothing vouches for the server except the
+    certificate the user accepted. So it is recorded, and a different one later
+    is refused instead of being waved through just as silently as the first."""
+    from app.core.errors import DownloadError
+    from app.core.manager import DownloadManager
+
+    first, second = tls_server_pair
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        manager.settings.auto_start_downloads = False
+        job = manager.add_url(
+            first.url("/f.bin"), dest_dir=str(dest), filename="f.bin", insecure=True
+        )
+        # First sighting pins whatever the host answered with.
+        manager._check_pinned_certificate(job)
+        host = "127.0.0.1"
+        pinned = manager.settings.trusted_certificates[host]
+        assert pinned.startswith("SHA256:")
+
+        # Same certificate again: no complaint.
+        manager._check_pinned_certificate(job)
+
+        # A different certificate on that host now - the impersonation case.
+        moved = manager.add_url(
+            second.url("/f.bin"), dest_dir=str(dest), filename="g.bin", insecure=True
+        )
+        with pytest.raises(DownloadError) as caught:
+            manager._check_pinned_certificate(moved)
+        assert "has changed" in str(caught.value)
+        assert pinned in str(caught.value)  # both fingerprints, so it can be checked
+
+        # Clearing the pin lets it be accepted again, deliberately.
+        manager.settings.forget_certificate(host)
+        manager._check_pinned_certificate(moved)
+        assert manager.settings.trusted_certificates[host] != pinned
+    finally:
+        manager.shutdown()
+
+
+def test_pinning_does_not_touch_verified_downloads(db: Database, dest: Path):
+    """A download that verifies normally needs no pin - the CA chain is what
+    vouches for it, and pinning would break ordinary certificate rotation."""
+    from app.core.manager import DownloadManager
+
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        manager.settings.auto_start_downloads = False
+        job = manager.add_url("https://example.com/f.bin", dest_dir=str(dest), filename="f.bin")
+        assert manager.insecure_for(job) is False
+        manager._create_task(job)  # must not consult or write any pin
+        assert manager.settings.trusted_certificates == {}
+    finally:
+        manager.shutdown()
+
+
+def test_an_unreachable_host_does_not_block_on_pinning(db: Database, dest: Path):
+    """The download's own error is better than one from the pin check."""
+    from app.core.manager import DownloadManager
+
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        manager.settings.auto_start_downloads = False
+        job = manager.add_url(
+            "https://127.0.0.1:1/f.bin", dest_dir=str(dest), filename="f.bin", insecure=True
+        )
+        manager._check_pinned_certificate(job)  # must not raise
+        assert manager.settings.trusted_certificates == {}
+    finally:
+        manager.shutdown()

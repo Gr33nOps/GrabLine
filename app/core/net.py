@@ -8,6 +8,7 @@ in the app is built here so one proxy setting covers all of them.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import socket
@@ -544,21 +545,91 @@ def stream_scoped(
 #: purpose - localhost, a NAS and a LAN server are exactly the things people
 #: buy a download manager to reach, and the user's own URL is never checked at
 #: all. The boundary is "who chose this address", not "is it routable".
-def is_link_local(host: str) -> bool:
-    """Is ``host`` a literal link-local address? (A name is not resolved here:
-    this is a cheap guard against a redirect to a metadata endpoint, not a
-    DNS-rebinding defence - see the security model.)"""
+def _is_link_local_literal(host: str) -> bool:
     import ipaddress
 
     try:
-        address = ipaddress.ip_address(host.strip("[]"))
+        return ipaddress.ip_address(host.strip("[]")).is_link_local
     except ValueError:
         return False
-    return address.is_link_local
+
+
+@lru_cache(maxsize=512)
+def _resolves_link_local(host: str) -> bool:
+    """Does this name resolve to a link-local address?
+
+    A literal check alone is trivially sidestepped: ``metadata.example.com`` can
+    have an A record of 169.254.169.254, and nothing about the URL says so. The
+    name is resolved and every answer inspected, so the guard applies to what
+    the connection will actually reach rather than to how it was spelled.
+
+    Cached, because it sits in front of every segment URL of a playlist that may
+    name thousands. Resolution failures answer False: a name that does not
+    resolve cannot reach a metadata service either, and the connection attempt
+    that follows will fail on its own with a clearer error than this could give.
+    """
+    import ipaddress
+
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return False
+    for info in infos:
+        address = info[4][0]
+        with contextlib.suppress(ValueError):
+            if ipaddress.ip_address(address).is_link_local:
+                return True
+    return False
+
+
+def is_link_local(host: str, *, resolve: bool = False) -> bool:
+    """Is ``host`` link-local - as a literal, or (with ``resolve``) by DNS?"""
+    host = host.strip()
+    if not host:
+        return False
+    if _is_link_local_literal(host):
+        return True
+    return resolve and _resolves_link_local(host)
 
 
 def refuse_if_link_local(url: str, *, what: str = "this address") -> None:
-    """Raise when a remotely-chosen URL points at link-local space."""
+    """Raise when a remotely-chosen URL points at link-local space.
+
+    Resolves the name rather than only reading it, so a hostname pointed at a
+    metadata endpoint is caught too. This is not a complete DNS-rebinding
+    defence - the address could still change between this lookup and the
+    connection - but it closes the case that needs no timing at all.
+    """
     host = host_of(url) or ""
-    if is_link_local(host):
+    if is_link_local(host, resolve=True):
         raise ValueError(f"refusing to follow {what} to a link-local address ({host})")
+
+
+def peer_fingerprint(host: str, port: int = 443, timeout: float = 10.0) -> str | None:
+    """The SHA-256 fingerprint of ``host``'s TLS certificate, or None.
+
+    Deliberately handshakes *without* verification: the whole point is to read
+    the certificate of a host whose certificate does not validate, so that a
+    user who accepted one self-signed certificate is told when it becomes a
+    different one. Same shape as the SSH host-key fingerprint, and readable in
+    the same places (``openssl s_client``, a browser's certificate viewer).
+    """
+    import base64
+    import hashlib
+    import ssl as ssl_mod
+
+    context = ssl_mod.SSLContext(ssl_mod.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl_mod.CERT_NONE
+    try:
+        with (
+            socket.create_connection((host, port), timeout=timeout) as raw,
+            context.wrap_socket(raw, server_hostname=host) as tls,
+        ):
+            der = tls.getpeercert(binary_form=True)
+    except (OSError, ssl_mod.SSLError):
+        return None
+    if not der:
+        return None
+    digest = hashlib.sha256(der).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")

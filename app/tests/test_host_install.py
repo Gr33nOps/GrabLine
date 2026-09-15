@@ -35,7 +35,7 @@ def test_darwin_targets(tmp_path: Path):
     assert "Library" in str(targets["Chrome"].manifest_dir)
     # Arc is macOS-first and keeps its manifests under its User Data dir.
     assert "Arc" in targets and "Vivaldi" in targets
-    assert str(targets["Arc"].manifest_dir).endswith("Arc/User Data/NativeMessagingHosts")
+    assert targets["Arc"].manifest_dir.parts[-3:] == ("Arc", "User Data", "NativeMessagingHosts")
 
 
 def test_frozen_host_path_none_from_source():
@@ -46,8 +46,8 @@ def test_frozen_host_path_none_from_source():
 def test_frozen_host_path_points_at_sibling_exe(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", "/opt/Grabline/grabline")
-    monkeypatch.setattr(sys, "platform", "linux")
-    assert frozen_host_path() == Path("/opt/Grabline/grabline-host")
+    assert frozen_host_path("linux") == Path("/opt/Grabline/grabline-host")
+    assert frozen_host_path("win32") == Path("/opt/Grabline/grabline-host.exe")
 
 
 def test_frozen_install_points_manifests_at_the_host_exe(
@@ -72,10 +72,13 @@ def test_install_writes_manifests_and_launcher(tmp_path: Path):
     written = install(platform="linux", home=tmp_path, bin_dir=tmp_path / "bin")
 
     assert len(written) == 6
+    # install(platform="linux") writes the POSIX launcher whatever host this
+    # runs on - the platform argument, not sys.platform, decides.
     launcher = tmp_path / "bin" / "grabline-host"
     assert launcher.exists()
-    assert os.access(launcher, os.X_OK)
     assert sys.executable in launcher.read_text()
+    if os.name == "posix":  # the exec bit only means anything here
+        assert os.access(launcher, os.X_OK)
 
     chrome_manifest = json.loads(
         (
@@ -132,6 +135,8 @@ def test_check_reports_healthy_after_install(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     install(platform="linux", home=tmp_path)
+    # No bin_dir here on purpose: this asserts the default location resolves
+    # consistently between install and check (both via XDG_DATA_HOME above).
     healthy, lines = check(platform="linux", home=tmp_path)
     assert healthy, "\n".join(lines)
     assert any("pong" in line for line in lines)
@@ -139,7 +144,7 @@ def test_check_reports_healthy_after_install(tmp_path: Path, monkeypatch: pytest
 
 def test_check_flags_missing_pairing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    healthy, lines = check(platform="linux", home=tmp_path)
+    healthy, lines = check(platform="linux", home=tmp_path, bin_dir=tmp_path / "bin")
     assert not healthy
     assert any(line.startswith("FAIL") for line in lines)
 

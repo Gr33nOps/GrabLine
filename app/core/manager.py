@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from app.core import categories, connectivity, naming, power
+from app.core import categories, connectivity, naming, net, power
 from app.core.credentials import CredentialStore
 from app.core.downloader import RATE_LIMIT_MARKER, SegmentedDownload
 from app.core.errors import DownloadError
@@ -1425,12 +1425,52 @@ class DownloadManager:
         """
         return bool(self.settings.insecure_ssl or job.options.get(INSECURE_OPTION))
 
+    def _check_pinned_certificate(self, job: Job) -> None:
+        """Pin the certificate of a host the user chose to trust unverified.
+
+        Skipping verification means nothing vouches for the server, so the only
+        thing that can: the certificate the user accepted the first time. It is
+        recorded, and a later change is refused with both fingerprints rather
+        than waved through exactly as silently as the first one - the same
+        trust-on-first-use shape as the SSH host keys, for the same reason.
+
+        Never blocks when the host simply cannot be reached: that is the
+        download's own error to report, with a better message than this.
+        """
+        from urllib.parse import urlsplit
+
+        target = job.final_url or job.url
+        parts = urlsplit(target)
+        if parts.scheme != "https":
+            return  # nothing to pin
+        host = (parts.hostname or "").lower()
+        if not host:
+            return
+        seen = net.peer_fingerprint(host, parts.port or 443)
+        if seen is None:
+            return
+        pinned = self.settings.trusted_certificates.get(host)
+        if pinned is None:
+            log.info("pinning the certificate %s accepted for %s", seen, host)
+            self.settings.remember_certificate(host, seen)
+            return
+        if pinned != seen:
+            raise DownloadError(
+                f"the HTTPS certificate for {host} has changed since you chose to "
+                f"trust it (was {pinned}, now {seen}). Certificate checking is off "
+                "for this download, so nothing else vouches for this server - "
+                "someone may be impersonating it. If you replaced the certificate "
+                "yourself, clear the saved one in Settings -> Security."
+            )
+
     def _create_task(self, job: Job) -> DownloadTask:
         job_kbps = int(job.options.get("speed_limit_kbps") or 0)
         proxy = self.settings.proxy
         # Recomputed on every start - so a resumed, retried or mirrored job
         # picks up the policy in force now, not the one it was created under.
         insecure = self.insecure_for(job)
+        if insecure:
+            self._check_pinned_certificate(job)
         fair_limiter = self._fair_limiter_for(job.id)
         if job.kind is JobKind.SMART:
             # yt-dlp takes one number: the tighter of the global and per-job cap.
