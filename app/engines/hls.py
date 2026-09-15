@@ -18,6 +18,8 @@ and restarts from the beginning.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import logging
 import os
 import re
@@ -62,6 +64,10 @@ _ESTIMATE_MIN_SECONDS = 5.0  # muxed seconds before the size estimate is trusted
 #: for AES-128 keys, data for inline base64 keys. No file:, concat:, subfile:,
 #: pipe: or exotic protocols. See _command (CWE-668 / CWE-918).
 _INPUT_PROTOCOLS = "http,https,tcp,tls,crypto,data"
+
+#: Records which playlist a work directory's cached segments belong to, so a
+#: resume can tell "carry on" from "that playlist is gone".
+_MANIFEST_STAMP = "playlist.id"
 
 
 class HlsDownload:
@@ -119,6 +125,16 @@ class HlsDownload:
         hls_referer = net.default_referer(self._input_url)
         if hls_referer:
             self._headers.setdefault("Referer", hls_referer)
+        #: The one URL in this job a person actually chose. Everything else -
+        #: variants, segments, keys, init maps - comes out of a remote playlist,
+        #: which is attacker-controllable content: it can name an absolute URL
+        #: on any host it likes. The browser's Cookie/Authorization go only to
+        #: this origin (and its subdomains); see net.scoped_headers.
+        self._origin = job.url
+        #: Set once a manifest has been read and every URI in it proved to be
+        #: on the approved origin. False until then, so FFmpeg is never handed
+        #: credentials for a playlist nobody has checked.
+        self._manifest_is_same_origin = False
 
     def pause(self) -> None:
         self._stop_event.set()
@@ -188,10 +204,25 @@ class HlsDownload:
     def _ffmpeg_headers(self) -> str | None:
         """The browser's headers as one CRLF-joined block, FFmpeg's -headers
         format - or None when there aren't any, so the flag is omitted rather
-        than sent empty."""
-        if not self._headers:
+        than sent empty.
+
+        FFmpeg applies one header block to *every* request it makes for this
+        input, and it resolves the playlist itself, so there is no per-URL
+        decision to make here the way there is in the native fetch. The
+        credentials therefore travel only when we have read the manifest and
+        seen that everything it references is on the approved origin. When we
+        could not read it (the FFmpeg fallback after a failed fetch), the safe
+        answer is the one that cannot leak a session to a host the playlist
+        chose: send the identifying headers, hold the credentials back.
+        """
+        headers = self._headers
+        if not headers:
             return None
-        return "".join(f"{key}: {value}\r\n" for key, value in self._headers.items())
+        if not self._manifest_is_same_origin:
+            headers = {k: v for k, v in headers.items() if k.lower() not in net.CREDENTIAL_HEADERS}
+            if not headers:
+                return None
+        return "".join(f"{key}: {value}\r\n" for key, value in headers.items())
 
     def _uses_tls(self) -> bool:
         """Does any input FFmpeg will open speak TLS?"""
@@ -406,16 +437,23 @@ class HlsDownload:
 
     def _fetch_url_text(self, url: str) -> tuple[str, str] | None:
         try:
-            with net.build_client(
-                proxy=self.proxy,
-                insecure=self.insecure,
-                follow_redirects=True,
-                http2=False,
-                timeout=15,
-            ) as client:
-                response = client.get(url, headers=self._headers or None)
+            # Redirects followed by hand so credentials are re-decided at every
+            # hop rather than carried to wherever a 302 points.
+            with (
+                net.build_client(
+                    proxy=self.proxy,
+                    insecure=self.insecure,
+                    trusted_host=net.host_of(self._origin),
+                    http2=False,
+                    timeout=15,
+                ) as client,
+                net.stream_scoped(
+                    client, url, headers=self._headers, origin=self._origin
+                ) as response,
+            ):
                 if response.status_code != 200:
                     return None
+                response.read()
                 return response.text, str(response.url)
         except httpx.HTTPError:
             return None
@@ -452,6 +490,11 @@ class HlsDownload:
         keep_work = False
         try:
             work.mkdir(parents=True, exist_ok=True)
+            # ...but only when it was left by *this* playlist. Local names are
+            # positional (video-00007.ts), so if the playlist changed while the
+            # download was paused, segment 7 is now different media and reusing
+            # the old file splices two streams together. See _check_manifest.
+            self._check_manifest_identity(text, base_url, work)
             _hide_dir(work)  # a big stream's thousands of parts shouldn't clutter the folder
             video = self._prepare_local_manifest(text, base_url, work, "video")
             if video is None:
@@ -512,6 +555,7 @@ class HlsDownload:
         """Rewrite a media playlist to point at local files, fetch them, and
         write the local manifest. None if there is nothing to fetch or a stop."""
         rewritten, downloads = self._localize(text, base_url, prefix)
+        self._note_manifest_origins([url for url, _name in downloads])
         if not any(name.endswith(".ts") for _, name in downloads):
             return None  # no media segments - not a playlist we can fetch locally
         if not self._fetch_segments(downloads, work):
@@ -519,6 +563,68 @@ class HlsDownload:
         manifest = work / f"{prefix}.m3u8"
         manifest.write_text(rewritten, encoding="utf-8")
         return manifest
+
+    def _check_manifest_identity(self, text: str, base_url: str, work: Path) -> None:
+        """Drop a stale segment cache when the playlist no longer matches it.
+
+        The local file names are positions in the playlist, not identities, so
+        a cache is only reusable by the playlist that produced it. The
+        fingerprint is over the resolved URI list rather than the raw text:
+        that is what actually decides which bytes land in which file, so a
+        cosmetic change (a comment, a re-ordered tag, a rotated token in an
+        unrelated field) does not needlessly throw away gigabytes, while any
+        change to what is fetched, or in what order, does.
+        """
+        stamp = work / _MANIFEST_STAMP
+        fingerprint = self._manifest_fingerprint(text, base_url)
+        try:
+            previous = stamp.read_text(encoding="utf-8").strip()
+        except OSError:
+            previous = ""
+        if previous == fingerprint:
+            return
+        if previous:
+            log.info(
+                "hls job %s: the playlist changed since this download was paused; "
+                "discarding the %s stale segment(s) cached for the old one",
+                self.job.id,
+                sum(1 for _ in work.glob("*.ts")),
+            )
+            for stale in work.iterdir():
+                if stale.is_file():
+                    stale.unlink(missing_ok=True)
+            self._downloaded = 0
+        with contextlib.suppress(OSError):
+            stamp.write_text(fingerprint, encoding="utf-8")
+
+    def _manifest_fingerprint(self, text: str, base_url: str) -> str:
+        """A hash of every URI this playlist resolves to, in order, plus the
+        media sequence - i.e. of exactly what the local cache is keyed on."""
+        digest = hashlib.sha256()
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("#EXT-X-MEDIA-SEQUENCE"):
+                digest.update(stripped.encode("utf-8", "replace") + b"\n")
+            elif stripped.startswith(("#EXT-X-KEY", "#EXT-X-SESSION-KEY", "#EXT-X-MAP")):
+                for match in _TAG_URI.finditer(stripped):
+                    digest.update(urljoin(base_url, match.group(1)).encode("utf-8", "replace"))
+                    digest.update(b"\n")
+            elif not stripped.startswith("#"):
+                digest.update(urljoin(base_url, stripped).encode("utf-8", "replace") + b"\n")
+        return digest.hexdigest()
+
+    def _note_manifest_origins(self, urls: list[str]) -> None:
+        """Record whether every URI a manifest references is on the approved
+        origin - the condition under which FFmpeg may be given credentials."""
+        self._manifest_is_same_origin = all(net.same_origin(url, self._origin) for url in urls)
+        if not self._manifest_is_same_origin:
+            log.info(
+                "hls job %s: playlist references other origins; "
+                "withholding browser credentials from them",
+                self.job.id,
+            )
 
     def _localize(self, text: str, base_url: str, prefix: str) -> tuple[str, list[tuple[str, str]]]:
         """Rewrite every segment / key / init URI to a local filename, collecting
@@ -529,6 +635,10 @@ class HlsDownload:
 
         def local_name(uri: str, suffix: str) -> str:
             absolute = urljoin(base_url, uri.strip())
+            # The playlist chose this address, not the user. Metadata endpoints
+            # are the one destination nothing legitimate references; a NAS or a
+            # LAN server stays perfectly allowed.
+            net.refuse_if_link_local(absolute, what="a playlist entry")
             if absolute not in local_of:
                 name = f"{prefix}-{len(local_of):05d}{suffix}"
                 local_of[absolute] = name
@@ -585,7 +695,9 @@ class HlsDownload:
                     return
                 wrote = 0
                 try:
-                    with client.stream("GET", url, headers=self._headers or None) as response:
+                    with net.stream_scoped(
+                        client, url, headers=self._headers, origin=self._origin
+                    ) as response:
                         response.raise_for_status()
                         with open(tmp, "wb") as fh:
                             for chunk in response.iter_bytes(65536):
@@ -630,7 +742,10 @@ class HlsDownload:
             net.build_client(
                 proxy=self.proxy,
                 insecure=self.insecure,
-                follow_redirects=True,
+                trusted_host=net.host_of(self._origin),
+                # Redirects are followed by stream_scoped, which re-scopes the
+                # credential headers on every hop.
+                follow_redirects=False,
                 # HTTP/1.1 so the segment workers are real parallel TCP flows,
                 # not multiplexed onto one h2 socket - the latter throttled the
                 # native fetch to a crawl. One kept-alive connection per worker.

@@ -14,8 +14,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# Least privilege at the top: the build jobs only need to read the repository.
+# The one job that creates a release raises its own permission below.
 permissions:
-  contents: write
+  contents: read
 
 # Use bash on every runner (Windows included) so steps behave identically and
 # don't hit PowerShell's error-handling quirks.
@@ -36,9 +38,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -64,9 +66,22 @@ jobs:
       - name: Install app and build tools
         timeout-minutes: 10
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -e .
-          pip install pyinstaller pillow
+          # Pinned: the frozen binary is a product of these tools, so leaving
+          # them floating means the same tag can build differently next month.
+          # Bump deliberately, in a commit, not by the calendar.
+          pip install "pyinstaller==6.22.3" "pillow==12.3.0"
+
+      - name: Record the exact build inputs
+        shell: bash
+        run: |
+          # Attached to the release, so a rebuild can be compared against what
+          # actually shipped instead of guessed at.
+          python -m pip freeze --all > "dist-requirements-${{ matrix.os }}.txt" || true
+          mkdir -p dist
+          mv "dist-requirements-${{ matrix.os }}.txt" dist/ || true
 
       - name: Resolve version
         id: ver
@@ -154,7 +169,7 @@ jobs:
           bash packaging/linux/build_deb.sh "$V"
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           # One artifact per matrix entry, keyed by its runner OS.
           name: grabline-${{ matrix.os }}
@@ -165,20 +180,61 @@ jobs:
             dist/Grabline-*-x86_64.AppImage
             dist/Grabline-*-linux-x86_64.tar.gz
             dist/grabline_*_amd64.deb
+            dist/dist-requirements-*.txt
           if-no-files-found: error
 
   release:
-    # The three platform builds gate the release. always() lets it publish even
-    # if one leg fails, and download-artifact attaches whatever built.
+    # Every platform build must succeed. This used to be `always()`, which let
+    # the release publish when a leg had failed - so a tag could end up with,
+    # say, no macOS .dmg, and the website's download button pointed at a
+    # release that silently had nothing for that platform. A missing installer
+    # is a failed release, not a partial one: fix the build and re-tag.
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ always() && github.ref_type == 'tag' }}
+    if: ${{ github.ref_type == 'tag' }}
+    permissions:
+      contents: write # only this job creates the release
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
+
+      - name: Verify every expected installer is present
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#v}"
+          missing=0
+          # One entry per artifact the release promises. A glob that matches
+          # nothing means that platform's installer is not in this release.
+          for pattern in \
+            "artifacts/*/Grabline-Setup-$V.exe" \
+            "artifacts/*/Grabline-$V-windows-portable.zip" \
+            "artifacts/*/Grabline-$V-"*.dmg \
+            "artifacts/*/Grabline-$V-x86_64.AppImage" \
+            "artifacts/*/Grabline-$V-linux-x86_64.tar.gz" \
+            "artifacts/*/grabline_${V}_amd64.deb"
+          do
+            # shellcheck disable=SC2086
+            if ! compgen -G "$pattern" > /dev/null; then
+              echo "::error::missing release asset: $pattern"
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ] || exit 1
+          echo "All expected installers are present."
+
+      - name: Publish SHA256SUMS alongside the installers
+        run: |
+          set -euo pipefail
+          # So anyone can verify a download, and so the updater's digest check
+          # has a second, human-checkable source.
+          ( cd artifacts && find . -type f ! -name 'SHA256SUMS*' -printf '%P\n' \
+              | sort | xargs -r sha256sum ) > SHA256SUMS.txt
+          mkdir -p artifacts/checksums && mv SHA256SUMS.txt artifacts/checksums/
+          cat artifacts/checksums/SHA256SUMS.txt
+
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: artifacts/**/*
           generate_release_notes: true

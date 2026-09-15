@@ -10,18 +10,20 @@ REST, an SFTP seek, or an HTTP Range (WebDAV/S3).
 
 from __future__ import annotations
 
+import contextlib
 import ftplib
 import logging
+import re
 import ssl
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 
-from app.core import net
+from app.core import net, paths
 from app.core.credentials import CredentialStore
 from app.core.errors import DownloadError
 from app.core.models import Job, JobStatus
@@ -82,10 +84,16 @@ class CloudDownload:
         *,
         credentials: CredentialStore | None = None,
         insecure: bool = False,
+        proxy: str | None = None,
+        proxy_bypass: tuple[str, ...] = (),
     ) -> None:
         self.db = db
         self.job = job
         self.store = credentials
+        #: WebDAV is HTTP, so it goes through the app's proxy like everything
+        #: else. (ftp/sftp/s3 use their own libraries' transports.)
+        self.proxy = proxy
+        self.proxy_bypass = proxy_bypass
         #: Accept an invalid/self-signed certificate for this job's transport
         #: (the manager passes ``global setting OR this job's override``).
         #: Applies to the TLS-bearing schemes - ftps, webdavs, s3 over https.
@@ -134,11 +142,38 @@ class CloudDownload:
 
     # -------------------------------------------------------- state helpers
 
-    def _sink(self) -> tuple[Path, int]:
-        """The .part file and where to resume from (its current size)."""
+    def _sink(self, identity: str | None = None) -> tuple[Path, int]:
+        """The .part file and where to resume from.
+
+        ``identity`` is whatever the protocol can say about *which* remote
+        object this is - a size and modification time, an ETag. It is recorded
+        on the first run and compared on every later one: a ``.part`` is only a
+        valid head of the file it was started against, and resuming it against
+        a different object joins two halves of two different files into
+        something that passes every size check and is garbage. When the remote
+        has changed (or we cannot tell), the partial is discarded and the
+        download starts over - the only answer that cannot produce a corrupt
+        file.
+        """
         part = self.job.part_path
         part.parent.mkdir(parents=True, exist_ok=True)
         offset = part.stat().st_size if part.exists() else 0
+        if offset and identity is not None:
+            stored = str(self.job.options.get(_IDENTITY_OPTION) or "")
+            if stored and stored != identity:
+                log.info(
+                    "cloud job %s: the remote file changed since this partial "
+                    "download was started - restarting rather than mixing versions",
+                    self.job.id,
+                )
+                part.unlink(missing_ok=True)
+                offset = 0
+        if identity is not None and str(self.job.options.get(_IDENTITY_OPTION) or "") != identity:
+            options = dict(self.job.options)
+            options[_IDENTITY_OPTION] = identity
+            self.job.options = options
+            with contextlib.suppress(Exception):  # a note, never fatal to a download
+                self.db.update_job_options(self.job.id, options)
         self._downloaded = offset
         return part, offset
 
@@ -198,7 +233,13 @@ class CloudDownload:
                 total = None
             if total:
                 self.db.update_job_total(self.job.id, total)
-            part, offset = self._sink()
+            try:
+                # MDTM is optional but widely supported; with SIZE it is enough
+                # to notice the file being replaced between sessions.
+                modified = ftp.voidcmd(f"MDTM {remote}").strip()
+            except ftplib.all_errors:
+                modified = ""
+            part, offset = self._sink(f"ftp:{total}:{modified}")
             if total is not None and offset >= total and offset > 0:
                 return self._finish(part)
             mode = "ab" if offset else "wb"
@@ -229,10 +270,11 @@ class CloudDownload:
         remote = unquote(urlsplit(self.job.url).path)
         client, sftp = _sftp_client(self.job.url, self.store)
         try:
-            total = int(sftp.stat(remote).st_size or 0)
+            info = sftp.stat(remote)
+            total = int(info.st_size or 0)
             if total:
                 self.db.update_job_total(self.job.id, total)
-            part, offset = self._sink()
+            part, offset = self._sink(f"sftp:{total}:{int(info.st_mtime or 0)}")
             if total and offset >= total:
                 return self._finish(part)
             with sftp.open(remote, "rb") as source, open(part, "ab" if offset else "wb") as sink:
@@ -262,7 +304,17 @@ class CloudDownload:
         total = int(head.get("ContentLength") or 0)
         if total:
             self.db.update_job_total(self.job.id, total)
-        part, offset = self._sink()
+        # ETag identifies the bytes; VersionId pins the object on a versioned
+        # bucket; LastModified catches a same-size replacement on a server that
+        # recycles ETags.
+        part, offset = self._sink(
+            "s3:{}:{}:{}:{}".format(
+                total,
+                str(head.get("ETag") or "").strip('"'),
+                head.get("VersionId") or "",
+                head.get("LastModified") or "",
+            )
+        )
         if total and offset >= total:
             return self._finish(part)
         extra = {"Range": f"bytes={offset}-"} if offset else {}
@@ -284,36 +336,121 @@ class CloudDownload:
         headers = {"Range": f"bytes={offset}-"} if offset else {}
         timeout = httpx.Timeout(30.0, connect=15.0)
         with (
-            # Through net.build_client, so WebDAV gets the same browser-like
-            # User-Agent, proxy support and certificate policy as every other
-            # HTTP client in the app instead of httpx's bare defaults.
+            # Through net.build_client, so WebDAV gets the same proxy, the same
+            # browser-like User-Agent and the same certificate policy as every
+            # other HTTP client in the app instead of httpx's bare defaults.
             net.build_client(
-                insecure=self.insecure, follow_redirects=True, timeout=timeout
+                proxy=self.proxy,
+                insecure=self.insecure,
+                bypass_hosts=self.proxy_bypass,
+                follow_redirects=True,
+                timeout=timeout,
             ) as client,
             client.stream("GET", http_url, headers=headers, auth=auth) as response,
         ):
-            if response.status_code not in (200, 206):
-                if offset and response.status_code == 416:  # already complete
+            if offset and response.status_code == 416:
+                # "Range not satisfiable" only means "already complete" when the
+                # server says the file is exactly as long as what we hold. It
+                # equally means the file SHRANK, and finalising then would
+                # publish a truncated download as a finished one.
+                if _complete_per_content_range(response.headers.get("content-range"), offset):
                     return self._finish(part)
+                log.info(
+                    "webdav job %s: 416 without a matching total - restarting from zero",
+                    self.job.id,
+                )
+                return self._restart_webdav(part, client, http_url, auth)
+            if response.status_code not in (200, 206):
                 response.raise_for_status()
-            total = response.headers.get("Content-Length")
-            if total is not None:
-                self.db.update_job_total(self.job.id, offset + int(total))
-            with open(part, "ab" if offset else "wb") as sink:
-                for block in response.iter_bytes(_CHUNK):
-                    self._check()
-                    sink.write(block)
-                    self._advance(len(block))
+            if offset and response.status_code != 206:
+                # We asked to resume and the server sent the WHOLE file anyway
+                # (plenty ignore Range). Appending it to what we already hold
+                # produces `old partial + complete file` - a corrupt download
+                # that passes every size check. Start over instead.
+                log.info(
+                    "webdav job %s: server ignored Range (HTTP %s) - restarting from zero",
+                    self.job.id,
+                    response.status_code,
+                )
+                return self._write_webdav_body(response, part, offset=0)
+            if offset and not _range_starts_at(response.headers.get("content-range"), offset):
+                log.info(
+                    "webdav job %s: 206 answered a different range - restarting from zero",
+                    self.job.id,
+                )
+                return self._write_webdav_body(response, part, offset=0)
+            return self._write_webdav_body(response, part, offset=offset)
+
+    def _restart_webdav(
+        self, part: Path, client: httpx.Client, url: str, auth: httpx.Auth | None
+    ) -> JobStatus:
+        """Re-fetch from zero after a resume attempt turned out to be unusable."""
+        with client.stream("GET", url, auth=auth) as response:
+            response.raise_for_status()
+            return self._write_webdav_body(response, part, offset=0)
+
+    def _write_webdav_body(self, response: httpx.Response, part: Path, *, offset: int) -> JobStatus:
+        """Stream the body into ``part``. ``offset`` 0 truncates and restarts;
+        anything else appends to a partial we have proved the response continues."""
+        length = response.headers.get("Content-Length")
+        if length is not None and length.isdigit():
+            self.db.update_job_total(self.job.id, offset + int(length))
+        self._downloaded = offset
+        with open(part, "ab" if offset else "wb") as sink:
+            for block in response.iter_bytes(_CHUNK):
+                self._check()
+                sink.write(block)
+                self._advance(len(block))
         return self._finish(part)
 
 
+#: Job option holding "which remote object this .part belongs to".
+_IDENTITY_OPTION = "remote_identity"
+
+_CONTENT_RANGE_TOTAL = re.compile(r"bytes\s+\*/(\d+)\s*$")
+_CONTENT_RANGE_SPAN = re.compile(r"bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$")
+
+
+def _complete_per_content_range(header: str | None, local_size: int) -> bool:
+    """Does a 416's ``Content-Range: bytes */TOTAL`` prove we already hold the
+    whole file? Missing or malformed proves nothing, so the answer is no."""
+    if not header:
+        return False
+    match = _CONTENT_RANGE_TOTAL.match(header.strip())
+    return match is not None and int(match.group(1)) == local_size
+
+
+def _range_starts_at(header: str | None, offset: int) -> bool:
+    """Does a 206's ``Content-Range`` confirm the body continues from
+    ``offset``? A 206 with no parsable Content-Range confirms nothing."""
+    if not header:
+        return False
+    match = _CONTENT_RANGE_SPAN.match(header.strip())
+    if match is None:
+        return False
+    start, end = int(match.group(1)), int(match.group(2))
+    if start != offset or end < start:
+        return False
+    total = match.group(3)
+    return total == "*" or int(total) > end >= start
+
+
 def _webdav_http_url(url: str) -> str:
+    """The http(s) URL behind a ``webdav://`` / ``webdavs://`` address.
+
+    The query survives: plenty of WebDAV endpoints (Nextcloud public shares,
+    signed URLs) carry the credential to reach the file in ``?token=...``, and
+    dropping it turned a working share link into a 401. Userinfo is dropped on
+    purpose - it is lifted out separately and sent as Basic auth rather than
+    left in a URL that ends up in logs.
+    """
     parts = urlsplit(url)
     scheme = "https" if parts.scheme == "webdavs" else "http"
     netloc = parts.hostname or ""
-    if parts.port:
-        netloc += f":{parts.port}"
-    return f"{scheme}://{netloc}{parts.path}"
+    with contextlib.suppress(ValueError):  # malformed port: fall back to the host
+        if parts.port:
+            netloc += f":{parts.port}"
+    return urlunsplit((scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 # ----------------------------------------------------- connection helpers
@@ -355,6 +492,52 @@ def _connect_ftp(
     return ftp
 
 
+def known_hosts_path() -> Path:
+    """GrabLine's own known_hosts, inside the private data directory."""
+    return paths.data_dir() / "known_hosts"
+
+
+class _TrustOnFirstUse:
+    """Accept a host key the first time, remember it, refuse a change.
+
+    ``paramiko.AutoAddPolicy`` accepts *every* unknown key, every time, and
+    never writes it down - so a server that swaps identity between two
+    downloads is accepted just as readily as the first one, which is precisely
+    the case host keys exist to catch. This records the key instead, and a
+    later mismatch reaches the user as a failure rather than a shrug.
+    """
+
+    def __init__(self, store: Path) -> None:
+        self._store = store
+
+    def missing_host_key(self, client: Any, hostname: str, key: Any) -> None:
+        import paramiko
+
+        fingerprint = key.get_base64()
+        log.info(
+            "sftp: trusting %s on first use (%s %s)", hostname, key.get_name(), _sha256_fp(key)
+        )
+        client.get_host_keys().add(hostname, key.get_name(), key)
+        try:
+            self._store.parent.mkdir(parents=True, exist_ok=True)
+            client.get_host_keys().save(str(self._store))
+        except (OSError, paramiko.SSHException) as exc:
+            # Not fatal - the connection is still authenticated for this
+            # session - but say so, because it means the next run cannot tell
+            # a changed key from a first sighting.
+            log.warning("sftp: could not record the host key for %s (%s)", hostname, exc)
+        del fingerprint
+
+
+def _sha256_fp(key: Any) -> str:
+    """OpenSSH-style ``SHA256:...`` fingerprint, for messages a user can check."""
+    import base64
+    import hashlib
+
+    digest = hashlib.sha256(key.asbytes()).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+
+
 def _sftp_client(url: str, store: CredentialStore | None) -> tuple[Any, Any]:
     import paramiko
 
@@ -363,10 +546,15 @@ def _sftp_client(url: str, store: CredentialStore | None) -> tuple[Any, Any]:
     port = parts.port or _DEFAULT_PORTS["sftp"]
     account = store.account_for("sftp", parts.hostname or "", user) if store else None
     client = paramiko.SSHClient()
-    # Trust-on-first-use: accept unknown host keys (a desktop app can't ship a
-    # known_hosts for the whole internet). The transfer itself is integrity-
-    # checked by SSH.
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # The user's own ~/.ssh/known_hosts first (a server they already trust in a
+    # terminal is a server they trust here), then GrabLine's own store.
+    with contextlib.suppress(OSError, paramiko.SSHException):
+        client.load_system_host_keys()
+    trusted = known_hosts_path()
+    if trusted.is_file():
+        with contextlib.suppress(OSError, paramiko.SSHException):
+            client.load_host_keys(str(trusted))
+    client.set_missing_host_key_policy(_TrustOnFirstUse(trusted))
     connect: dict[str, Any] = {
         "hostname": parts.hostname or "",
         "port": port,
@@ -378,7 +566,17 @@ def _sftp_client(url: str, store: CredentialStore | None) -> tuple[Any, Any]:
         connect["passphrase"] = secret or None
     else:
         connect["password"] = secret or None
-    client.connect(**connect)
+    try:
+        client.connect(**connect)
+    except paramiko.BadHostKeyException as exc:
+        # The server answered with a different key than the one we recorded.
+        # Never replace it silently: that is the whole point of storing it.
+        raise DownloadError(
+            f"the SSH host key for {parts.hostname} has changed "
+            f"(expected {_sha256_fp(exc.expected_key)}, got {_sha256_fp(exc.key)}). "
+            "Someone may be impersonating the server. If you changed it yourself, "
+            f"remove the old entry from {known_hosts_path()} and try again."
+        ) from exc
     return client, client.open_sftp()
 
 

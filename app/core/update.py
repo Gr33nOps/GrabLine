@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import platform as platform_mod
 import re
 import threading
 from collections.abc import Callable
@@ -115,20 +116,61 @@ def latest_release(proxy: str | None = None) -> tuple[str, str] | None:
 WEBSITE_DOWNLOAD_URL = "https://gr33nops.github.io/GrabLine/#download"
 
 
-def _asset_matches(name: str, platform: str) -> bool:
+#: Asset-name fragments that identify a CPU architecture, mapped to the
+#: normalised machine names platform.machine() reports for them.
+_ARCH_TAGS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("applesilicon", frozenset({"arm64", "aarch64"})),
+    ("aarch64", frozenset({"arm64", "aarch64"})),
+    ("arm64", frozenset({"arm64", "aarch64"})),
+    ("armhf", frozenset({"armv7l", "armv6l", "arm"})),
+    ("x86_64", frozenset({"x86_64", "amd64"})),
+    ("amd64", frozenset({"x86_64", "amd64"})),
+    ("intel", frozenset({"x86_64", "amd64"})),
+    ("x64", frozenset({"x86_64", "amd64"})),
+    ("i386", frozenset({"i386", "i686", "x86"})),
+    ("x86", frozenset({"i386", "i686", "x86"})),
+)
+
+
+def current_machine() -> str:
+    """This CPU's architecture, normalised the way _ARCH_TAGS spells it."""
+    machine = platform_mod.machine().lower()
+    return {"amd64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}.get(machine, machine)
+
+
+def _asset_arch_ok(name: str, machine: str) -> bool:
+    """Is this asset built for ``machine``?
+
+    An asset that names no architecture at all is accepted: single-arch
+    releases are normal, and refusing them would mean never updating. One that
+    *does* name one must agree - handing an Intel Mac the applesilicon .dmg, or
+    an ARM board the x86_64 AppImage, produces an update that cannot run, which
+    is worse than no update at all.
+    """
     lowered = name.lower()
-    if platform.startswith("win"):
+    wanted = {"x86_64": "x86_64", "arm64": "arm64"}.get(machine, machine)
+    for tag, machines in _ARCH_TAGS:
+        if tag in lowered:
+            return wanted in machines or machine in machines
+    return True
+
+
+def _asset_matches(name: str, platform_name: str, machine: str | None = None) -> bool:
+    lowered = name.lower()
+    if not _asset_arch_ok(lowered, machine or current_machine()):
+        return False
+    if platform_name.startswith("win"):
         # Prefer the Inno Setup installer; also accept the portable zip when
         # a release ships only that (or Setup failed to build).
         return (lowered.endswith(".exe") and "setup" in lowered) or (
             "windows" in lowered and lowered.endswith(".zip")
         )
-    if platform == "darwin":
+    if platform_name == "darwin":
         return lowered.endswith(".dmg")
     # Prefer the AppImage; fall back to the .deb so a Linux user still gets an
     # installer when the AppImage leg of a release was the one that failed.
     return lowered.endswith(".appimage") or (
-        lowered.startswith("grabline_") and lowered.endswith("_amd64.deb")
+        lowered.startswith("grabline_") and lowered.endswith(".deb")
     )
 
 
@@ -161,7 +203,7 @@ def _asset_digest(asset: dict[str, Any]) -> str | None:
 
 
 def installer_update(
-    proxy: str | None = None, platform: str | None = None
+    proxy: str | None = None, platform: str | None = None, machine: str | None = None
 ) -> tuple[str, str, str, int, str | None] | None:
     """(tag, asset name, download URL, size, sha256) of this platform's installer
     for a newer release, or None when already up to date / no matching asset.
@@ -173,6 +215,7 @@ def installer_update(
     import sys
 
     platform = platform or sys.platform
+    machine = machine or current_machine()
     data = _fetch_latest(proxy)
     tag = str(data.get("tag_name") or "").strip()
     if not tag or not is_newer(tag, __version__):
@@ -185,13 +228,16 @@ def installer_update(
     for asset in ranked:
         name = str(asset.get("name") or "")
         url = str(asset.get("browser_download_url") or "")
-        if name and url and _asset_matches(name, platform):
+        if name and url and _asset_matches(name, platform, machine):
             raw_size = asset.get("size")
             size = int(raw_size) if isinstance(raw_size, int) and raw_size > 0 else 0
             return (tag, name, url, size, _asset_digest(asset))
     # Newer tag exists but this platform's installer is missing (e.g. the
     # macOS job failed) - still an error the user should see, not "up to date".
-    raise DownloadError(f"GrabLine {tag} is out, but no installer for this system is attached yet")
+    raise DownloadError(
+        f"GrabLine {tag} is out, but no installer for this system "
+        f"({platform}/{machine}) is attached yet"
+    )
 
 
 def _ua() -> dict[str, str]:

@@ -403,6 +403,11 @@ def test_command_forwards_browser_headers_to_ffmpeg(db: Database, dest: Path):
         },
     )
     task = HlsDownload(db, job, ffmpeg_path="ffmpeg")
+    # FFmpeg applies one header block to every request it makes and resolves
+    # the playlist itself, so the credentials ride along only once a manifest
+    # has been read and proved to reference nothing off-origin. That is the
+    # state after a successful native pass.
+    task._note_manifest_origins(["https://cdn.example/seg1.ts", "https://cdn.example/seg2.ts"])
     command = task._command(job.part_path)
 
     for i, arg in enumerate(command):
@@ -411,6 +416,46 @@ def test_command_forwards_browser_headers_to_ffmpeg(db: Database, dest: Path):
             block = command[i - 1]
             assert "Referer: https://site.example/watch\r\n" in block
             assert "Cookie: sess=abc123\r\n" in block
+
+
+def test_ffmpeg_gets_no_credentials_until_the_playlist_has_been_vetted(db: Database, dest: Path):
+    """The FFmpeg fallback runs when the native fetch could not read the
+    playlist - so nothing has checked where it points. Identifying headers
+    still go (a CDN needs the Referer); the session does not."""
+    job = _hls_job(
+        db,
+        "https://cdn.example/master.m3u8",
+        dest,
+        options={
+            "http_headers": {
+                "Referer": "https://site.example/watch",
+                "Cookie": "sess=abc123",
+                "Authorization": "Bearer secret",
+            }
+        },
+    )
+    block = HlsDownload(db, job, ffmpeg_path="ffmpeg")._ffmpeg_headers() or ""
+    assert "Referer: https://site.example/watch" in block
+    assert "User-Agent:" in block
+    assert "sess=abc123" not in block
+    assert "Bearer secret" not in block
+
+
+def test_ffmpeg_gets_no_credentials_when_the_playlist_points_off_origin(db: Database, dest: Path):
+    """The attack this exists for: a playlist naming an absolute segment URL on
+    a host of its choosing must not cause the page's session to be handed to
+    that host by FFmpeg."""
+    job = _hls_job(
+        db,
+        "https://cdn.example/master.m3u8",
+        dest,
+        options={"http_headers": {"Cookie": "sess=abc123", "Referer": "https://site.example/"}},
+    )
+    task = HlsDownload(db, job, ffmpeg_path="ffmpeg")
+    task._note_manifest_origins(["https://cdn.example/seg1.ts", "https://attacker.example/seg2.ts"])
+    block = task._ffmpeg_headers() or ""
+    assert "sess=abc123" not in block
+    assert "Referer: https://site.example/" in block
 
 
 def test_command_sends_default_browser_headers_when_none_stored(db: Database, dest: Path):

@@ -4,10 +4,12 @@ name: Pages
 # One-time setup: repo Settings -> Pages -> Build and deployment ->
 # Source: "GitHub Actions". The site then publishes on every push to main.
 
-# No paths filter: main is rebuilt as a single amended commit and
-# force-pushed on release, and GitHub can't diff a rewritten ref - a paths
-# filter silently skips the run (the site never updated after the first
-# deploy). Main only moves on release, so this is ~one deploy per release.
+# No paths filter. Historically main was rebuilt as a single orphan commit and
+# force-pushed on release, and GitHub cannot diff a rewritten ref - a paths
+# filter silently skipped the run and the site never updated. That rewriting
+# has been stopped (see CONTRIBUTING.md); the filter stays off anyway because
+# a missed deploy is far more annoying than an extra one, and main moves
+# rarely.
 on:
   push:
     branches: [main]
@@ -34,7 +36,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Pre-fetch the release into a static file the page reads at runtime,
       # instead of every visitor's browser calling the GitHub REST API
       # directly. That endpoint's 60/hour anonymous limit is shared per IP -
@@ -90,9 +92,9 @@ jobs:
           cat website/latest.json
       # Pages must be enabled once in Settings → Pages → Source: GitHub Actions.
       # GITHUB_TOKEN cannot create the site (Resource not accessible by integration).
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: website
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

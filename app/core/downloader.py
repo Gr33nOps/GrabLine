@@ -50,7 +50,7 @@ DEFAULT_CONNECTIONS = 8
 #: Statuses that mean "try this segment again" rather than "the job is dead":
 #: rate limits, transient server faults, and the auth-flavored ones a refreshed
 #: (re-signed) URL usually cures.
-_RETRYABLE_STATUS = frozenset({403, 408, 409, 425, 429, 500, 502, 503, 504})
+_RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 #: The subset that means "you are asking for too much at once". A host that
 #: served the first segments happily and then starts answering these is rate
@@ -59,7 +59,17 @@ _RETRYABLE_STATUS = frozenset({403, 408, 409, 425, 429, 500, 502, 503, 504})
 #: 403 belongs here because most CDNs use it (not 429) to shed excess range
 #: requests; a genuinely forbidden URL fails on its very first segment, before
 #: any progress, and still ends up failing the job.
-_PUSHBACK_STATUS = frozenset({403, 429, 503})
+_PUSHBACK_STATUS = frozenset({429, 503})
+
+#: 403 is ambiguous. Some CDNs shed excess parallel range requests with it, so
+#: treating it as back-pressure is what finishes those downloads. But it is
+#: also the ordinary answer for "forbidden": an expired signed URL, hotlink
+#: protection, a bot wall. Telling them apart needs one fact - whether this
+#: download has ever successfully transferred anything. If it has, the file is
+#: reachable and a sudden 403 under parallel load is pressure worth backing off
+#: from. If the very first requests are refused, it is a wall, and spending the
+#: full back-off budget on it only delays a clear error by minutes.
+_AMBIGUOUS_PUSHBACK_STATUS = frozenset({403})
 
 #: Phrase in the failure message when a download died to rate limiting. The
 #: manager keys its auto-retry off this (see _TRANSIENT_OVERRIDES): the plain
@@ -69,7 +79,7 @@ RATE_LIMIT_MARKER = "rate limiting"
 #: Never wait longer than this on a Retry-After, however large it says.
 _MAX_RETRY_AFTER = 60.0
 
-_CONTENT_RANGE_START = re.compile(r"\s*bytes\s+(\d+)-")
+_CONTENT_RANGE = re.compile(r"\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$")
 
 
 class StopReason(Enum):
@@ -274,10 +284,17 @@ class SegmentedDownload:
             proxy=proxy,
             bypass_hosts=bypass_hosts,
             user_agent=user_agent,
+            # Probed against THIS download's own host, not a fixed one: a
+            # black-holed v6 route is per-route, so only the server we are
+            # about to talk to can say whether binding v4 helps.
+            force_ipv4=net.force_ipv4_for(job.final_url or job.url),
             # One client for the whole download: the probe, every redirect,
             # every range/segment request, every retry and every resume run on
-            # it, so this TLS policy is the download's TLS policy throughout.
+            # it, so this TLS policy is the download's TLS policy throughout -
+            # and trusted_host keeps it pinned to the server the user approved,
+            # so a redirect cannot carry the exemption somewhere else.
             insecure=insecure,
+            trusted_host=net.host_of(job.url),
             follow_redirects=True,
             # HTTP/1.1 on purpose. This is a segmented downloader: its whole
             # point is N range requests carried on N *separate* TCP connections,
@@ -407,6 +424,15 @@ class SegmentedDownload:
         self._segments = segments
         self._preallocate(part)
 
+    def _range_validator(self) -> str | None:
+        """The strongest If-Range value this job has. A strong ETag is exact; a
+        weak one (``W/"..."``) is explicitly not usable for byte ranges, so
+        Last-Modified is preferred over it."""
+        etag = (self.job.etag or "").strip()
+        if etag and not etag.upper().startswith("W/"):
+            return etag
+        return (self.job.last_modified or "").strip() or None
+
     def _probe_from_job(self) -> ProbeResult | None:
         """Rebuild a ProbeResult from fields written at add/resolve time."""
         job = self.job
@@ -428,27 +454,72 @@ class SegmentedDownload:
             return True
         if not result.resumable and any(segment.downloaded for segment in segments):
             return True  # server no longer honors ranges; offsets are unusable
+        started = any(segment.downloaded for segment in segments)
         if job.etag and result.etag:
             return job.etag != result.etag
         if job.last_modified and result.last_modified:
             return job.last_modified != result.last_modified
-        if job.total_size is not None and result.total_size is not None:
-            return job.total_size != result.total_size
+        if (
+            job.total_size is not None
+            and result.total_size is not None
+            and job.total_size != result.total_size
+        ):
+            return True
+        if not started:
+            return False
+        # Nothing matched a validator we had. A resource that used to carry one
+        # and now carries none has, as far as we can tell, been replaced - and
+        # an equal size proves nothing (an edited file of the same length is the
+        # exact case that produced a corrupt, half-and-half download). Only
+        # resume when identity was actually confirmed.
+        if (job.etag and not result.etag) or (job.last_modified and not result.last_modified):
+            log.info(
+                "job %s: the server no longer reports the validator this partial "
+                "download was started against - restarting rather than mixing versions",
+                job.id,
+            )
+            return True
+        if not (job.etag or job.last_modified):
+            # We never had one either. Size is the only signal available; it
+            # already matched above, so carry on (with If-Range absent, the
+            # Content-Range checks remain the backstop).
+            return False
         return False
 
     #: Refuse to fill the disk to the brim (S6).
     DISK_SPACE_MARGIN = 64 * 1024 * 1024
 
+    def _bytes_still_needed(self, part: Path, total: int) -> int:
+        """How many bytes this download has yet to write.
+
+        Emphatically *not* ``total - part.stat().st_size``: a preallocated part
+        file is sparse, so its apparent size is the full length from the moment
+        it is created while none of those blocks are allocated yet. Measuring
+        that way made the free-space check read "0 bytes needed" for a download
+        that had not written a thing - the check passed on a disk that could
+        not possibly hold the file. Segment progress is the real answer; it
+        counts bytes actually received.
+        """
+        done = sum(segment.downloaded for segment in self._segments)
+        if not self._segments and part.exists():
+            # Before segments exist, fall back to physical allocation where the
+            # platform reports it (st_blocks is 512-byte units and absent on
+            # Windows), and only then to the apparent size.
+            info = part.stat()
+            blocks = getattr(info, "st_blocks", None)
+            done = min(total, blocks * 512) if blocks is not None else min(total, info.st_size)
+        return max(0, total - done)
+
     def _preallocate(self, part: Path) -> None:
         part.parent.mkdir(parents=True, exist_ok=True)
         total = self.job.total_size
         if total:
-            already = part.stat().st_size if part.exists() else 0
+            needed = self._bytes_still_needed(part, total)
             free = shutil.disk_usage(part.parent).free
-            if free < total - already + self.DISK_SPACE_MARGIN:
+            if free < needed + self.DISK_SPACE_MARGIN:
                 raise DownloadError(
                     "not enough free disk space for this download "
-                    f"(need {total} bytes plus headroom)"
+                    f"(need {needed} more bytes plus headroom, {free} free)"
                 )
         if not part.exists():
             part.touch()
@@ -694,6 +765,11 @@ class SegmentedDownload:
     #: half then stays above MIN_SEGMENT_SIZE.
     STEAL_THRESHOLD = 2 * MIN_SEGMENT_SIZE
 
+    def _has_transferred(self) -> bool:
+        """Has this download ever successfully received data from the server?
+        The signal that separates 'too many connections' from 'forbidden'."""
+        return any(segment.downloaded for segment in self._segments)
+
     def _steal_segment(self) -> Segment | None:
         """Split the tail off the segment with the most bytes remaining and
         return it as fresh work, so a finished connection keeps pulling."""
@@ -751,9 +827,20 @@ class SegmentedDownload:
         a nearly-complete download for good.
         """
         status = response.status_code
-        if status in _PUSHBACK_STATUS:
+        if status in _PUSHBACK_STATUS or (
+            status in _AMBIGUOUS_PUSHBACK_STATUS and self._has_transferred()
+        ):
             self._distrust_final_url()
             raise _Pushback(f"HTTP {status}", retry_after=_retry_after_seconds(response.headers))
+        if status in _AMBIGUOUS_PUSHBACK_STATUS:
+            # Refused before this download ever moved a byte: a wall, not
+            # back-pressure. Fail with something the user can act on instead of
+            # spending the back-off budget re-asking a server that is saying no.
+            raise DownloadError(
+                f"the server refused this download (HTTP {status}) before any data "
+                "arrived. The link may have expired, or it may need the page's "
+                "login - open it in your browser and use the GrabLine button."
+            )
         if status in _RETRYABLE_STATUS:
             self._distrust_final_url()
             raise _Retry(f"segment {segment.index}: HTTP {status}")
@@ -774,17 +861,46 @@ class SegmentedDownload:
         if encoding and encoding != "identity":
             raise _Retry(f"segment {segment.index}: server sent {encoding}-compressed bytes")
 
-    @staticmethod
-    def _check_range_start(response: httpx.Response, offset: int, segment: Segment) -> None:
-        """A 206 that answers a *different* range than we asked for would be
-        written at the requested offset, silently corrupting the file."""
-        match = _CONTENT_RANGE_START.match(response.headers.get("content-range", ""))
+    def _check_content_range(
+        self, response: httpx.Response, offset: int, end: int, segment: Segment
+    ) -> None:
+        """Verify that a 206 really is the range we asked for.
+
+        The status alone proves nothing: the body is written at ``offset``
+        whatever it actually contains, so a 206 that answers a different range -
+        or carries no usable Content-Range at all - corrupts the file silently.
+        A missing or malformed header used to be trusted; it is now a retry,
+        which lands on a redirect target or a CDN node that answers properly.
+        """
+        raw = response.headers.get("content-range", "")
+        match = _CONTENT_RANGE.match(raw)
         if match is None:
-            return  # no parsable header: trust the status, as before
-        if int(match.group(1)) != offset:
+            raise _Retry(f"segment {segment.index}: 206 without a usable Content-Range ({raw!r})")
+        start, last, total = int(match.group(1)), int(match.group(2)), match.group(3)
+        if start != offset:
             raise _Retry(
-                f"segment {segment.index}: server answered byte {match.group(1)}, expected {offset}"
+                f"segment {segment.index}: server answered byte {start}, expected {offset}"
             )
+        if last < start or last > end:
+            # More than we asked for would run past this segment into the next
+            # one's bytes; less is fine (a short range is topped up on the next
+            # pass) as long as it starts where we asked.
+            raise _Retry(
+                f"segment {segment.index}: server answered bytes {start}-{last}, "
+                f"expected to end by {end}"
+            )
+        if total != "*":
+            declared = int(total)
+            if self.job.total_size is not None and declared != self.job.total_size:
+                raise _Retry(
+                    f"segment {segment.index}: the file is now {declared} bytes, "
+                    f"was {self.job.total_size}"
+                )
+            if last >= declared:
+                raise _Retry(
+                    f"segment {segment.index}: Content-Range ends at {last} "
+                    f"but claims a total of {declared}"
+                )
 
     def _stream_range(self, handle: IO[bytes], segment: Segment) -> None:
         end = segment.end
@@ -794,11 +910,19 @@ class SegmentedDownload:
         if offset > end:
             return
         headers = {"Range": f"bytes={offset}-{end}"}
+        validator = self._range_validator()
+        if validator and segment.downloaded:
+            # If-Range: continue this partial ONLY if the resource is still the
+            # one we started. A server that has since replaced the file answers
+            # 200 with the whole new file instead of a 206, which the status
+            # check below turns into a restart rather than a spliced-together
+            # mixture of two versions.
+            headers["If-Range"] = validator
         with self._client.stream("GET", self._request_url(), headers=headers) as response:
             if response.status_code != 206:
                 self._reject_status(response, segment)
             self._reject_encoded(response, segment)
-            self._check_range_start(response, offset, segment)
+            self._check_content_range(response, offset, end, segment)
             # Seek once, then write sequentially: every chunk lands exactly
             # where the previous one left off, so a per-chunk lseek buys
             # nothing. This handle belongs to one worker running one segment.

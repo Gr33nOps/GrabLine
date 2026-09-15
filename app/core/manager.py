@@ -1457,7 +1457,14 @@ class DownloadManager:
         if job.kind is JobKind.TORRENT:
             return TorrentDownload(self.db, job, settings=self.settings)
         if job.kind is JobKind.CLOUD:
-            return CloudDownload(self.db, job, credentials=self.credentials, insecure=insecure)
+            return CloudDownload(
+                self.db,
+                job,
+                credentials=self.credentials,
+                insecure=insecure,
+                proxy=proxy,
+                proxy_bypass=self.settings.proxy_bypass,
+            )
         # Fair sharing of the connection budget across simultaneous downloads.
         # TCP fairness is per-flow, so without this the first download's N flows
         # starve every later sibling. Each unpinned download instead runs its

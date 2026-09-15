@@ -186,7 +186,8 @@ def test_host_limits_setting_roundtrip(db: Database):
 
 
 def _reset_v6_cache() -> None:
-    net._v6_state = None
+    net._v6_state.clear()
+    net._v6_probe_done.clear()
 
 
 def test_ipv6_broken_when_v6_fails_but_v4_works(monkeypatch: pytest.MonkeyPatch):
@@ -226,10 +227,16 @@ def test_ipv6_verdict_is_cached(monkeypatch: pytest.MonkeyPatch):
     assert len(calls) == 1  # one v6 probe, then the cache answers
 
 
-def test_build_client_forces_v4_only_when_broken(monkeypatch: pytest.MonkeyPatch):
+def test_build_client_binds_v4_only_when_the_caller_asks(monkeypatch: pytest.MonkeyPatch):
+    """The bind is opt-in per client now.
+
+    It used to be applied to *every* client whenever one probe host (YouTube)
+    had a bad v6 route, which took IPv6 away from every unrelated download on
+    the machine. Callers that know which host they are about to contact ask
+    for it; nobody else is affected.
+    """
     _reset_v6_cache()
-    monkeypatch.setattr(net, "ipv6_broken", lambda: True)
-    client = net.build_client(timeout=1)
+    client = net.build_client(timeout=1, force_ipv4=True)
     # The v4-bound transport replaces the default one.
     assert isinstance(client._transport, httpx.HTTPTransport)
     # _pool is a private httpx.HTTPTransport attribute, not on the BaseTransport
@@ -238,18 +245,40 @@ def test_build_client_forces_v4_only_when_broken(monkeypatch: pytest.MonkeyPatch
     assert getattr(pool, "_local_address", None) == "0.0.0.0"
     client.close()
 
-    monkeypatch.setattr(net, "ipv6_broken", lambda: False)
     client = net.build_client(timeout=1)
     pool = getattr(client._transport, "_pool", None)
     assert getattr(pool, "_local_address", None) is None
     client.close()
 
 
-def test_proxied_client_never_forces_v4(monkeypatch: pytest.MonkeyPatch):
+def test_one_hosts_broken_v6_does_not_bind_every_other_client(monkeypatch: pytest.MonkeyPatch):
+    """The regression this exists for: a single site's black-holed IPv6 route
+    must not decide how the app connects to unrelated servers."""
+    import socket as socket_mod
+
+    _reset_v6_cache()
+    # Only the probe host's v6 is dead; everything else is fine.
+    monkeypatch.setattr(
+        net,
+        "_handshakes",
+        lambda host, family: not (host == "dead.example" and family == socket_mod.AF_INET6),
+    )
+    assert net.ipv6_broken("dead.example") is True
+    assert net.ipv6_broken("healthy.example") is False
+    assert net.force_ipv4_for("https://healthy.example/file.bin") is False
+    assert net.force_ipv4_for("https://dead.example/file.bin") is True
+
+    # A client built without asking is untouched regardless.
+    client = net.build_client(timeout=1)
+    pool = getattr(client._transport, "_pool", None)
+    assert getattr(pool, "_local_address", None) is None
+    client.close()
+
+
+def test_proxied_client_never_forces_v4():
     """The proxy connects onward itself - binding our socket family would
     change nothing and risks breaking a v6-only proxy address."""
-    monkeypatch.setattr(net, "ipv6_broken", lambda: True)
-    client = net.build_client(proxy="http://127.0.0.1:9", timeout=1)
+    client = net.build_client(proxy="http://127.0.0.1:9", timeout=1, force_ipv4=True)
     pool = getattr(client._transport, "_pool", None)
     assert getattr(pool, "_local_address", None) is None
     client.close()
