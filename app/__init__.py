@@ -4,4 +4,4 @@ Keep this module import-light: the headless CLI (``app.cli``) and the test
 suite must be able to import the core without pulling in PySide6.
 """
 
-__version__ = "1.30.1"
+__version__ = "1.30.2"

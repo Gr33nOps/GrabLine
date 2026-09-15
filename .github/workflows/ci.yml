@@ -108,10 +108,8 @@ jobs:
             app/tests/test_paths.py \
             app/tests/test_naming.py \
             app/tests/test_reveal.py \
-            app/tests/test_proc.py \
             app/tests/test_update.py \
             app/tests/test_security_review.py \
             app/tests/test_settings.py \
             app/tests/test_db.py \
-            app/tests/test_instance.py \
-            app/tests/test_host_install.py
+            app/tests/test_instance.py

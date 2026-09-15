@@ -505,14 +505,16 @@ class SegmentedDownload:
         not possibly hold the file. Segment progress is the real answer; it
         counts bytes actually received.
         """
+        if not self._segments:
+            # No progress records yet, so nothing is known to be written. The
+            # part file's own size cannot fill the gap: it is preallocated
+            # sparse, so it reports the full length immediately - and on
+            # Windows there is not even an st_blocks to ask about the real
+            # allocation. Assuming the whole file is still to come is the only
+            # answer that is right on every platform, and erring toward "needs
+            # more space" is the safe direction for a disk-space check.
+            return total
         done = sum(segment.downloaded for segment in self._segments)
-        if not self._segments and part.exists():
-            # Before segments exist, fall back to physical allocation where the
-            # platform reports it (st_blocks is 512-byte units and absent on
-            # Windows), and only then to the apparent size.
-            info = part.stat()
-            blocks = getattr(info, "st_blocks", None)
-            done = min(total, blocks * 512) if blocks is not None else min(total, info.st_size)
         return max(0, total - done)
 
     def _preallocate(self, part: Path) -> None:
