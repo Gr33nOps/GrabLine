@@ -133,24 +133,26 @@ def _package_root() -> Path:
     return Path(paths.__file__).resolve().parents[2]
 
 
-def frozen_host_path() -> Path | None:
+def frozen_host_path(platform: str | None = None) -> Path | None:
     """In a PyInstaller build the Native Messaging host is a sibling console
     executable (``grabline-host``); the browser manifests point straight at it,
     so no launcher script is written. None when running from source."""
     if not getattr(sys, "frozen", False):
         return None
-    exe = "grabline-host.exe" if sys.platform == "win32" else "grabline-host"
+    platform = platform or sys.platform
+    exe = "grabline-host.exe" if platform == "win32" else "grabline-host"
     return Path(sys.executable).with_name(exe)
 
 
-def write_launcher(bin_dir: Path | None = None) -> Path:
+def write_launcher(bin_dir: Path | None = None, platform: str | None = None) -> Path:
     """A tiny script that runs ``python -m app.native_host``; the manifests
     point at it. PYTHONPATH is pinned to where the ``app`` package lives,
     because browsers spawn the host from their own working directory."""
+    platform = platform or sys.platform
     target_dir = bin_dir or paths.bin_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
     executable = sys.executable
-    if sys.platform == "win32":  # pragma: no cover - windows-only branch
+    if platform == "win32":  # pragma: no cover - windows-only branch
         # pythonw.exe avoids a console window flashing up when the browser
         # spawns the host. newline="\r\n" with \n content - text mode would
         # double the \r and the stray char corrupts the command line (the bug
@@ -188,13 +190,13 @@ def install(
 ) -> list[Path]:
     """Write manifests for every known browser location. Returns paths written."""
     platform = platform or sys.platform
-    frozen = frozen_host_path()
+    frozen = frozen_host_path(platform)
     if frozen is not None:
         launcher = frozen  # installed grabline-host exe; no wrapper script needed
     elif not dry_run:
-        launcher = write_launcher(bin_dir)
+        launcher = write_launcher(bin_dir, platform)
     else:
-        launcher = paths.bin_dir() / "grabline-host"
+        launcher = (bin_dir or paths.bin_dir()) / "grabline-host"
     written: list[Path] = []
     if platform == "win32":  # pragma: no cover - registry path, windows-only
         return _install_windows_registry(launcher, dry_run=dry_run)
@@ -237,12 +239,13 @@ def _install_windows_registry(
 # ------------------------------------------------------------- the doctor
 
 
-def _launcher_path() -> Path:
-    frozen = frozen_host_path()
+def _launcher_path(platform: str | None = None, bin_dir: Path | None = None) -> Path:
+    platform = platform or sys.platform
+    frozen = frozen_host_path(platform)
     if frozen is not None:
         return frozen
-    name = "grabline-host.bat" if sys.platform == "win32" else "grabline-host"
-    return paths.bin_dir() / name
+    name = "grabline-host.bat" if platform == "win32" else "grabline-host"
+    return (bin_dir or paths.bin_dir()) / name
 
 
 def _check_manifest(browser: str, manifest_path: Path, lines: list[str]) -> bool:
@@ -292,7 +295,9 @@ def _check_ping(launcher: Path, lines: list[str]) -> bool:
     return False
 
 
-def check(platform: str | None = None, home: Path | None = None) -> tuple[bool, list[str]]:
+def check(
+    platform: str | None = None, home: Path | None = None, bin_dir: Path | None = None
+) -> tuple[bool, list[str]]:
     """Verify the whole pairing chain; returns (healthy, report lines)."""
     platform = platform or sys.platform
     lines: list[str] = []
@@ -302,7 +307,7 @@ def check(platform: str | None = None, home: Path | None = None) -> tuple[bool, 
         lines.append(f"FAIL {_STORE_PYTHON_MESSAGE}")
         healthy = False
 
-    launcher = _launcher_path()
+    launcher = _launcher_path(platform, bin_dir)
     if launcher.exists():
         lines.append(f"OK   launcher exists: {launcher}")
     else:

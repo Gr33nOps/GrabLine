@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -17,26 +18,28 @@ def test_clean_env_strips_the_bundled_lib_path(monkeypatch: pytest.MonkeyPatch):
     children, which broke system tools (Open folder launched a browser). The
     bundle paths are removed while a genuine system path survives."""
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "_MEIPASS", "/tmp/.mount_x/usr/bin/_internal", raising=False)
-    monkeypatch.setenv("APPDIR", "/tmp/.mount_x")
-    monkeypatch.setenv(
-        "LD_LIBRARY_PATH", "/tmp/.mount_x/usr/bin/_internal:/usr/lib/x86_64-linux-gnu"
-    )
-    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/tmp/.mount_x/usr/bin/_internal")
+    root = os.sep.join(("", "tmp", ".mount_x"))
+    bundle = os.sep.join((root, "usr", "bin", "_internal"))
+    system = os.sep.join(("", "usr", "lib", "x86_64-linux-gnu"))
+    monkeypatch.setattr(sys, "_MEIPASS", bundle, raising=False)
+    monkeypatch.setenv("APPDIR", root)
+    monkeypatch.setenv("LD_LIBRARY_PATH", os.pathsep.join((bundle, system)))
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", bundle)
 
     env = proc.clean_env()
 
     assert env is not None
-    assert env.get("LD_LIBRARY_PATH") == "/usr/lib/x86_64-linux-gnu"  # bundle gone, system kept
-    assert "/tmp/.mount_x" not in (env.get("LD_LIBRARY_PATH") or "")
+    assert env.get("LD_LIBRARY_PATH") == system  # bundle gone, system kept
+    assert root not in (env.get("LD_LIBRARY_PATH") or "")
     assert "LD_LIBRARY_PATH_ORIG" not in env  # was only the bundle, so dropped entirely
 
 
 def test_clean_env_drops_ld_path_when_only_the_bundle(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "_MEIPASS", "/opt/app/_internal", raising=False)
+    bundle = os.sep.join(("", "opt", "app", "_internal"))
+    monkeypatch.setattr(sys, "_MEIPASS", bundle, raising=False)
     monkeypatch.delenv("APPDIR", raising=False)
-    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/app/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH", bundle)
 
     env = proc.clean_env()
 
