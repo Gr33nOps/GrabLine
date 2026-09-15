@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -23,27 +23,31 @@ def test_linux_uses_a_plain_path_not_a_file_url():
     # The bug: a file:// URL routed through x-scheme-handler/file, whose default
     # handler is the web browser. A plain directory path resolves as
     # inode/directory instead, so the file manager opens.
-    command = reveal.unix_command(Path("/home/u/Downloads"), "linux", which=_only("xdg-open"))
+    command = reveal.unix_command(
+        PurePosixPath("/home/u/Downloads"), "linux", which=_only("xdg-open")
+    )
     assert command == ["/usr/bin/xdg-open", "/home/u/Downloads"]
     assert not any("file://" in part for part in command)
 
 
 def test_linux_falls_back_to_gio_with_its_open_subcommand():
-    command = reveal.unix_command(Path("/data/clips"), "linux", which=_only("gio"))
+    command = reveal.unix_command(PurePosixPath("/data/clips"), "linux", which=_only("gio"))
     assert command == ["/usr/bin/gio", "open", "/data/clips"]
 
 
 def test_linux_returns_none_when_no_opener_is_installed():
-    assert reveal.unix_command(Path("/x"), "linux", which=lambda name: None) is None
+    assert reveal.unix_command(PurePosixPath("/x"), "linux", which=lambda name: None) is None
 
 
 def test_macos_opens_the_folder_or_reveals_the_file():
-    assert reveal.unix_command(Path("/Users/me/Downloads"), "darwin") == [
+    assert reveal.unix_command(PurePosixPath("/Users/me/Downloads"), "darwin") == [
         "open",
         "/Users/me/Downloads",
     ]
     revealed = reveal.unix_command(
-        Path("/Users/me/Downloads"), "darwin", reveal=Path("/Users/me/Downloads/clip.mp4")
+        PurePosixPath("/Users/me/Downloads"),
+        "darwin",
+        reveal=PurePosixPath("/Users/me/Downloads/clip.mp4"),
     )
     assert revealed == ["open", "-R", "/Users/me/Downloads/clip.mp4"]
 
@@ -142,7 +146,7 @@ def test_each_desktop_gets_its_own_file_manager(desktop: str, manager: str):
     # Every manager is installed *and* so is xdg-open: the desktop's own must
     # still win, and xdg-open must not be chosen.
     command = reveal.unix_command(
-        Path("/home/u/Downloads"),
+        PurePosixPath("/home/u/Downloads"),
         "linux",
         which=_installed(*reveal._FILE_MANAGERS, "xdg-open", "gio"),
         environ=_desktop(desktop),
@@ -155,7 +159,7 @@ def test_each_desktop_gets_its_own_file_manager(desktop: str, manager: str):
 def test_desktop_session_is_read_when_xdg_current_desktop_is_missing():
     # Some session managers only set DESKTOP_SESSION, sometimes as a path.
     command = reveal.unix_command(
-        Path("/home/u/Downloads"),
+        PurePosixPath("/home/u/Downloads"),
         "linux",
         which=_installed("nemo", "nautilus", "xdg-open"),
         environ={"DESKTOP_SESSION": "/usr/share/xsessions/cinnamon"},
@@ -166,7 +170,7 @@ def test_desktop_session_is_read_when_xdg_current_desktop_is_missing():
 def test_falls_back_to_another_real_manager_when_the_desktops_own_is_missing():
     # KDE without Dolphin installed: still a real file manager, not xdg-open.
     command = reveal.unix_command(
-        Path("/home/u/Downloads"),
+        PurePosixPath("/home/u/Downloads"),
         "linux",
         which=_installed("thunar", "xdg-open", "gio"),
         environ=_desktop("KDE"),
@@ -176,7 +180,7 @@ def test_falls_back_to_another_real_manager_when_the_desktops_own_is_missing():
 
 def test_generic_opener_is_only_used_when_no_file_manager_exists():
     command = reveal.unix_command(
-        Path("/home/u/Downloads"),
+        PurePosixPath("/home/u/Downloads"),
         "linux",
         which=_installed("xdg-open", "gio"),
         environ=_desktop("KDE"),
@@ -190,7 +194,7 @@ def test_a_browser_is_never_chosen_as_the_file_manager():
     browsers = ("brave", "brave-browser", "firefox", "google-chrome", "chromium", "vivaldi")
     # A machine with browsers and one real file manager.
     command = reveal.unix_command(
-        Path("/home/u/Downloads"),
+        PurePosixPath("/home/u/Downloads"),
         "linux",
         which=_installed(*browsers, "nemo"),
         environ=_desktop("X-Cinnamon"),
@@ -204,7 +208,7 @@ def test_a_browser_is_never_chosen_as_the_file_manager():
 
 
 def test_managers_that_support_it_select_the_file():
-    a_file = Path("/home/u/Downloads/ubuntu.iso")
+    a_file = PurePosixPath("/home/u/Downloads/ubuntu.iso")
     nautilus = reveal.unix_command(
         a_file.parent,
         "linux",
@@ -223,7 +227,7 @@ def test_managers_without_a_select_flag_open_the_directory_not_the_file():
     # Nemo, Thunar and Caja have no documented select flag. Handing them the
     # *file* would open it in its default application (a video player) rather
     # than showing it in its folder - so the directory is the right answer.
-    a_file = Path("/home/u/Downloads/clip.mp4")
+    a_file = PurePosixPath("/home/u/Downloads/clip.mp4")
     for desktop, manager in (("X-Cinnamon", "nemo"), ("XFCE", "thunar"), ("MATE", "caja")):
         command = reveal.unix_command(
             a_file.parent,
@@ -238,7 +242,7 @@ def test_managers_without_a_select_flag_open_the_directory_not_the_file():
 
 def test_an_unknown_desktop_still_finds_an_installed_manager():
     command = reveal.unix_command(
-        Path("/srv/files"),
+        PurePosixPath("/srv/files"),
         "linux",
         which=_installed("dolphin", "xdg-open"),
         environ={"XDG_CURRENT_DESKTOP": "some-wm-nobody-has-heard-of"},
@@ -248,7 +252,7 @@ def test_an_unknown_desktop_still_finds_an_installed_manager():
 
 def test_no_desktop_environment_at_all_still_avoids_the_generic_opener():
     command = reveal.unix_command(
-        Path("/srv/files"), "linux", which=_installed("caja", "xdg-open"), environ={}
+        PurePosixPath("/srv/files"), "linux", which=_installed("caja", "xdg-open"), environ={}
     )
     assert command == ["/usr/bin/caja", "/srv/files"]
 

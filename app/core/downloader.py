@@ -71,6 +71,11 @@ _PUSHBACK_STATUS = frozenset({429, 503})
 #: full back-off budget on it only delays a clear error by minutes.
 _AMBIGUOUS_PUSHBACK_STATUS = frozenset({403})
 
+#: Retries an ambiguous refusal gets while the download has never received a
+#: byte. Enough to ride out a burst and let the worker pool narrow, far short
+#: of the minutes the full budget would spend on a server that is saying no.
+_NO_PROGRESS_PUSHBACK_LIMIT = 2
+
 #: Phrase in the failure message when a download died to rate limiting. The
 #: manager keys its auto-retry off this (see _TRANSIENT_OVERRIDES): the plain
 #: "HTTP 4xx" text alone reads as permanent and would strand the job.
@@ -725,11 +730,33 @@ class SegmentedDownload:
                 if segment.downloaded > downloaded_before:
                     pushbacks = 0  # forward progress earns a fresh budget
                 pushbacks += 1
-                if pushbacks > self.max_pushback_retries:
+                # How much patience a refusal is worth depends on whether the
+                # server has ever actually served us. A download that was
+                # flowing and then started being refused is under pressure and
+                # deserves the full budget; one that has never moved a byte is
+                # looking at a wall (an expired signature, hotlink protection, a
+                # bot check), and re-asking for minutes only delays a clear
+                # answer. Deciding here rather than at the first refusal is
+                # deliberate: at that moment a sibling worker can be mid-body
+                # with nothing recorded yet, and reading the flag then raced
+                # that write - which is exactly how this misfired on CI.
+                budget = (
+                    self.max_pushback_retries
+                    if self._has_transferred()
+                    else min(self.max_pushback_retries, _NO_PROGRESS_PUSHBACK_LIMIT)
+                )
+                if pushbacks > budget:
+                    if self._has_transferred():
+                        raise DownloadError(
+                            f"the server is {RATE_LIMIT_MARKER} this download "
+                            f"(segment {segment.index}: {exc}). It refused even "
+                            f"{self._target_connections()} connection(s)."
+                        ) from exc
                     raise DownloadError(
-                        f"the server is {RATE_LIMIT_MARKER} this download "
-                        f"(segment {segment.index}: {exc}). It refused even "
-                        f"{self._target_connections()} connection(s)."
+                        f"the server refused this download ({exc}) and never sent "
+                        "any data. The link may have expired, or it may need the "
+                        "page's login - open it in your browser and use the "
+                        "GrabLine button."
                     ) from exc
                 self._stop_event.wait(self._pushback_delay(exc, pushbacks))
             except (httpx.TransportError, _Retry) as exc:
@@ -827,20 +854,9 @@ class SegmentedDownload:
         a nearly-complete download for good.
         """
         status = response.status_code
-        if status in _PUSHBACK_STATUS or (
-            status in _AMBIGUOUS_PUSHBACK_STATUS and self._has_transferred()
-        ):
+        if status in _PUSHBACK_STATUS or status in _AMBIGUOUS_PUSHBACK_STATUS:
             self._distrust_final_url()
             raise _Pushback(f"HTTP {status}", retry_after=_retry_after_seconds(response.headers))
-        if status in _AMBIGUOUS_PUSHBACK_STATUS:
-            # Refused before this download ever moved a byte: a wall, not
-            # back-pressure. Fail with something the user can act on instead of
-            # spending the back-off budget re-asking a server that is saying no.
-            raise DownloadError(
-                f"the server refused this download (HTTP {status}) before any data "
-                "arrived. The link may have expired, or it may need the page's "
-                "login - open it in your browser and use the GrabLine button."
-            )
         if status in _RETRYABLE_STATUS:
             self._distrust_final_url()
             raise _Retry(f"segment {segment.index}: HTTP {status}")
