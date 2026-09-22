@@ -63,14 +63,6 @@ jobs:
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
             libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-util1 libxcb-xkb1
 
-      # SonarCloud flags these pip lines (S8541 wants --only-binary :all:,
-      # which forbids the build an editable install performs; S8544 wants a
-      # resolved lockfile this project does not keep). Neither an inline
-      # NOSONAR nor sonar-project.properties suppresses them - automatic
-      # analysis honours neither for the Actions analyser - so they have to be
-      # accepted in the SonarCloud UI. What IS pinned: every Action is a commit
-      # SHA, the release build tools are exact versions, and each release
-      # attaches the pip freeze of the environment that built it.
       - name: Install app and build tools
         timeout-minutes: 10
         run: |
