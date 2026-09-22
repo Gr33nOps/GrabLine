@@ -686,6 +686,98 @@ class Settings:
     def torrent_dir(self, value: Path | str | None) -> None:
         self._db.set_setting("torrent_dir", str(value) if value else "")
 
+    # ---- bulk import + watch folder ---------------------------------------
+
+    @property
+    def torrent_batch_dir(self) -> Path | None:
+        """The destination the batch importer last used (None = never used).
+        Remembered so importing another hundred torrents into the same folder
+        is one click, not another trip through the file picker."""
+        raw = self._db.get_setting("torrent_batch_dir")
+        return Path(raw) if raw else None
+
+    @torrent_batch_dir.setter
+    def torrent_batch_dir(self, value: Path | str | None) -> None:
+        self._db.set_setting("torrent_batch_dir", str(value) if value else "")
+
+    @property
+    def torrent_batch_remember(self) -> bool:
+        """Whether the batch dialog writes its destination back to
+        ``torrent_batch_dir`` on Download All."""
+        return self._get_bool("torrent_batch_remember", True)
+
+    @torrent_batch_remember.setter
+    def torrent_batch_remember(self, value: bool) -> None:
+        self._set_bool("torrent_batch_remember", value)
+
+    @property
+    def torrent_batch_subfolders(self) -> bool:
+        """Give each torrent in a batch its own folder under the shared
+        destination."""
+        return self._get_bool("torrent_batch_subfolders", False)
+
+    @torrent_batch_subfolders.setter
+    def torrent_batch_subfolders(self, value: bool) -> None:
+        self._set_bool("torrent_batch_subfolders", value)
+
+    @property
+    def torrent_watch_enabled(self) -> bool:
+        """Watch a folder and queue .torrent files dropped into it."""
+        return self._get_bool("torrent_watch_enabled", False)
+
+    @torrent_watch_enabled.setter
+    def torrent_watch_enabled(self, value: bool) -> None:
+        self._set_bool("torrent_watch_enabled", value)
+
+    @property
+    def torrent_watch_dir(self) -> Path | None:
+        """The folder being watched (None = none chosen, which also means the
+        watcher stays off however the enable flag is set)."""
+        raw = self._db.get_setting("torrent_watch_dir")
+        return Path(raw) if raw else None
+
+    @torrent_watch_dir.setter
+    def torrent_watch_dir(self, value: Path | str | None) -> None:
+        self._db.set_setting("torrent_watch_dir", str(value) if value else "")
+
+    @property
+    def torrent_watch_dest(self) -> Path | None:
+        """Where watch-folder imports save (None = the usual torrent folder)."""
+        raw = self._db.get_setting("torrent_watch_dest")
+        return Path(raw) if raw else None
+
+    @torrent_watch_dest.setter
+    def torrent_watch_dest(self, value: Path | str | None) -> None:
+        self._db.set_setting("torrent_watch_dest", str(value) if value else "")
+
+    @property
+    def torrent_watch_subfolders(self) -> bool:
+        return self._get_bool("torrent_watch_subfolders", False)
+
+    @torrent_watch_subfolders.setter
+    def torrent_watch_subfolders(self, value: bool) -> None:
+        self._set_bool("torrent_watch_subfolders", value)
+
+    @property
+    def torrent_watch_interval_seconds(self) -> int:
+        """How often the watch folder is polled. The floor is 5s so a
+        mistyped value cannot turn into a busy loop over a network share."""
+        return max(5, min(3600, self._get_int("torrent_watch_interval_seconds", 20)))
+
+    @torrent_watch_interval_seconds.setter
+    def torrent_watch_interval_seconds(self, value: int) -> None:
+        self._db.set_setting("torrent_watch_interval_seconds", str(value))
+
+    @property
+    def torrent_watch_seen(self) -> tuple[str, ...]:
+        """Keys of the torrents the watch folder already imported (capped to
+        the newest 500), so a restart does not re-queue the whole folder."""
+        return self._get_str_list("torrent_watch_seen")
+
+    @torrent_watch_seen.setter
+    def torrent_watch_seen(self, value: Sequence[str]) -> None:
+        self._db.set_setting("torrent_watch_seen", json.dumps(list(value)[-500:]))
+
     @property
     def torrent_search_url(self) -> str:
         """Search template opened in the browser; %s is the query. Empty =

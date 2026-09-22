@@ -59,6 +59,9 @@ GrabLine is built in spare time. If it saves you hassle, [buy me a coffee][suppo
 * **Browser button:** hover media or right click links; handoff over Native Messaging (no open ports).
 * **Video and audio:** yt dlp in process: quality picks, playlists, SponsorBlock, chapters, clip trim.
 * **Torrents:** libtorrent (same engine family as qBittorrent): magnets, DHT, sequential streaming, seed ratios, RSS.
+* **Bulk torrents:** drop in a folder, a hundred files or a page of magnet links, pick one
+  destination, press Download All; or point a watch folder at your browser's download dir
+  and new .torrent files queue themselves.
 * **Cloud:** SFTP, FTP, S3, WebDAV with OS keychain secrets; Drive and Dropbox share links as direct downloads.
 * **Queue control:** named queues picked when you add a download, schedules, priorities,
   dependencies, category auto sort; set a queue to one download at a time for a strictly

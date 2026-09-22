@@ -922,6 +922,64 @@ def test_the_queue_page_shows_a_card_per_queue_plus_the_default_one(db: Database
         manager.shutdown()
 
 
+def test_a_long_job_name_never_widens_the_queue_page(db: Database, dest: Path):
+    """The reported bug: one long release name in the 'what is running' line
+    made a card wider than the window, so the whole page grew a horizontal
+    scrollbar and the text ran under the progress bar. Every line on a card
+    elides now, so the page is as wide as the window gives it and no wider."""
+    from PySide6.QtWidgets import QApplication
+
+    from app.core.manager import QueueStats
+    from app.ui.queue_view import QueueView, _active_text, _live_text
+
+    if not isinstance(QApplication.instance(), QApplication):
+        QApplication([])
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        queue = manager.create_queue("movies")
+        view = QueueView(manager)
+        view.resize(420, 600)
+        view.show()
+
+        enormous = (
+            "The Lord Of The Rings The Fellowship Of The Ring (2001) "
+            "[EXTENDED] [2160p] [4K] [BluRay] [5.1] [YTS.MX]"
+        )
+        stats = QueueStats(
+            queue_id=queue.id,
+            downloading=1,
+            queued=2,
+            completed=5,
+            active=(enormous,),
+            total_bytes=10_800_000_000,
+            downloaded_bytes=132_200_000,
+        )
+        # The counts and the names are separate lines: the counts survive
+        # whatever the running job happens to be called.
+        assert _live_text(stats) == "1 downloading  ·  2 waiting  ·  5 done"
+        assert _active_text(stats) == enormous
+
+        widgets = view._live[queue.id]
+        view._apply_stats(widgets, stats)
+        QApplication.processEvents()
+        assert widgets.active.full_text() == enormous
+        assert widgets.active.text() != enormous  # painted elided at 420px
+        assert widgets.active.toolTip() == enormous
+        assert not widgets.bar.isTextVisible()  # a 6px bar has no room for text
+        assert widgets.readout.isVisible()  # the figures get their own line
+
+        # Nothing on the page demands more width than the window offers.
+        assert view._body_holder.minimumSizeHint().width() <= view.width()
+
+        view.resize(1200, 600)
+        QApplication.processEvents()
+        assert widgets.active.text() == enormous  # room again: shown in full
+        view.hide()
+        view.deleteLater()
+    finally:
+        manager.shutdown()
+
+
 def test_the_torrent_dialog_offers_and_returns_a_queue(db: Database, tmp_path: Path):
     """The reported gap: no way to choose a queue before a torrent starts."""
     from PySide6.QtWidgets import QApplication
