@@ -197,9 +197,9 @@ class Database:
         self._path = Path(path).expanduser().resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        # NOSONAR(pythonsecurity:S8706,pythonsecurity:S8707) - the "injection"
-        # source is this app's own --data-dir argument, typed by the person
-        # running it; there is no privilege boundary between them and the file.
+        # The path comes from this app's own --data-dir argument, typed by
+        # the person running it; there is no privilege boundary between them
+        # and the file, so there is nothing here to inject across.
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         # The DB holds API keys and browser-session cookies. Lock the file to
         # the owner on POSIX (defense in depth behind the 0700 data dir);
