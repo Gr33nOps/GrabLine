@@ -820,6 +820,7 @@
   "{count} selected": "Выбрано: {count}",
   "{count} tasks": "{count} задач",
   "{count} waiting": "{count} в ожидании",
+  "{done} of {total}  ·  {percent}%": "{done} из {total}  ·  {percent}%",
   "{ext} file": "Файл {ext}",
   "{lang} (auto)": "{lang} (авто)",
   "{name}\n\n{findings}\n\nThe file is saved and usable. This is advice only. Open the full report?": "{name}\n\n{findings}\n\nФайл сохранён и пригоден для использования. Это лишь рекомендация. Открыть полный отчёт?",

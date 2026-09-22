@@ -820,6 +820,7 @@
   "{count} selected": "已选 {count} 项",
   "{count} tasks": "{count} 个任务",
   "{count} waiting": "{count} 个等待中",
+  "{done} of {total}  ·  {percent}%": "{done} / {total}  ·  {percent}%",
   "{ext} file": "{ext} 文件",
   "{lang} (auto)": "{lang}（自动）",
   "{name}\n\n{findings}\n\nThe file is saved and usable. This is advice only. Open the full report?": "{name}\n\n{findings}\n\n文件已保存且可用。这仅是建议。要打开完整报告吗？",

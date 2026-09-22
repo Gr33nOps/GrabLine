@@ -820,6 +820,7 @@
   "{count} selected": "{count} 件選択",
   "{count} tasks": "{count} 件のタスク",
   "{count} waiting": "{count} 件待機中",
+  "{done} of {total}  ·  {percent}%": "{total} 中 {done}  ·  {percent}%",
   "{ext} file": "{ext} ファイル",
   "{lang} (auto)": "{lang}（自動）",
   "{name}\n\n{findings}\n\nThe file is saved and usable. This is advice only. Open the full report?": "{name}\n\n{findings}\n\nファイルは保存され、使用可能です。これは単なる助言です。完全なレポートを開きますか?",

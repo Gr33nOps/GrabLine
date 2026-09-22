@@ -10,11 +10,12 @@ from collections import deque
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -48,6 +49,62 @@ def role_label(text: str, role: str, *, size: int | None = None, bold: bool = Fa
         font.setBold(bold)
         lbl.setFont(font)
     return lbl
+
+
+class ElidingLabel(QLabel):
+    """A one-line label that shrinks its *text* instead of its container.
+
+    A plain QLabel reports the full string as its minimum width, so one long
+    download title inside a card pushes the card wider than the window and the
+    whole page grows a horizontal scrollbar. This paints an elided copy at
+    whatever width it is actually given, keeps the full text in the tooltip,
+    and reports a minimum width of zero so the layout is free to narrow.
+    """
+
+    def __init__(
+        self,
+        text: str = "",
+        role: str | None = None,
+        *,
+        size: int | None = None,
+        bold: bool = False,
+        mode: Qt.TextElideMode = Qt.TextElideMode.ElideRight,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._full = ""
+        self._mode = mode
+        if role is not None:
+            self.setProperty("role", role)
+        if size is not None or bold:
+            font = self.font()
+            if size is not None:
+                font.setPointSize(size)
+            font.setBold(bold)
+            self.setFont(font)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(0)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:
+        self._full = text or ""
+        # Only offer a tooltip when there is something the elision hides.
+        self.setToolTip(self._full if self._full else "")
+        self._render()
+
+    def full_text(self) -> str:
+        return self._full
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._render()
+
+    def _render(self) -> None:
+        width = max(0, self.width())
+        if width <= 0 or not self._full:
+            super().setText(self._full)
+            return
+        super().setText(self.fontMetrics().elidedText(self._full, self._mode, width))
 
 
 class StatusPill(QLabel):

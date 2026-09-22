@@ -820,6 +820,7 @@
   "{count} selected": "{count} selecionados",
   "{count} tasks": "{count} tarefas",
   "{count} waiting": "{count} em espera",
+  "{done} of {total}  ·  {percent}%": "{done} de {total}  ·  {percent}%",
   "{ext} file": "Arquivo {ext}",
   "{lang} (auto)": "{lang} (auto)",
   "{name}\n\n{findings}\n\nThe file is saved and usable. This is advice only. Open the full report?": "{name}\n\n{findings}\n\nO arquivo está salvo e é utilizável. Isso é apenas um aviso. Abrir o relatório completo?",

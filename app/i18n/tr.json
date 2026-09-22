@@ -820,6 +820,7 @@
   "{count} selected": "{count} seçildi",
   "{count} tasks": "{count} görev",
   "{count} waiting": "{count} bekliyor",
+  "{done} of {total}  ·  {percent}%": "{total} içinden {done}  ·  %{percent}",
   "{ext} file": "{ext} dosyası",
   "{lang} (auto)": "{lang} (otomatik)",
   "{name}\n\n{findings}\n\nThe file is saved and usable. This is advice only. Open the full report?": "{name}\n\n{findings}\n\nDosya kaydedildi ve kullanılabilir. Bu sadece bir öneridir. Tam raporu açmak ister misiniz?",

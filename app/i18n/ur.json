@@ -820,6 +820,7 @@
   "{count} selected": "{count} منتخب",
   "{count} tasks": "{count} کام",
   "{count} waiting": "{count} انتظار میں",
+  "{done} of {total}  ·  {percent}%": "{total} میں سے {done}  ·  {percent}%",
   "{ext} file": "{ext} فائل",
   "{lang} (auto)": "{lang} (خودکار)",
   "{name}\n\n{findings}\n\nThe file is saved and usable. This is advice only. Open the full report?": "{name}\n\n{findings}\n\nفائل محفوظ ہے اور استعمال کے قابل ہے۔ یہ صرف مشورہ ہے۔ مکمل رپورٹ کھولیں؟",

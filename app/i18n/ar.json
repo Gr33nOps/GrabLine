@@ -820,6 +820,7 @@
   "{count} selected": "{count} محدد",
   "{count} tasks": "{count} مهمة",
   "{count} waiting": "{count} في الانتظار",
+  "{done} of {total}  ·  {percent}%": "{done} من {total}  ·  {percent}%",
   "{ext} file": "ملف {ext}",
   "{lang} (auto)": "{lang} (تلقائي)",
   "{name}\n\n{findings}\n\nThe file is saved and usable. This is advice only. Open the full report?": "{name}\n\n{findings}\n\nالملف محفوظ وقابل للاستخدام. هذه نصيحة فقط. هل تريد فتح التقرير الكامل؟",

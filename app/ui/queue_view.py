@@ -16,6 +16,7 @@ button here is a DownloadManager call, and the scheduler is what enforces it.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import NamedTuple
 
 from PySide6.QtCore import Qt, QTime, QTimer
 from PySide6.QtWidgets import (
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTimeEdit,
     QVBoxLayout,
@@ -58,6 +60,15 @@ _CATEGORIES = (
 )
 
 
+class _LiveWidgets(NamedTuple):
+    """The widgets on one card that the one-second tick rewrites in place."""
+
+    summary: components.ElidingLabel  # "2 downloading · 3 waiting"
+    active: components.ElidingLabel  # the names of the jobs in flight
+    bar: QProgressBar
+    readout: components.ElidingLabel  # "1.2 GB of 10.8 GB · 11%"
+
+
 def _live_text(stats: QueueStats) -> str:
     """One plain sentence about what this queue is doing right now.
 
@@ -78,13 +89,24 @@ def _live_text(stats: QueueStats) -> str:
         parts.append(t("{count} done", count=stats.completed))
     if stats.failed:
         parts.append(t("{count} failed", count=stats.failed))
-    line = "  ·  ".join(parts) if parts else t("Nothing to do")
-    if stats.active:
-        shown = ", ".join(stats.active[:2])
-        if len(stats.active) > 2:
-            shown += t(" and {count} more", count=len(stats.active) - 2)
-        line += f"  —  {shown}"
-    return line
+    return "  ·  ".join(parts) if parts else t("Nothing to do")
+
+
+def _active_text(stats: QueueStats) -> str:
+    """The names of the jobs in flight, as a line of its own.
+
+    They used to be appended to the counts with an em dash. A single film
+    release name is longer than the whole rest of the sentence, so on a narrow
+    window that one line decided the card's width and the page grew a
+    horizontal scrollbar. Its own eliding line keeps the counts readable at
+    any size.
+    """
+    if not stats.active:
+        return ""
+    shown = ", ".join(stats.active[:2])
+    if len(stats.active) > 2:
+        shown += t(" and {count} more", count=len(stats.active) - 2)
+    return shown
 
 
 def _would_cycle(queues: dict[int, Queue], queue_id: int, depends_on: int | None) -> bool:
@@ -109,7 +131,7 @@ class QueueView(QWidget):
         #: queue id (None = default queue) -> the widgets the live tick writes
         #: into. Updating these in place rather than rebuilding the page keeps
         #: the open editor, the scroll position and the focus where they were.
-        self._live: dict[int | None, tuple[QLabel, QProgressBar]] = {}
+        self._live: dict[int | None, _LiveWidgets] = {}
         self._timer = QTimer(self)
         self._timer.setInterval(_LIVE_MS)
         self._timer.timeout.connect(self._tick)
@@ -135,6 +157,9 @@ class QueueView(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # Cards elide rather than overflow, so a sideways scrollbar would only
+        # ever be the symptom of a layout bug - refuse it outright.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._body_holder = QWidget()
         self._body = QVBoxLayout(self._body_holder)
         self._body.setContentsMargins(16, 16, 16, 16)
@@ -158,18 +183,29 @@ class QueueView(QWidget):
         if not self._live:
             return
         stats = self.manager.queue_stats()
-        for queue_id, (label, bar) in self._live.items():
-            self._apply_stats(label, bar, stats.get(queue_id) or QueueStats(queue_id=queue_id))
+        for queue_id, widgets in self._live.items():
+            self._apply_stats(widgets, stats.get(queue_id) or QueueStats(queue_id=queue_id))
 
     @staticmethod
-    def _apply_stats(label: QLabel, bar: QProgressBar, stats: QueueStats) -> None:
-        label.setText(_live_text(stats))
-        running = stats.downloading > 0
-        bar.setVisible(running and stats.total_bytes > 0)
-        if bar.isVisible():
-            bar.setValue(stats.percent)
-            bar.setFormat(
-                f"{human_bytes(stats.downloaded_bytes)} / {human_bytes(stats.total_bytes)}"
+    def _apply_stats(widgets: _LiveWidgets, stats: QueueStats) -> None:
+        widgets.summary.setText(_live_text(stats))
+        active = _active_text(stats)
+        widgets.active.setText(active)
+        widgets.active.setVisible(bool(active))
+        showing = stats.downloading > 0 and stats.total_bytes > 0
+        widgets.bar.setVisible(showing)
+        widgets.readout.setVisible(showing)
+        if showing:
+            widgets.bar.setValue(stats.percent)
+            # The bar is a 6px hairline: its own text renders clipped and
+            # overlapping the line beneath it, so the figures live in a label.
+            widgets.readout.setText(
+                t(
+                    "{done} of {total}  ·  {percent}%",
+                    done=human_bytes(stats.downloaded_bytes),
+                    total=human_bytes(stats.total_bytes),
+                    percent=stats.percent,
+                )
             )
 
     def reload(self) -> None:
@@ -179,6 +215,12 @@ class QueueView(QWidget):
                 break
             w = item.widget()
             if w is not None:
+                # Unparent before deleting. deleteLater() only schedules the
+                # destruction for the next pass of the event loop, and until
+                # then the old card is still a visible child painting over the
+                # new layout - two reloads in one slot left ghost text lying
+                # across the cards. setParent(None) takes it off screen now.
+                w.setParent(None)
                 w.deleteLater()
         self._live.clear()
         queues = {q.id: q for q in self.manager.list_queues()}
@@ -220,7 +262,7 @@ class QueueView(QWidget):
         settings of its own - it runs under the global 'Downloads at once' -
         so it offers no edit or delete, only the same live view."""
         card, body = self._card_shell(str(index), t("Default"))
-        traits = components.role_label(
+        traits = components.ElidingLabel(
             t(
                 "Every download not put in a queue  ·  global limit: {count} at once",
                 count=self.manager.max_concurrent,
@@ -247,32 +289,47 @@ class QueueView(QWidget):
         badge.setObjectName("QueueBadge")
         badge.setFixedSize(30, 30)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        top.addWidget(badge)
+        top.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
 
         text = QWidget()
         # Layout only - without this it paints the page background over the card.
         text.setObjectName("BareContainer")
+        # Free to shrink: the column's own minimum used to be whatever its
+        # longest label wanted, which is what pushed the card off the page.
+        text.setMinimumWidth(0)
+        text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         body = QVBoxLayout(text)
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(2)
-        body.addWidget(components.role_label(title, "strong", size=design.FONT["h2"], bold=True))
+        body.addWidget(components.ElidingLabel(title, "strong", size=design.FONT["h2"], bold=True))
         top.addWidget(text, 1)
         card._top_row = top  # type: ignore[attr-defined]  # buttons go here
         outer.addLayout(top)
         return card, body
 
     def _attach_live(self, queue_id: int | None, body: QVBoxLayout, stats: QueueStats) -> None:
-        """Add the live status line and progress bar, and register them so the
-        one-second tick can rewrite them without rebuilding the page."""
-        live = components.role_label("", "dim", size=design.FONT["small"])
+        """Add the live status lines and progress bar, and register them so the
+        one-second tick can rewrite them without rebuilding the page.
+
+        Every text line elides, so a card is as wide as the page gives it and
+        never a character more.
+        """
+        summary = components.ElidingLabel("", "dim", size=design.FONT["small"])
+        active = components.ElidingLabel("", "muted", size=design.FONT["small"])
+        active.setVisible(False)
         bar = QProgressBar()
-        bar.setTextVisible(True)
+        bar.setTextVisible(False)
         bar.setFixedHeight(6)
         bar.setVisible(False)
-        body.addWidget(live)
+        readout = components.ElidingLabel("", "dim", size=design.FONT["caption"])
+        readout.setVisible(False)
+        body.addWidget(summary)
+        body.addWidget(active)
         body.addWidget(bar)
-        self._live[queue_id] = (live, bar)
-        self._apply_stats(live, bar, stats)
+        body.addWidget(readout)
+        widgets = _LiveWidgets(summary, active, bar, readout)
+        self._live[queue_id] = widgets
+        self._apply_stats(widgets, stats)
 
     def _card(
         self,
@@ -288,7 +345,7 @@ class QueueView(QWidget):
         if self._editing == queue.id:
             card.setProperty("selected", "true")
         body.addWidget(
-            components.role_label(self._traits(queue, queues), "muted", size=design.FONT["small"])
+            components.ElidingLabel(self._traits(queue, queues), "muted", size=design.FONT["small"])
         )
         self._attach_live(queue.id, body, stats)
 
