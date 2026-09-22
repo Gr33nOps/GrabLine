@@ -65,6 +65,10 @@ class TorrentMeta:
     comment: str = ""
     trackers: tuple[str, ...] = ()
     num_raw_files: int = 0  # including hidden pad files - priority list length
+    #: Lowercase hex info-hash, v1 for preference - the one to show and store.
+    info_hash: str = ""
+    #: Every hash form this torrent answers to; see :func:`hash_forms`.
+    info_hashes: tuple[str, ...] = ()
 
     def priorities_for(self, skipped: set[int]) -> list[int]:
         """A full libtorrent priority list: normal (4) everywhere, 0 for the
@@ -133,6 +137,7 @@ def parse_torrent(data: bytes) -> TorrentMeta:
         for i in range(storage.num_files())
         if not storage.file_flags(i) & lt.file_storage.flag_pad_file
     )
+    hashes = _info_hashes_of(info)
     return TorrentMeta(
         name=str(info.name()),
         total_size=sum(entry.size for entry in files),
@@ -140,7 +145,106 @@ def parse_torrent(data: bytes) -> TorrentMeta:
         comment=str(info.comment() or ""),
         trackers=tuple(t.url for t in info.trackers()),
         num_raw_files=int(storage.num_files()),
+        info_hash=hashes[0] if hashes else "",
+        info_hashes=hashes,
     )
+
+
+def hash_forms(*values: str) -> tuple[str, ...]:
+    """Normalise info-hashes to every form the rest of the app may be holding.
+
+    One torrent has more than one true name. A hybrid v1/v2 torrent has a
+    SHA-1 hash (what a magnet link's ``btih`` carries) *and* a SHA-256 one
+    (its ``btmh``), and libtorrent reports the SHA-256 one truncated to 20
+    bytes on a live handle - which is what a running job has stored on it.
+    Comparing one chosen form against another is how "already queued" quietly
+    stops working, so the duplicate check compares whole sets and this is what
+    builds them: lowercased, all-zero placeholders dropped, and every 64-hex
+    v2 hash accompanied by its 40-hex truncation.
+    """
+    forms: list[str] = []
+    for value in values:
+        text = (value or "").strip().lower()
+        if not text or set(text) == {"0"}:
+            continue
+        for form in (text, text[:40] if len(text) == 64 else ""):
+            if form and form not in forms:
+                forms.append(form)
+    return tuple(forms)
+
+
+def _info_hashes_of(info: Any) -> tuple[str, ...]:
+    """Every hash form of a libtorrent ``torrent_info``, v1 first.
+
+    libtorrent 2.x moved this behind ``info_hashes()`` and made the old
+    ``info_hash()`` return the *best* (v2, truncated) hash, so both are read.
+    An unknown hash is simply absent, never a guess: these are duplicate keys.
+    """
+    v1 = v2 = best = ""
+    getter = getattr(info, "info_hashes", None)
+    if getter is not None:
+        try:
+            pair = getter()
+            v1, v2 = str(getattr(pair, "v1", "")), str(getattr(pair, "v2", ""))
+        except Exception:  # opaque libtorrent binding error
+            log.debug("info_hashes read failed", exc_info=True)
+    legacy = getattr(info, "info_hash", None)
+    if legacy is not None:
+        try:
+            best = str(legacy())
+        except Exception:
+            log.debug("info_hash read failed", exc_info=True)
+    return hash_forms(v1, v2, best)
+
+
+def info_hashes_from_data(data: bytes) -> tuple[str, ...]:
+    """Every hash form of raw .torrent bytes (the batch importer's duplicate
+    key). Raises DownloadError when the bytes are not a torrent."""
+    lt = _lt()
+    try:
+        info = lt.torrent_info(lt.bdecode(data))
+    except (RuntimeError, ValueError) as exc:
+        raise DownloadError(f"not a valid torrent file ({exc})") from exc
+    return _info_hashes_of(info)
+
+
+def info_hashes_from_magnet(magnet: str) -> tuple[str, ...]:
+    """Every hash form in a magnet link's ``xt`` parameters.
+
+    Parsed here rather than through libtorrent so the batch importer can key
+    magnets before the session is up, and so a malformed link is a skipped row
+    instead of an exception mid-import. Base32 hashes (the older 32-character
+    form) are decoded to hex, since the same torrent must not count twice for
+    being written in the other notation.
+    """
+    import base64
+    import binascii
+    from urllib.parse import parse_qs, urlsplit
+
+    if not magnet.strip().lower().startswith("magnet:"):
+        return ()
+    found: list[str] = []
+    for value in parse_qs(urlsplit(magnet.strip()).query).get("xt", []):
+        lowered = value.strip().lower()
+        if lowered.startswith("urn:btih:"):
+            digest = lowered[len("urn:btih:") :]
+            if len(digest) == 40 and all(c in "0123456789abcdef" for c in digest):
+                found.append(digest)
+            elif len(digest) == 32:
+                with contextlib.suppress(ValueError, binascii.Error):
+                    found.append(binascii.hexlify(base64.b32decode(digest.upper())).decode())
+        elif lowered.startswith("urn:btmh:1220"):  # BitTorrent v2, SHA-256
+            digest = lowered[len("urn:btmh:1220") :]
+            if len(digest) == 64 and all(c in "0123456789abcdef" for c in digest):
+                found.append(digest)
+    return hash_forms(*found)
+
+
+def info_hash_from_magnet(magnet: str) -> str:
+    """The magnet's primary (v1 for preference) info-hash, or an empty
+    string. The full set is :func:`info_hashes_from_magnet`."""
+    forms = info_hashes_from_magnet(magnet)
+    return forms[0] if forms else ""
 
 
 def magnet_from_torrent(data: bytes) -> str:

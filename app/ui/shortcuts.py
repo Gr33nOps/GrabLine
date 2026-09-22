@@ -57,6 +57,7 @@ DEFAULTS: tuple[Shortcut, ...] = (
     Shortcut("download.batch", N_("New batch download"), N_("General"), "Ctrl+Shift+N"),
     Shortcut("download.paste", N_("Paste URL and download"), N_("General"), "Ctrl+V"),
     Shortcut("torrent.add", N_("Add torrent file"), N_("General"), "Ctrl+O"),
+    Shortcut("torrent.batch", N_("Add torrents in bulk"), N_("General"), "Ctrl+Shift+T"),
     Shortcut("import.links", N_("Import links"), N_("General"), "Ctrl+L"),
     Shortcut("list.export", N_("Export list"), N_("General"), "Ctrl+E"),
     Shortcut("site.grab", N_("Grab site"), N_("General"), "Ctrl+G"),

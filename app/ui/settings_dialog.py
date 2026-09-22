@@ -675,6 +675,45 @@ class SettingsDialog(chrome.Dialog):
             )
         )
 
+        torrent_form.addRow(components.SectionLabel(t("Watch folder")))
+        self.watch_check = QCheckBox(t("Queue .torrent files dropped into a folder"))
+        torrent_form.addRow(self.watch_check)
+        watch_row = QHBoxLayout()
+        self.watch_dir_edit = QLineEdit()
+        self.watch_dir_edit.setPlaceholderText(t("the folder to watch"))
+        watch_browse = QPushButton(t("Browse…"))
+        watch_browse.clicked.connect(self._browse_watch_folder)
+        watch_row.addWidget(self.watch_dir_edit, 1)
+        watch_row.addWidget(watch_browse)
+        torrent_form.addRow(t("Watch:"), watch_row)
+        watch_dest_row = QHBoxLayout()
+        self.watch_dest_edit = QLineEdit()
+        self.watch_dest_edit.setPlaceholderText(t("blank = the torrent folder above"))
+        watch_dest_browse = QPushButton(t("Browse…"))
+        watch_dest_browse.clicked.connect(self._browse_watch_dest)
+        watch_dest_row.addWidget(self.watch_dest_edit, 1)
+        watch_dest_row.addWidget(watch_dest_browse)
+        torrent_form.addRow(t("Save them to:"), watch_dest_row)
+        self.watch_subfolder_check = QCheckBox(t("Give each torrent its own folder"))
+        torrent_form.addRow(self.watch_subfolder_check)
+        self.watch_interval_spin = QSpinBox()
+        self.watch_interval_spin.setRange(5, 3600)
+        self.watch_interval_spin.setSuffix(" s")
+        torrent_form.addRow(t("Check every:"), self.watch_interval_spin)
+        forget = QPushButton(t("Forget imported files"))
+        forget.clicked.connect(self._forget_watched)
+        forget_row = QHBoxLayout()
+        forget_row.addWidget(forget)
+        forget_row.addStretch(1)
+        torrent_form.addRow("", forget_row)
+        torrent_form.addRow(
+            _note(
+                "Your .torrent files are never moved or deleted - they are only read. "
+                "A file is picked up once it has finished copying, and is remembered "
+                "so it is not queued twice."
+            )
+        )
+
         # ---- Cloud Downloads ---------------------------------------------------
         cloud_tab = QWidget()
         _prepare_freeform_page(cloud_tab)
@@ -1427,6 +1466,28 @@ class SettingsDialog(chrome.Dialog):
         if chosen:
             self.torrent_dir_edit.setText(chosen)
 
+    def _browse_watch_folder(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, t("Watch this folder"), self.watch_dir_edit.text() or str(Path.home())
+        )
+        if chosen:
+            self.watch_dir_edit.setText(chosen)
+
+    def _browse_watch_dest(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, t("Save watched torrents to"), self.watch_dest_edit.text() or str(Path.home())
+        )
+        if chosen:
+            self.watch_dest_edit.setText(chosen)
+
+    def _forget_watched(self) -> None:
+        """Clear the remembered-import list, so everything in the watch folder
+        is picked up again on the next poll."""
+        self.settings.torrent_watch_seen = []
+        QMessageBox.information(
+            self, "GrabLine", t("The watch folder will pick those files up again.")
+        )
+
     def _browse_folder(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
             self, t("Choose download folder"), self.folder_edit.text()
@@ -1590,6 +1651,11 @@ class SettingsDialog(chrome.Dialog):
         )
         self.seed_minutes_spin.setValue(s.torrent_seed_minutes)
         self.trackers_default_edit.setPlainText("\n".join(s.torrent_trackers))
+        self.watch_check.setChecked(s.torrent_watch_enabled)
+        self.watch_dir_edit.setText(str(s.torrent_watch_dir) if s.torrent_watch_dir else "")
+        self.watch_dest_edit.setText(str(s.torrent_watch_dest) if s.torrent_watch_dest else "")
+        self.watch_subfolder_check.setChecked(s.torrent_watch_subfolders)
+        self.watch_interval_spin.setValue(s.torrent_watch_interval_seconds)
 
         # Archive manager.
         self.extract_check.setChecked(s.auto_extract)
@@ -1757,6 +1823,15 @@ class SettingsDialog(chrome.Dialog):
         self.settings.torrent_encryption = self.encryption_combo.currentData()
         self.settings.torrent_seed_minutes = self.seed_minutes_spin.value()
         self.settings.torrent_trackers = self.trackers_default_edit.toPlainText().splitlines()
+        self.settings.torrent_watch_dir = self.watch_dir_edit.text().strip() or None
+        self.settings.torrent_watch_dest = self.watch_dest_edit.text().strip() or None
+        self.settings.torrent_watch_subfolders = self.watch_subfolder_check.isChecked()
+        self.settings.torrent_watch_interval_seconds = self.watch_interval_spin.value()
+        # Enabling without a folder would poll nothing every few seconds, so
+        # the flag follows the folder: no folder, no watcher.
+        self.settings.torrent_watch_enabled = self.watch_check.isChecked() and bool(
+            self.watch_dir_edit.text().strip()
+        )
         self.settings.extract_to_subfolder = self.extract_subfolder_check.isChecked()
         self.settings.delete_archive_after_extract = self.delete_archive_check.isChecked()
         self.settings.default_tags = self.default_tags_edit.text()

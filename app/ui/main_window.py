@@ -4,10 +4,11 @@ routes it in a background thread, and Smart Engine hits get the quality panel.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -73,6 +74,8 @@ from app.core import (
     reveal,
     rss,
     security,
+    torrentbatch,
+    torrentwatch,
     update,
     verify,
     virusscan,
@@ -120,7 +123,10 @@ from app.ui.playlist_panel import PlaylistPanel
 from app.ui.quality_panel import QualityPanel
 from app.ui.security_dialog import SecurityDialog
 from app.ui.setup_dialog import SetupDialog
+from app.ui.torrent_batch_dialog import TorrentBatchDialog
 from app.ui.torrent_dialog import AddTorrentDialog, CreateTorrentDialog
+
+log = logging.getLogger(__name__)
 
 #: Table columns: an icon, name, size, progress, speed, ETA, status.
 _COLUMNS = (N_(""), N_("Name"), N_("Size"), N_("Progress"), N_("Speed"), N_("ETA"), N_("Status"))
@@ -310,6 +316,14 @@ class MainWindow(QMainWindow):
         self._rss_timer.timeout.connect(self._poll_rss)
         self._rss_timer.start(self.settings.rss_interval_minutes * 60_000)
         QTimer.singleShot(15_000, self._poll_rss)
+        # Torrent watch folder: the same shape as the RSS poll. Started
+        # unconditionally and skipped inside the tick when it is switched off,
+        # so toggling it in Settings takes effect without a restart.
+        self._watcher = torrentwatch.TorrentWatcher()
+        self._watch_busy = False
+        self._watch_timer = QTimer(self)
+        self._watch_timer.timeout.connect(self._poll_torrent_watch)
+        self._watch_timer.start(self.settings.torrent_watch_interval_seconds * 1000)
         self.refresh()
         self._install_shortcuts()
 
@@ -470,6 +484,7 @@ class MainWindow(QMainWindow):
             t("Torrent"),
             (
                 (t("Add torrent…"), self._add_torrent_file),
+                (t("Add torrents in bulk…"), lambda: self._add_torrents_bulk()),
                 (t("Search torrents…"), self._search_torrents),
                 (t("Create torrent…"), self._create_torrent),
             ),
@@ -733,6 +748,7 @@ class MainWindow(QMainWindow):
             "download.batch": self._import_links,
             "download.paste": self._paste_and_download,
             "torrent.add": self._add_torrent_file,
+            "torrent.batch": lambda: self._add_torrents_bulk(),
             "import.links": self._import_links,
             "list.export": self._export_list,
             "site.grab": self._grab_site,
@@ -931,7 +947,7 @@ class MainWindow(QMainWindow):
         bounded operations (a subprocess convert, a network resolve), so the
         wait terminates."""
         self._shutting_down = True
-        for timer in (self._timer, self._handoff_timer, self._rss_timer):
+        for timer in (self._timer, self._handoff_timer, self._rss_timer, self._watch_timer):
             timer.stop()
         # Ask any unbounded op (an in-flight installer download) to stop first, so
         # its worker returns quickly and the wait below doesn't time out on a
@@ -2904,6 +2920,185 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(t("Queued torrent {name}", name=name), 5000)
         self.refresh()
 
+    def _add_torrents_bulk(self, sources: Sequence[str] | None = None) -> None:
+        """The batch importer: many torrents, one destination, one click.
+
+        ``sources`` preloads the list - used by drag-and-drop and by 'open
+        with GrabLine' on a multiple selection, so the dropped files are
+        already there when the dialog appears.
+        """
+        from app.ui.add_download_dialog import queue_choices
+
+        default_dir = (
+            self.settings.torrent_batch_dir
+            or self.settings.torrent_dir
+            or self.settings.download_dir
+        )
+        dialog = TorrentBatchDialog(
+            default_dir=Path(default_dir),
+            queues=queue_choices(self.manager),
+            subfolders=self.settings.torrent_batch_subfolders,
+            remember=self.settings.torrent_batch_remember,
+            sequential=self.settings.torrent_sequential,
+            proxy=self.settings.proxy,
+            insecure=self.settings.insecure_ssl,
+            existing_keys=self._queued_torrent_keys(),
+            parent=self,
+        )
+        if sources:
+            dialog.add_sources(list(sources))
+        if dialog.exec() != TorrentBatchDialog.DialogCode.Accepted:
+            return
+        try:
+            candidates = dialog.selected_candidates()
+        except torrentbatch.DestinationError as exc:  # pragma: no cover - re-checked
+            QMessageBox.warning(self, "GrabLine", str(exc))
+            return
+        duplicates, unreadable = dialog.skipped_counts()
+        added, failed = self._queue_torrent_batch(
+            candidates,
+            options=dialog.shared_options(),
+            queue_id=dialog.chosen_queue(),
+        )
+        # These are remembered on use, not on cancel: the folder you actually
+        # downloaded into is the one worth offering next time.
+        self.settings.torrent_batch_subfolders = dialog.use_subfolders()
+        self.settings.torrent_batch_remember = dialog.remember_destination()
+        if dialog.remember_destination():
+            self.settings.torrent_batch_dir = dialog.destination()
+        self.statusBar().showMessage(
+            self._batch_summary(added, duplicates, unreadable + failed), 10_000
+        )
+        self.refresh()
+
+    @staticmethod
+    def _batch_summary(added: int, duplicates: int, unreadable: int) -> str:
+        """'48 torrents added successfully. 2 duplicates skipped.'"""
+        parts = [t("{count} torrent(s) added successfully.", count=added)]
+        if duplicates:
+            parts.append(t("{count} duplicate(s) skipped.", count=duplicates))
+        if unreadable:
+            parts.append(t("{count} could not be read.", count=unreadable))
+        return " ".join(parts)
+
+    def _open_torrent_drop(self, paths: Sequence[str]) -> None:
+        """One dropped .torrent opens the familiar add dialog; anything else -
+        several files, or a folder - opens the batch importer preloaded with
+        what was dropped."""
+        if len(paths) == 1 and paths[0].lower().endswith(".torrent"):
+            self.add_torrent_source(paths[0])
+            return
+        self._add_torrents_bulk(sources=list(paths))
+
+    def _queued_torrent_keys(self) -> list[str]:
+        """Duplicate keys for every torrent already in the app, so the batch
+        dialog can mark what would be added twice."""
+        jobs = [job for job in self.manager.db.list_jobs() if job.kind is JobKind.TORRENT]
+        return sorted(torrentbatch.queued_keys(jobs))
+
+    def _queue_torrent_batch(
+        self,
+        candidates: Sequence[torrentbatch.TorrentCandidate],
+        *,
+        options: Mapping[str, object] | None = None,
+        queue_id: int | None = AUTO_QUEUE,
+        subfolders: bool = False,
+    ) -> tuple[int, int]:
+        """Add candidates to the existing queue, one job each, and return
+        ``(added, failed)``.
+
+        Adding is a database insert per torrent; the scheduler then starts them
+        under the queue's own concurrency limit, exactly as it would for a
+        hundred torrents added by hand. Nothing here starts a download
+        directly, so "Download All (100)" never means a hundred live swarms.
+
+        A candidate that cannot be added is counted and skipped: one bad row
+        must not cost the user the other ninety-nine.
+        """
+        added = 0
+        failed = 0
+        for candidate in candidates:
+            dest = candidate.dest_dir or str(
+                self.settings.torrent_dir or self.settings.download_dir
+            )
+            try:
+                if subfolders or candidate.dest_dir:
+                    torrentbatch.ensure_destination(Path(dest))
+                self.manager.add_torrent(
+                    candidate.source,
+                    dest_dir=dest,
+                    name=candidate.name,
+                    options={**(options or {}), **candidate.identity_options()},
+                    queue_id=queue_id,
+                )
+                added += 1
+            except (torrentbatch.DestinationError, DownloadError, OSError, ValueError) as exc:
+                log.warning("could not queue %s: %s", candidate.name, exc)
+                failed += 1
+        return added, failed
+
+    # -------------------------------------------------------- watch folder
+
+    def _poll_torrent_watch(self) -> None:
+        """Import .torrent files dropped into the watched folder.
+
+        The scan itself touches the disk, so it runs on a worker; the import
+        runs back here, through the same queue path everything else uses. The
+        source files are never moved or deleted - they are only remembered, so
+        the next scan leaves them alone.
+        """
+        if self._shutting_down or self._watch_busy:
+            return
+        if not self.settings.torrent_watch_enabled:
+            return
+        folder = self.settings.torrent_watch_dir
+        if not folder:
+            return
+        seen = list(self.settings.torrent_watch_seen)
+        self._watch_busy = True
+
+        def work() -> object:
+            return self._watcher.scan(folder, seen)
+
+        def done(result: object) -> None:
+            self._watch_busy = False
+            outcome = cast("torrentwatch.WatchResult", result)
+            if outcome.error or not outcome.ready:
+                return
+            self._import_watched(outcome.ready, seen)
+
+        def failed(error: object) -> None:  # a vanished drive, a permissions change
+            self._watch_busy = False
+            log.debug("watch-folder scan failed: %s", error)
+
+        self._run_file_op(work, done, failed)
+
+    def _import_watched(self, paths: Sequence[Path], seen: Sequence[str]) -> None:
+        """Queue the stable files one scan found, and remember them."""
+        base = Path(
+            self.settings.torrent_watch_dest
+            or self.settings.torrent_dir
+            or self.settings.download_dir
+        )
+        candidates = torrentbatch.load_candidates([str(path) for path in paths])
+        keys: list[str] = []
+        for path, candidate in zip(paths, candidates, strict=True):
+            # An unreadable file is remembered too: retrying a corrupt torrent
+            # on every poll would be a loop, not a recovery.
+            keys.extend(torrentwatch.watch_keys_for(path, candidate.info_hash))
+        queueable = [
+            c for c in torrentbatch.mark_duplicates(candidates, self._queued_torrent_keys()) if c.ok
+        ]
+        subfolders = self.settings.torrent_watch_subfolders
+        placed = torrentbatch.assign_destinations(queueable, base, subfolders=subfolders)
+        added, _failed = self._queue_torrent_batch(placed, subfolders=subfolders)
+        self.settings.torrent_watch_seen = torrentwatch.remember(seen, keys)
+        if added:
+            self.statusBar().showMessage(
+                t("Watch folder: queued {count} torrent(s)", count=added), 6000
+            )
+            self.refresh()
+
     def _create_torrent(self) -> None:
         dialog = CreateTorrentDialog(self)
         if self.settings.torrent_trackers:  # Settings → Torrent: default trackers
@@ -3391,20 +3586,29 @@ class MainWindow(QMainWindow):
 
     def dropEvent(self, event: QDropEvent) -> None:
         data = event.mimeData()
-        # A .torrent file dropped from the file manager opens as a torrent.
-        for dropped in data.urls():
-            local = dropped.toLocalFile()
-            if local and local.lower().endswith(".torrent"):
-                event.acceptProposedAction()
-                self.add_torrent_source(local)
-                return
+        # Torrents dropped from the file manager open as torrents: one goes
+        # straight to the add dialog, several (or a folder of them) open the
+        # batch importer, which is the whole point of dropping a handful.
+        locals_dropped = [url.toLocalFile() for url in data.urls() if url.toLocalFile()]
+        torrent_drops = [
+            path
+            for path in locals_dropped
+            if path.lower().endswith(".torrent") or Path(path).is_dir()
+        ]
+        if torrent_drops:
+            event.acceptProposedAction()
+            self._open_torrent_drop(torrent_drops)
+            return
         text_parts = [url.toString() for url in data.urls()]
         if data.hasText():
             text_parts.append(data.text())
-        magnets = [p for p in text_parts[-1:] if p.strip().lower().startswith("magnet:")]
+        magnets = torrentbatch.magnet_links("\n".join(text_parts))
         if magnets:
             event.acceptProposedAction()
-            self.add_torrent_source(magnets[0].strip())
+            if len(magnets) > 1:
+                self._add_torrents_bulk(sources=magnets)
+            else:
+                self.add_torrent_source(magnets[0])
             return
         clouds = [p for p in text_parts[-1:] if cloud_engine.is_cloud_scheme(p.strip())]
         if clouds:
