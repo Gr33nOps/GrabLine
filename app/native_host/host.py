@@ -11,6 +11,7 @@ from typing import Any, BinaryIO
 from urllib.parse import urlsplit
 
 from app.core import instance
+from app.core.mediaurl import captured_video_page
 from app.db.database import Database
 from app.native_host.protocol import ProtocolError, read_message, write_message
 
@@ -88,6 +89,12 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
         url = _valid_url(message.get("url"))
         if url is None:
             return {"type": "error", "message": "only http(s) URLs can be downloaded"}
+        original_url = url
+        url = captured_video_page(url, _valid_url(message.get("pageUrl")))
+        headers = _download_headers(message)
+        if url != original_url:
+            # CDN cookies do not belong to the watch-page origin.
+            headers.pop("Cookie", None)
         quality = _clean_text(message.get("quality"), limit=8)
         if quality is not None and quality.lower() not in _QUALITY_LABELS:
             quality = None
@@ -98,7 +105,7 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
         if isinstance(raw_fallbacks, list):
             for item in raw_fallbacks[:_MAX_FALLBACK_ITEMS]:
                 valid = _valid_url(item)
-                if valid is not None and valid != url:
+                if valid is not None and valid != url and url == original_url:
                     fallbacks.append(valid)
         running = instance.app_is_running()
         if message.get("onlyIfRunning") and not running:
@@ -114,7 +121,7 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
             source=_clean_text(message.get("source")) or "extension",
             quality=quality,
             payload=fallbacks,
-            headers=_download_headers(message),
+            headers=headers,
         )
         return {"type": "queued", "handoffId": handoff_id, "appRunning": running}
     if kind == "status":

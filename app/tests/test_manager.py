@@ -743,3 +743,25 @@ def test_fair_saturation_boosts_underestimated_capacity(db: Database):
         assert manager._line_capacity == before
     finally:
         manager.shutdown()
+
+
+def test_throughput_does_not_count_existing_bytes_of_new_active_job(db, monkeypatch):
+    from types import SimpleNamespace
+
+    manager = DownloadManager(db, max_concurrent=0)
+    manager._running = False
+    manager._kick()
+    manager._scheduler.join(timeout=5)
+    try:
+        manager._rate_mark = (10.0, 1000)
+        manager._job_marks = {1: 1000}
+        manager._active = {
+            1: SimpleNamespace(bytes_downloaded=1100),
+            2: SimpleNamespace(bytes_downloaded=90 * 1024**3),
+        }
+        monkeypatch.setattr("app.core.manager.time.monotonic", lambda: 11.0)
+        manager._sample_throughput()
+        assert manager._last_download_rate == 100
+    finally:
+        manager._active.clear()
+        manager.shutdown()

@@ -92,6 +92,11 @@ class StopReason(Enum):
     PAUSE = "pause"
     CANCEL = "cancel"
     ERROR = "error"
+    FULL_STREAM = "full_stream"
+
+
+class _FullStream(Exception):
+    """The server requires a fresh, ordinary GET instead of parallel ranges."""
 
 
 class _Retry(Exception):
@@ -324,6 +329,7 @@ class SegmentedDownload:
         )
         self._checkpointer = _Checkpointer(db, checkpoint_interval)
         self._segments: list[Segment] = []
+        self._initial_downloaded = db.stored_progress(job)
         self._stop_event = threading.Event()
         self._reason = StopReason.NONE
         self._reason_lock = threading.Lock()
@@ -356,6 +362,8 @@ class SegmentedDownload:
 
     @property
     def bytes_downloaded(self) -> int:
+        if not self._segments:
+            return self._initial_downloaded
         return sum(segment.downloaded for segment in self._segments)
 
     # ---------------------------------------------------------------- run
@@ -378,6 +386,25 @@ class SegmentedDownload:
         if self._stop_event.is_set():
             return self._settle_stopped()
         if any(not segment.is_complete for segment in self._segments):
+            self._checkpointer.start()
+            self._run_workers()
+            self._checkpointer.close()
+        if self._reason is StopReason.FULL_STREAM:
+            # All workers have joined and checkpoints have flushed before any
+            # ranges are discarded. Never mix an ordinary response with parts.
+            with self._reason_lock:
+                if self._reason is StopReason.FULL_STREAM:
+                    self._reason = StopReason.NONE
+                    self._stop_event.clear()
+            if self._stop_event.is_set():
+                return self._settle_stopped()
+            self.job.resumable = False
+            self.job.total_size = None
+            self.db.update_job_probe(self.job)
+            self._segments = self.db.replace_segments(self.job.id, [(0, None)])
+            with open(self.job.part_path, "wb"):
+                pass
+            self._checkpointer = _Checkpointer(self.db, self._checkpointer._interval)
             self._checkpointer.start()
             self._run_workers()
             self._checkpointer.close()
@@ -650,9 +677,13 @@ class SegmentedDownload:
                     finally:
                         with self._steal_lock:
                             self._claimed.discard(segment.id)
-                    if self._stop_event.is_set() or self._retire_if_over_target():
+                    if self._stop_event.is_set():
+                        break
+                    if self._retire_if_over_target():
                         retired = True
                         break
+        except _FullStream:
+            self._request_stop(StopReason.FULL_STREAM)
         except DownloadError as exc:
             self._record_error(str(exc))
         except Exception as exc:
@@ -929,7 +960,7 @@ class SegmentedDownload:
             return
         headers = {"Range": f"bytes={offset}-{end}"}
         validator = self._range_validator()
-        if validator and segment.downloaded:
+        if validator:
             # If-Range: continue this partial ONLY if the resource is still the
             # one we started. A server that has since replaced the file answers
             # 200 with the whole new file instead of a 206, which the status
@@ -937,6 +968,8 @@ class SegmentedDownload:
             # mixture of two versions.
             headers["If-Range"] = validator
         with self._client.stream("GET", self._request_url(), headers=headers) as response:
+            if response.status_code in (200, 412, 428):
+                raise _FullStream()
             if response.status_code != 206:
                 self._reject_status(response, segment)
             self._reject_encoded(response, segment)
@@ -1066,7 +1099,10 @@ class SegmentedDownload:
 
     def _request_stop(self, reason: StopReason) -> None:
         with self._reason_lock:
-            if self._reason is StopReason.NONE:
+            if self._reason is StopReason.NONE or (
+                self._reason is StopReason.FULL_STREAM
+                and reason in (StopReason.PAUSE, StopReason.CANCEL)
+            ):
                 self._reason = reason
         self._stop_event.set()
 

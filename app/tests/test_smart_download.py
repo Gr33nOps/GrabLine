@@ -1093,3 +1093,8 @@ def test_no_browser_headers_leaves_http_headers_unset(db: Database, dest: Path):
     job = _smart_job(db, "https://site.example/v", dest, "v.mp4")
     opts = SmartDownload(db, job, ffmpeg_path=None)._build_options()
     assert "http_headers" not in opts
+
+
+def test_missing_fragments_must_not_be_reported_as_complete(db, dest):
+    task = SmartDownload(db, _smart_job(db, "https://youtu.be/x", dest, "v.mp4"), ffmpeg_path=None)
+    assert task._build_options()["skip_unavailable_fragments"] is False

@@ -291,6 +291,7 @@ def test_pause_persists_and_resume_completes(server: MediaServer, db: Database, 
     assert not thread.is_alive()
 
     assert results == [JobStatus.PAUSED]
+    assert download._active_workers == 0
     persisted = db.job_downloaded(job.id)
     assert persisted > 0
     assert (dest / "slow.bin.gl-part").exists()
@@ -299,7 +300,9 @@ def test_pause_persists_and_resume_completes(server: MediaServer, db: Database, 
     served_before_resume = server.served_bytes("/slow.bin")
     resumed_job = db.get_job(job.id)
     assert resumed_job is not None
-    status = SegmentedDownload(db, resumed_job, connections=8).run()
+    resumed = SegmentedDownload(db, resumed_job, connections=8)
+    assert resumed.bytes_downloaded == persisted
+    status = resumed.run()
 
     assert status is JobStatus.COMPLETED
     assert sha256_file(dest / "slow.bin") == sha256(data)
@@ -781,3 +784,67 @@ def test_an_unsized_resumable_job_streams_instead_of_failing(
 
     assert status is JobStatus.COMPLETED
     assert sha256_file(dest / "nosize.bin") == sha256(data)
+
+
+@pytest.mark.parametrize("refusal", [200, 412, 428])
+@pytest.mark.parametrize("existing_partial", [False, True])
+def test_range_refusal_restarts_as_clean_full_download(
+    db, dest, monkeypatch, refusal, existing_partial
+):
+    import httpx
+
+    data = payload(2 * MB, 71)
+    requests = []
+
+    def respond(request):
+        span = request.headers.get("Range")
+        requests.append(span)
+        if span == "bytes=0-0":
+            return httpx.Response(
+                206, headers={"Content-Range": f"bytes 0-0/{len(data)}"}, content=data[:1]
+            )
+        if span:
+            return httpx.Response(refusal, content=data if refusal == 200 else b"")
+        return httpx.Response(200, stream=httpx.ByteStream(data))
+
+    monkeypatch.setattr(
+        "app.core.downloader.net.build_client",
+        lambda **kw: httpx.Client(transport=httpx.MockTransport(respond)),
+    )
+    job = db.create_job("https://example.test/file.zip", str(dest), "file.zip")
+    if existing_partial:
+        prior = SegmentedDownload(db, job, connections=4)
+        try:
+            prior._prepare()
+            first = prior._segments[0]
+            assert first.end is not None
+            saved = first.end + 1
+            db.update_segment_progress({first.id: saved})
+            with open(job.part_path, "r+b") as partial:
+                partial.write(b"x" * saved)
+        finally:
+            prior._client.close()
+        job = db.get_job(job.id)
+        assert job is not None
+    task = SegmentedDownload(db, job, connections=4)
+    assert task.run() is JobStatus.COMPLETED
+    assert (dest / "file.zip").read_bytes() == data
+    assert requests.count(None) == 1
+    assert not db.get_job(job.id).resumable
+
+
+def test_new_segments_send_resource_validator(server, db, dest):
+    data = payload(2 * MB, 19)
+    url = server.add("/conditional.bin", data, etag='"version-one"')
+    job = db.create_job(url, str(dest), "conditional.bin")
+    task = SegmentedDownload(db, job, connections=4)
+    task._prepare()
+    server.resources["/conditional.bin"].required_headers = {"If-Range": '"version-one"'}
+    task._checkpointer.start()
+    try:
+        task._run_workers()
+        assert task._finalize() is JobStatus.COMPLETED
+        assert (dest / "conditional.bin").read_bytes() == data
+    finally:
+        task._checkpointer.close()
+        task._client.close()

@@ -85,6 +85,16 @@ async function sendToGrabLine(
     onlyIfRunning = false,
   } = {},
 ) {
+  // CDN requests can be a single playback chunk or an audio-only track.
+  // Resolve the original video before fetching cookies or sending the handoff.
+  try {
+    const host = new URL(url).hostname;
+    if ((host === "googlevideo.com" || host.endsWith(".googlevideo.com")) &&
+        tab?.url && needsMediaCookies(tab.url)) {
+      url = tab.url;
+      fallbackUrls = [];
+    }
+  } catch { /* URL validation belongs to the native host. */ }
   if (onlyIfRunning && takeoverAlreadyQueued(url)) {
     // Same URL was handed off moments ago - tell the caller it already landed
     // so they still cancel the browser's duplicate attempt, without queuing

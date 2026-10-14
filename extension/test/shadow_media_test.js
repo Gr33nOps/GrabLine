@@ -1,12 +1,18 @@
 import { assertEquals, load } from "./harness.js";
 
-const { closestDeep } = (await load("../content/lib/button-kit.js")).grablineButtonKit;
+class FakeElement {}
+class FakeShadowRoot {
+  constructor(host) { this.host = host; }
+}
+const { closestDeep } = (await load("../content/lib/button-kit.js", {
+  Element: FakeElement, ShadowRoot: FakeShadowRoot,
+})).grablineButtonKit;
 
 // Minimal Element/ShadowRoot stand-ins - enough to prove closestDeep walks out
 // of an open shadow host the way Reddit's shreddit-player requires.
 
 function el(tag) {
-  return {
+  return Object.assign(new FakeElement(), {
     tagName: tag.toUpperCase(),
     parentElement: null,
     assignedSlot: null,
@@ -20,7 +26,7 @@ function el(tag) {
     getRootNode() {
       return this._root || this;
     },
-  };
+  });
 }
 
 Deno.test("closestDeep walks out of an open shadow host to the post", () => {
@@ -28,7 +34,7 @@ Deno.test("closestDeep walks out of an open shadow host to the post", () => {
   const player = el("shreddit-player");
   const video = el("video");
   player.parentElement = post;
-  const shadow = { host: player };
+  const shadow = new FakeShadowRoot(player);
   video._root = shadow;
 
   assertEquals(closestDeep(video, "shreddit-player"), player);
