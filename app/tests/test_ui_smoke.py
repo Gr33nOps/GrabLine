@@ -1746,3 +1746,37 @@ def test_detail_drawer_media_tab_stays_visible(db: Database, tmp_path: Path):
         assert drawer._media_grid._rows["Video"][1].text() == "H264"
     finally:
         manager.shutdown()
+
+
+def test_speed_smoother_rebases_after_counter_restart():
+    from app.ui.motion import SpeedSmoother
+
+    smoother = SpeedSmoother()
+    smoother.push_total(0, 1_000_000)
+    smoother.push_total(1, 2_000_000)
+    assert smoother.push_total(2, 0) == 0
+    assert smoother.push_total(3, 100) == 100
+
+
+def test_minimum_window_keeps_primary_columns_visible(db, tmp_path):
+    app = _qapp()
+    settings = Settings(db)
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    try:
+        db.create_job("https://example.invalid/file.zip", str(tmp_path), "file.zip")
+        window = MainWindow(manager, settings)
+        window.resize(940, 560)
+        window.show()
+        window.refresh()
+        window.table.selectRow(0)
+        app.processEvents()
+        assert window._drawer.isVisible()
+        assert window.table.horizontalScrollBar().maximum() == 0
+        assert window.table.columnWidth(1) >= 120
+        window.resize(1600, 900)
+        app.processEvents()
+        assert not window.table.isColumnHidden(2)
+        window.hide()
+        window.deleteLater()
+    finally:
+        manager.shutdown()

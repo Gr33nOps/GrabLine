@@ -357,7 +357,14 @@ class DownloadManager:
         if self._rate_mark is not None:
             elapsed = now - self._rate_mark[0]
             if elapsed > 0:
-                measured = max(0.0, (total - self._rate_mark[1]) / elapsed)
+                measured = (
+                    sum(
+                        max(0, size - self._job_marks[job_id])
+                        for job_id, size in items
+                        if job_id in self._job_marks
+                    )
+                    / elapsed
+                )
                 self._last_download_rate = measured
                 self._update_line_capacity(measured, n_active)
                 self._update_job_rates(items, elapsed)

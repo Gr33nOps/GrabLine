@@ -169,6 +169,14 @@ class _ScanFlagged(DownloadError):
         self.detail = detail
 
 
+class _DownloadsTable(QTableWidget):
+    resized = Signal()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
+
+
 class MainWindow(QMainWindow):
     #: Emitted when a download finishes (display name, file path) and when the
     #: last active/queued download drains, so __main__ can toast and act.
@@ -612,7 +620,7 @@ class MainWindow(QMainWindow):
         self._apply_filter()
 
     def _build_table(self) -> QWidget:
-        self.table = QTableWidget(0, len(_COLUMNS), self)
+        self.table = _DownloadsTable(0, len(_COLUMNS), self)
         self.table.setObjectName("JobsTable")  # full-bleed styling in the QSS
         self.table.setHorizontalHeaderLabels([t(column) for column in _COLUMNS])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -661,6 +669,7 @@ class MainWindow(QMainWindow):
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.hide()
         self._apply_table_prefs()
+        self.table.resized.connect(self._apply_table_prefs)
         return self.table
 
     def _apply_table_prefs(self) -> None:
@@ -675,8 +684,14 @@ class MainWindow(QMainWindow):
             "eta": _COL_ETA,
             "status": _COL_STATUS,
         }
+        narrow = self.table.viewport().width() < 700
+        # Secondary values remain in the detail drawer. Reserve readable room
+        # for the name, progress, speed and status instead of scrolling them off.
         for key, column in toggles.items():
-            self.table.setColumnHidden(column, key in hidden)
+            self.table.setColumnHidden(column, key in hidden or (narrow and key in {"size", "eta"}))
+        self.table.setColumnWidth(_COL_PROGRESS, 80 if narrow else 150)
+        self.table.setColumnWidth(_COL_SPEED, 90 if narrow else 100)
+        self.table.setColumnWidth(_COL_STATUS, 106 if narrow else 116)
 
     def _make_queue_page(self) -> QWidget:
         from app.ui.queue_view import QueueView

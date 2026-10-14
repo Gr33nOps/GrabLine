@@ -17,6 +17,13 @@ from app.tests.media_server import MediaServer
 FAKE_DENO = b"#!/bin/sh\necho 'deno 2.9.2'\n"
 
 
+@pytest.fixture(autouse=True)
+def isolated_runtime_path(monkeypatch):
+    # Installation tests must not silently reuse the developer's system Deno.
+    # Runtime-discovery tests override this with their own explicit PATH.
+    monkeypatch.setattr("app.core.jsruntime.shutil.which", lambda _: None)
+
+
 def _zip(members: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as bundle:

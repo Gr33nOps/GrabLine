@@ -1403,6 +1403,7 @@ class SmartDownload:
             "postprocessor_hooks": [self._postprocessor_hook],
             "retries": 3,
             "fragment_retries": 5,
+            "skip_unavailable_fragments": False,
             "continuedl": True,
             # YouTube (and other DASH/HLS) ships many small fragments; one at a
             # time leaves the pipe idle between requests. Parallelism cuts

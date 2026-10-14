@@ -191,14 +191,15 @@ def test_rss_rejects_junk():
 # --------------------------------------------------------------- end to end
 
 
-def test_torrent_loopback_transfer(db: Database, tmp_path: Path):
+@pytest.mark.parametrize("use_magnet", [False, True])
+def test_torrent_loopback_transfer(db: Database, tmp_path: Path, use_magnet):
     """The real thing: a libtorrent seeder on 127.0.0.1 and Grabline's manager
     downloading from it - metadata naming, progress, and a byte-perfect file."""
     lt = pytest.importorskip("libtorrent")
 
     seed_dir = tmp_path / "seed"
     seed_dir.mkdir()
-    payload = bytes(range(256)) * 1000  # 256 KB
+    payload = bytes(reversed(range(256)) if use_magnet else range(256)) * 1000  # 256 KB
     (seed_dir / "payload.bin").write_bytes(payload)
     torrent_bytes = create_torrent_file(seed_dir / "payload.bin")
     torrent_path = tmp_path / "payload.torrent"
@@ -233,7 +234,9 @@ def test_torrent_loopback_transfer(db: Database, tmp_path: Path):
     manager = DownloadManager(db, settings=settings, max_concurrent=1)
     try:
         job = manager.add_torrent(
-            str(torrent_path), dest_dir=dest, options={"peers": ["127.0.0.1:6971"]}
+            magnet_from_torrent(torrent_bytes) if use_magnet else str(torrent_path),
+            dest_dir=dest,
+            options={"peers": ["127.0.0.1:6971"]},
         )
         assert job.kind is JobKind.TORRENT
         deadline = time.time() + 60
@@ -273,3 +276,28 @@ def test_torrent_stats_guards(db: Database, tmp_path: Path):
         assert manager.torrent_stats(999_999) is None  # no such job
     finally:
         manager.shutdown()
+
+
+def test_resumed_torrent_starts_with_existing_progress(db, tmp_path):
+    from app.engines.torrent import TorrentDownload
+
+    job = db.create_job("magnet:?xt=urn:btih:" + "a" * 40, str(tmp_path), "file")
+    job.downloaded = 90 * 1024**3
+    task = TorrentDownload(db, job, settings=Settings(db))
+    assert task.bytes_downloaded == job.downloaded
+
+
+def test_torrent_queue_is_owned_by_grabline(monkeypatch):
+    import libtorrent as lt
+
+    from app.engines.torrent import TorrentSession
+
+    class Session:
+        def add_torrent(self, params):
+            assert not params.flags & lt.torrent_flags.auto_managed
+            assert not params.flags & lt.torrent_flags.duplicate_is_error
+            return "handle"
+
+    session = TorrentSession()
+    monkeypatch.setattr(session, "session", lambda: Session())
+    assert session.add(lt.add_torrent_params()) == "handle"

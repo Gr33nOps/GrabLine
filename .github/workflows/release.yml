@@ -168,6 +168,10 @@ jobs:
           # PATH, removable with apt.
           bash packaging/linux/build_deb.sh "$V"
 
+      - name: Package browser extensions
+        if: runner.os == 'Linux'
+        run: python scripts/package_extension.py
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -181,6 +185,7 @@ jobs:
             dist/Grabline-*-linux-x86_64.tar.gz
             dist/grabline_*_amd64.deb
             dist/dist-requirements-*.txt
+            dist/grabline-connect-*.zip
           if-no-files-found: error
 
   release:
@@ -212,7 +217,9 @@ jobs:
             "artifacts/*/Grabline-$V-"*.dmg \
             "artifacts/*/Grabline-$V-x86_64.AppImage" \
             "artifacts/*/Grabline-$V-linux-x86_64.tar.gz" \
-            "artifacts/*/grabline_${V}_amd64.deb"
+            "artifacts/*/grabline_${V}_amd64.deb" \
+            "artifacts/*/grabline-connect-chrome-$V.zip" \
+            "artifacts/*/grabline-connect-firefox-$V.zip"
           do
             # shellcheck disable=SC2086
             if ! compgen -G "$pattern" > /dev/null; then

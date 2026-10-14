@@ -394,8 +394,10 @@ class TorrentSession:
     def add(self, params: Any) -> Any:
         lt = _lt()
         # Re-adding the same torrent (a resume) must return the live handle,
-        # not raise - clear the duplicate-is-error flag.
-        params.flags &= ~lt.torrent_flags.duplicate_is_error
+        # not raise - clear the duplicate-is-error flag. GrabLine owns the
+        # queue; libtorrent auto-management must not silently queue active jobs
+        # or resume handles that the user explicitly paused.
+        params.flags &= ~(lt.torrent_flags.duplicate_is_error | lt.torrent_flags.auto_managed)
         return self.session().add_torrent(params)
 
     def remove(self, handle: Any, *, delete_files: bool = False) -> None:
@@ -530,7 +532,7 @@ class TorrentDownload:
         self.settings = settings
         self._pause_event = threading.Event()
         self._cancel_event = threading.Event()
-        self._state = _State()
+        self._state = _State(downloaded=job.downloaded)
         self._named = False
         self._handle: Any = None
         self._download_limit = 0  # bytes/sec; 0 = unlimited
@@ -568,10 +570,10 @@ class TorrentDownload:
             return JobStatus.FAILED
         handle = SESSION.add(params)
         self._handle = handle
+        handle.unset_flags(lt.torrent_flags.auto_managed)
         handle.resume()  # a re-added (resumed) torrent may still be paused
-        if self._download_limit:
-            with contextlib.suppress(Exception):
-                handle.set_download_limit(self._download_limit)
+        with contextlib.suppress(Exception):
+            handle.set_download_limit(self._download_limit)
         self._persist_info_hash(handle)
         self._apply_options(lt, handle)
         for peer in self.job.options.get("peers") or ():

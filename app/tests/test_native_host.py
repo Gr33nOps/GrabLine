@@ -394,3 +394,34 @@ def test_focus_drops_a_marker_handoff(db: Database):
 def test_unknown_type_still_rejected(db: Database):
     reply = handle_message(db, {"type": "nonsense"})
     assert reply["type"] == "error"
+
+
+def test_captured_youtube_chunk_uses_complete_page(db):
+    page = "https://www.youtube.com/watch?v=video123"
+    chunk = "https://rr1.googlevideo.com/videoplayback?id=abc&sq=18"
+    reply = handle_message(
+        db,
+        {
+            "type": "download",
+            "url": chunk,
+            "pageUrl": page,
+            "cookie": "cdn=secret",
+            "fallbackUrls": [chunk],
+        },
+    )
+    assert reply["type"] == "queued"
+    handoff = db.claim_handoffs()[0]
+    assert handoff.url == page
+    assert not handoff.payload
+    assert "Cookie" not in handoff.headers
+
+
+def test_captured_media_does_not_redirect_unrelated_files():
+    from app.core.mediaurl import captured_video_page
+
+    page = "https://www.youtube.com/watch?v=video123"
+    file = "https://example.com/file.zip"
+    assert captured_video_page(file, page) == file
+    chunk = "https://rr1.googlevideo.com/videoplayback?sq=1"
+    assert captured_video_page(chunk, "https://youtube.com.evil.test/watch?v=x") == chunk
+    assert captured_video_page(chunk, None) == chunk

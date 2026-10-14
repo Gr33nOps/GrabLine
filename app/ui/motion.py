@@ -172,6 +172,8 @@ class SpeedSmoother:
         self._ema: float | None = None
 
     def push_total(self, now: float, total: float) -> float:
+        if self._samples and total < self._samples[-1][1]:
+            self.reset()
         self._samples.append((now, total))
         # Keep one sample just outside the window so the span covers it fully.
         cutoff = now - self._window
