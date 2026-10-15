@@ -15,7 +15,7 @@ from app.core.models import JobKind, JobStatus
 from app.db.database import Database
 from app.engines.smart import SmartDownload
 from app.tests.conftest import sha256_file, wait_for
-from app.tests.media_fixtures import FFMPEG, make_mp4
+from app.tests.media_fixtures import FFMPEG, FFPROBE, make_mp4, probe_duration, probe_streams
 from app.tests.media_server import MediaServer, payload, sha256
 
 MB = 1024 * 1024
@@ -394,7 +394,7 @@ def test_build_options_passes_runtime_only_on_escalation(db: Database, dest: Pat
     task = SmartDownload(db, _smart_job(db, "https://youtu.be/x", dest, "v.mp4"), ffmpeg_path=None)
     task._js_runtime = ("node", "/usr/bin/node")  # an existing Node, not Deno
     # Fast path omits the runtime even when one is available (that's the speed win).
-    assert "js_runtimes" not in task._build_options()
+    assert task._build_options()["js_runtimes"] == {}
     # Escalated path passes the runtime by name plus the EJS solver fetch.
     opts = task._build_options(with_runtime=True)
     assert opts["js_runtimes"] == {"node": {"path": "/usr/bin/node"}}
@@ -483,22 +483,27 @@ def test_audio_extraction_requires_ffmpeg(
 
 
 @pytest.mark.skipif(FFMPEG is None, reason="needs a real ffmpeg for postprocessing")
-def test_smart_download_mp3_extraction(
-    server: MediaServer, db: Database, dest: Path, tmp_path: Path
+@pytest.mark.parametrize("audio_format", ["mp3", "m4a", "flac"])
+def test_smart_download_audio_extraction(
+    server: MediaServer, db: Database, dest: Path, tmp_path: Path, audio_format: str
 ):
     data = make_mp4(tmp_path / "src.mp4", seconds=2, with_audio=True)
     url = server.add("/real.mp4", data, content_type="video/mp4")
-    job = _smart_job(db, url, dest, "song.mp3", audio_format="mp3")
+    job = _smart_job(db, url, dest, f"song.{audio_format}", audio_format=audio_format)
 
     status = SmartDownload(db, job, ffmpeg_path=FFMPEG).run()
 
     assert status is JobStatus.COMPLETED
     fresh = db.get_job(job.id)
     assert fresh is not None
-    assert fresh.filename.endswith(".mp3")
+    assert fresh.filename.endswith(f".{audio_format}")
     output = dest / fresh.filename
     assert output.exists() and output.stat().st_size > 0
     assert not (dest / "song.mp4").exists()  # intermediate got cleaned up
+    if FFPROBE:
+        assert probe_streams(output) == ["audio"]
+        duration = probe_duration(output)
+        assert duration is not None and 1.8 <= duration <= 2.5
 
 
 @pytest.mark.skipif(FFMPEG is None, reason="needs a real ffmpeg for remuxing")
@@ -1098,3 +1103,20 @@ def test_no_browser_headers_leaves_http_headers_unset(db: Database, dest: Path):
 def test_missing_fragments_must_not_be_reported_as_complete(db, dest):
     task = SmartDownload(db, _smart_job(db, "https://youtu.be/x", dest, "v.mp4"), ffmpeg_path=None)
     assert task._build_options()["skip_unavailable_fragments"] is False
+
+
+@pytest.mark.parametrize("with_runtime", [False, True])
+def test_download_without_runtime_never_scans_untrusted_path(
+    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch, with_runtime: bool
+):
+    import yt_dlp
+    from yt_dlp.utils import _jsruntime
+
+    def inaccessible_path(*args, **kwargs):
+        raise OSError(448, "The path contains an untrusted mount point")
+
+    monkeypatch.setattr(_jsruntime, "_find_exe", inaccessible_path)
+    job = _smart_job(db, "https://www.youtube.com/watch?v=BaW_jenozKc", dest, "clip.mp4")
+    task = SmartDownload(db, job)
+    with yt_dlp.YoutubeDL(task._build_options(with_runtime=with_runtime)) as ydl:
+        assert not ydl._js_runtimes

@@ -794,7 +794,9 @@ class SmartEngine:
         try:
             import yt_dlp
 
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}):
+            with yt_dlp.YoutubeDL(
+                {"quiet": True, "no_warnings": True, "skip_download": True, "js_runtimes": {}}
+            ):
                 pass
         except Exception:  # pragma: no cover - a warm-up must never break a launch
             log.debug("yt-dlp warm-up failed", exc_info=True)
@@ -1067,6 +1069,9 @@ class SmartEngine:
             "no_warnings": True,
             "noplaylist": True,
             "extract_flat": "in_playlist",
+            # Disable implicit PATH discovery (Windows realpath can raise WinError 448).
+            # Runtime-enabled extraction supplies an explicit path below.
+            "js_runtimes": {},
             "skip_download": True,
         }
         _apply_network_guards(opts, proxy, insecure=insecure)
@@ -1394,6 +1399,7 @@ class SmartDownload:
             fmt = f"b/{fmt}"
         ydl_opts: dict[str, Any] = {
             "format": fmt,
+            "js_runtimes": {},  # only enable a runtime with an explicit path below
             "outtmpl": {"default": outtmpl},
             "noplaylist": True,
             "quiet": True,

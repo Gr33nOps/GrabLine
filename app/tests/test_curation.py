@@ -485,3 +485,32 @@ def test_resolve_thread_does_not_prefetch_during_analysis(
     )
     thread.run()
     assert calls == []
+
+
+@pytest.mark.parametrize("with_runtime", [False, True])
+def test_extract_does_not_implicitly_search_windows_path(monkeypatch, with_runtime):
+    import yt_dlp
+    from yt_dlp.utils import _jsruntime
+
+    def inaccessible_path(*args, **kwargs):
+        raise OSError(448, "The path contains an untrusted mount point")
+
+    monkeypatch.setattr(_jsruntime, "_find_exe", inaccessible_path)
+    monkeypatch.setattr("app.engines.smart.provision_js_runtime", lambda *a, **k: None)
+
+    def extract(ydl, url, download=False):
+        assert ydl.params["js_runtimes"] == {}
+        assert not ydl._js_runtimes
+        return {"id": "test", "title": "Test", "formats": []}
+
+    monkeypatch.setattr(yt_dlp.YoutubeDL, "extract_info", extract)
+    SmartEngine._warm_engine()
+    result = SmartEngine()._extract_info(
+        "https://www.youtube.com/watch?v=BaW_jenozKc",
+        with_runtime=with_runtime,
+        use_session=False,
+        session_browser="chrome",
+        proxy=None,
+        force_generic=False,
+    )
+    assert result["id"] == "test"
