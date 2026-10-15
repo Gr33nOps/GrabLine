@@ -576,3 +576,54 @@ def test_whitelist_blocks_local_file_read(dest: Path, tmp_path: Path):
     )
     got = out.read_bytes() if out.exists() else b""
     assert b"LOCAL-SECRET" not in got  # the nested file:// segment was refused
+
+
+@pytest.mark.skipif(FFMPEG is None or FFPROBE is None, reason="needs ffmpeg and ffprobe")
+def test_dash_reassembles_complete_video_and_audio(server, db, dest, tmp_path):
+    import subprocess
+
+    assert FFMPEG is not None
+    directory = tmp_path / "dash"
+    directory.mkdir()
+    subprocess.run(
+        [
+            FFMPEG,
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=128x72:d=3:r=10",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=3",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-c:a",
+            "aac",
+            "-shortest",
+            "-f",
+            "dash",
+            "-seg_duration",
+            "1",
+            str(directory / "index.mpd"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    for item in directory.iterdir():
+        server.add(
+            "/dash/" + item.name,
+            item.read_bytes(),
+            content_type="application/dash+xml" if item.suffix == ".mpd" else "video/mp4",
+        )
+    job = _hls_job(db, server.url("/dash/index.mpd"), dest)
+    assert HlsDownload(db, job, ffmpeg_path=FFMPEG).run() is JobStatus.COMPLETED
+    output = dest / "lecture.mp4"
+    assert set(probe_streams(output)) == {"video", "audio"}
+    duration = probe_duration(output)
+    assert duration is not None and 2.8 <= duration <= 3.5

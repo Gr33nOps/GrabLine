@@ -214,11 +214,21 @@ def test_youtube_uses_detected_browser_without_settings(
     assert calls == [(True, True)]
 
 
-def test_youtube_without_any_browser_tries_jsless_first(
-    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://youtu.be/x",
+        "https://www.youtube.com/watch?v=x",
+        "https://www.youtube.com/shorts/x",
+        "https://www.youtube.com/live/x",
+        "https://www.youtube-nocookie.com/embed/x",
+    ],
+)
+def test_youtube_without_any_browser_uses_runtime_first(
+    db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch, url: str
 ):
-    _no_runtime(monkeypatch)
-    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4")  # no session_browser
+    monkeypatch.setattr("app.core.jsruntime.detect_js_runtime", lambda: ("deno", "/x/deno"))
+    job = _smart_job(db, url, dest, "v.mp4")  # no session_browser
     task = SmartDownload(db, job, ffmpeg_path=None)
     monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda *a, **k: None)
     calls: list[tuple[bool, bool]] = []
@@ -229,7 +239,7 @@ def test_youtube_without_any_browser_tries_jsless_first(
 
     monkeypatch.setattr(task, "_download", fake_download)
     assert task._download_smart() == {"title": "ok"}
-    assert calls == [(False, False)]
+    assert calls == [(False, True)]
 
 
 def test_quality_first_uses_the_runtime_up_front(
@@ -262,7 +272,7 @@ def test_format_error_escalates_to_runtime_without_login(
     import yt_dlp
 
     _no_runtime(monkeypatch)
-    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4")
+    job = _smart_job(db, "https://vimeo.com/123", dest, "v.mp4")
     task = SmartDownload(db, job, ffmpeg_path=None)
     monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda *a, **k: None)
 
@@ -829,7 +839,7 @@ def test_http_403_escalates_to_the_runtime_retry(db: Database, dest: Path, monke
 
     _no_runtime(monkeypatch)
     monkeypatch.setattr("app.core.browser_setup.detect_cookie_browser", lambda *a, **k: None)
-    job = _smart_job(db, "https://youtu.be/x", dest, "v.mp4", format_spec="bv*+ba/b")
+    job = _smart_job(db, "https://vimeo.com/123", dest, "v.mp4", format_spec="bv*+ba/b")
     task = SmartDownload(db, job, ffmpeg_path="/usr/bin/ffmpeg")
     monkeypatch.setattr(task, "_ensure_ffmpeg", lambda: None)
     monkeypatch.setattr(

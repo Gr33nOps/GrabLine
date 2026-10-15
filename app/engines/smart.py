@@ -1656,13 +1656,11 @@ class SmartDownload:
     def _download_smart(self) -> dict[str, Any]:
         """Start the transfer as soon as the site allows, escalate on failure.
 
-        Non-YouTube sites still prefer a cookie-free, jsless first attempt
-        (seconds to first byte). YouTube currently bot-checks those anonymous
-        clients, so when a browser login is configured we skip the doomed
-        attempt and open with cookies + the JS runtime immediately - that is
-        what `--cookies-from-browser` on the CLI is doing, and it is the only
-        path that yields unthrottled formats today. Quality-first (Settings)
-        also pays for the runtime up front so the full 4K ladder is visible.
+        Non-YouTube sites prefer a cookie-free, jsless first attempt. YouTube
+        downloads enable a JS runtime up front for challenge solving, whether
+        or not a browser profile exists, matching download-ready prefetch.
+        When available, browser cookies are also used for gated videos.
+        Quality-first enables the runtime up front on other sites as well.
         """
         import yt_dlp
 
@@ -1674,13 +1672,14 @@ class SmartDownload:
         if self._wants_ffmpeg():
             self._ensure_ffmpeg()
 
+        # Public YouTube streams also require challenge solving; browser availability
+        # must not decide whether downloads get usable, unthrottled format URLs.
         runtime_first = bool(self.job.options.get("hq_first"))
-        # YouTube needs a browser login + JS runtime today (bot check). Start
-        # there automatically whenever any browser profile is available - no
-        # Settings toggle, no cookies.txt, no failed anonymous attempt first.
+        # Use an available browser profile for YouTube auth walls. Runtime
+        # provisioning below is independent of whether cookies are available.
         browser = self._cookie_browser()
         youtube_login_first = needs_js_runtime(self.job.url) and browser is not None
-        want_runtime = runtime_first or youtube_login_first
+        want_runtime = runtime_first or needs_js_runtime(self.job.url)
         if want_runtime:
             if self._js_runtime is None:
                 self._js_runtime = jsruntime.detect_js_runtime()
