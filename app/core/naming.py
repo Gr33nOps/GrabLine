@@ -9,7 +9,7 @@ import posixpath
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 FALLBACK_NAME = "download"
 MAX_NAME_LENGTH = 150
@@ -37,8 +37,21 @@ def sanitize_filename(name: str, max_length: int = MAX_NAME_LENGTH) -> str:
     return name
 
 
+_ENDPOINT_SUFFIXES = {".php", ".asp", ".aspx", ".ashx", ".jsp", ".do"}
+
+
 def filename_from_url(url: str) -> str:
-    name = unquote(posixpath.basename(urlsplit(url).path))
+    parts = urlsplit(url)
+    name = unquote(posixpath.basename(parts.path))
+    # LMS/download endpoints often carry the real name in an explicit query
+    # parameter. Do not replace a real path filename with arbitrary query data.
+    if not Path(name).suffix or Path(name).suffix.lower() in _ENDPOINT_SUFFIXES:
+        query = parse_qs(parts.query)
+        for key in ("filename", "file"):
+            for value in query.get(key, []):
+                candidate = posixpath.basename(value.replace("\\", "/"))
+                if candidate and Path(candidate).suffix:
+                    return sanitize_filename(candidate)
     return sanitize_filename(name) if name else FALLBACK_NAME
 
 
@@ -88,15 +101,167 @@ def is_ugly_name(name: str) -> bool:
     return False
 
 
+# Canonical suffixes for common downloads missing from Python's built-in MIME
+# database, plus ambiguous defaults (e.g. MP3 vs MP2). This is not a download
+# whitelist: unknown types and all explicit filename suffixes remain supported.
+_MIME_EXTENSIONS = {
+    "application/msword": ".doc",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template": ".dotx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template": ".xltx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.openxmlformats-officedocument.presentationml.slideshow": ".ppsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.template": ".potx",
+    "application/vnd.ms-word.document.macroenabled.12": ".docm",
+    "application/vnd.ms-word.template.macroenabled.12": ".dotm",
+    "application/vnd.ms-excel.sheet.macroenabled.12": ".xlsm",
+    "application/vnd.ms-excel.sheet.binary.macroenabled.12": ".xlsb",
+    "application/vnd.ms-excel.template.macroenabled.12": ".xltm",
+    "application/vnd.ms-powerpoint.presentation.macroenabled.12": ".pptm",
+    "application/vnd.ms-powerpoint.slideshow.macroenabled.12": ".ppsm",
+    "application/vnd.ms-powerpoint.template.macroenabled.12": ".potm",
+    "application/vnd.oasis.opendocument.text": ".odt",
+    "application/vnd.oasis.opendocument.spreadsheet": ".ods",
+    "application/vnd.oasis.opendocument.presentation": ".odp",
+    "application/epub+zip": ".epub",
+    "application/rtf": ".rtf",
+    "application/zip": ".zip",
+    "application/x-zip-compressed": ".zip",
+    "application/vnd.rar": ".rar",
+    "application/x-rar-compressed": ".rar",
+    "application/x-7z-compressed": ".7z",
+    "application/gzip": ".gz",
+    "application/x-gzip": ".gz",
+    "application/x-bzip2": ".bz2",
+    "application/x-xz": ".xz",
+    "application/zstd": ".zst",
+    "application/x-tar": ".tar",
+    "application/x-iso9660-image": ".iso",
+    "application/x-msdownload": ".exe",
+    "application/vnd.microsoft.portable-executable": ".exe",
+    "application/x-msi": ".msi",
+    "application/vnd.android.package-archive": ".apk",
+    "application/vnd.debian.binary-package": ".deb",
+    "application/x-debian-package": ".deb",
+    "application/x-rpm": ".rpm",
+    "application/x-apple-diskimage": ".dmg",
+    "application/java-archive": ".jar",
+    "application/x-bittorrent": ".torrent",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/flac": ".flac",
+    "audio/x-flac": ".flac",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "video/x-matroska": ".mkv",
+    "video/webm": ".webm",
+    "image/webp": ".webp",
+    "image/avif": ".avif",
+    "image/heic": ".heic",
+    "text/markdown": ".md",
+}
+# Some MIME types cover several formats. Retain an extension-only name's
+# more specific hint instead of turning a DLL into dll.exe or PPS into pps.ppt.
+_MIME_SUFFIX_ALIASES = {
+    "application/x-msdownload": {"exe", "dll", "ocx"},
+    "application/vnd.microsoft.portable-executable": {"exe", "dll", "sys"},
+    "application/vnd.ms-powerpoint": {"ppt", "pps", "pot"},
+    "application/vnd.ms-excel": {"xls", "xlt"},
+    "image/jpeg": {"jpg", "jpeg", "jpe"},
+}
+_BUILTIN_MIMES = mimetypes.MimeTypes(filenames=())
+_GENERIC_TYPES = {
+    "",
+    "application/octet-stream",
+    "binary/octet-stream",
+    "application/force-download",
+}
+_HTML_COMPATIBLE_SUFFIXES = {".html", ".htm", ".xhtml", ".txt", ".xml", ".svg"}
+
+
+def extension_for_type(content_type: str | None) -> str:
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    if mime in _GENERIC_TYPES:
+        return ""  # a generic binary response tells us nothing about its format
+    return _MIME_EXTENSIONS.get(mime) or _BUILTIN_MIMES.guess_extension(mime) or ""
+
+
+def filename_with_type(name: str, content_type: str | None) -> str:
+    """Restore missing suffixes without changing explicit or custom extensions."""
+    name = sanitize_filename(name)
+    suffix = extension_for_type(content_type)
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    if name.lower() in _MIME_SUFFIX_ALIASES.get(mime, set()):
+        suffix = "." + name.lower()
+    if not suffix or Path(name).suffix:
+        return name
+    stem = FALLBACK_NAME if name.lower() == suffix[1:] else name
+    return sanitize_filename(stem + suffix)
+
+
+def resolve_download_name(
+    name: str,
+    *,
+    url: str,
+    final_url: str,
+    server_filename: str | None,
+    content_type: str | None,
+) -> str:
+    """Use response metadata, preserving names the user chose explicitly."""
+    if server_filename:
+        return filename_with_type(server_filename, content_type)
+    if name == filename_from_url(url) and (
+        not Path(name).suffix or Path(name).suffix.lower() in _ENDPOINT_SUFFIXES
+    ):
+        redirected = filename_from_url(final_url)
+        if Path(redirected).suffix and Path(redirected).suffix.lower() not in _ENDPOINT_SUFFIXES:
+            name = redirected
+        suffix = extension_for_type(content_type)
+        if (
+            Path(name).suffix.lower() in _ENDPOINT_SUFFIXES
+            and suffix
+            and expects_binary_file("download" + suffix)
+        ):
+            # download.php is the endpoint, not the type of the returned PDF.
+            name = Path(name).stem
+    return filename_with_type(name, content_type)
+
+
+def expects_binary_file(name: str) -> bool:
+    """Whether HTML would clearly be an error page for the named download."""
+    from app.core.categories import category_for
+
+    suffix = Path(name).suffix.lower() or "." + name.lower()
+    if suffix in _HTML_COMPATIBLE_SUFFIXES:
+        return False
+    probe_name = "download" + suffix
+    if category_for(probe_name) in {
+        "Archives",
+        "Programs",
+        "Games",
+        "Torrents",
+        "Music",
+        "Video",
+        "Images",
+    }:
+        return True
+    mime = next((mime for mime, ext in _MIME_EXTENSIONS.items() if ext == suffix), None)
+    mime = mime or _BUILTIN_MIMES.guess_type(probe_name)[0]
+    return bool(mime and mime.startswith(("application/", "audio/", "video/", "image/")))
+
+
 def improved_filename(url: str, page_title: str | None, content_type: str | None = None) -> str:
     """The ugly-name fixer (F1.8): keep good URL names, replace junk with the
     page title, keeping (or guessing) the file extension."""
     from_url = filename_from_url(url)
     if not page_title or not is_ugly_name(from_url):
-        return from_url
+        return filename_with_type(from_url, content_type)
     extension = Path(from_url).suffix
     if not extension and content_type:
-        extension = mimetypes.guess_extension(content_type.split(";")[0].strip()) or ""
+        extension = extension_for_type(content_type)
     return sanitize_filename(page_title.strip() + extension)
 
 
