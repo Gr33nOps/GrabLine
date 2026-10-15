@@ -9,8 +9,8 @@ way it does FFmpeg: the pinned per-platform archive is downloaded over HTTPS,
 hashed while streaming, rejected on any mismatch, and only then extracted -
 never a blanket archive extract, never executed before it is verified.
 
-The runtime is only fetched when the user has opted into browser session, so
-plain public videos (which need no JS runtime) never trigger the download.
+The runtime is fetched when a YouTube download or browser-session extraction
+needs it, including public videos whose media URLs require challenge solving.
 """
 
 from __future__ import annotations
