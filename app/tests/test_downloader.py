@@ -848,3 +848,161 @@ def test_new_segments_send_resource_validator(server, db, dest):
     finally:
         task._checkpointer.close()
         task._client.close()
+
+
+@pytest.mark.parametrize("cached_probe", [False, True])
+@pytest.mark.parametrize("disposition", [None, 'attachment; filename="pptx"'])
+def test_lms_powerpoint_keeps_extension_and_exact_bytes(
+    server, db, dest, cached_probe, disposition
+):
+    import io
+    import zipfile
+
+    import httpx
+
+    from app.core.manager import DownloadManager
+    from app.core.probe import probe
+
+    # A small OPC package: compare the entire response and read ZIP members,
+    # so repairing the name cannot conceal altered or incomplete file bytes.
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        bundle.writestr("[Content_Types].xml", "<Types/>")
+        bundle.writestr("ppt/presentation.xml", "<presentation/>")
+    data = buffer.getvalue()
+    mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    url = server.add("/pptx", data, content_type=mime, content_disposition=disposition)
+    if cached_probe:
+        with httpx.Client() as client:
+            metadata = probe(client, url)
+        manager = DownloadManager(db, max_concurrent=0)
+        try:
+            job = manager.add_url(url, dest, filename="pptx", probe=metadata)
+        finally:
+            manager.shutdown()
+    else:
+        job = db.create_job(url, str(dest), "pptx")
+    assert SegmentedDownload(db, job).run() is JobStatus.COMPLETED
+    saved = dest / "download.pptx"
+    assert saved.read_bytes() == data
+    with zipfile.ZipFile(saved) as bundle:
+        assert bundle.testzip() is None
+        assert "ppt/presentation.xml" in bundle.namelist()
+    assert db.get_job(job.id).filename == "download.pptx"
+
+
+@pytest.mark.parametrize("name", ["pptx", "lecture.pptx", "lecture.ppt"])
+def test_lms_login_page_is_not_a_completed_presentation(server, db, dest, name):
+    url = server.add("/resource", b"<html>Sign in</html>", content_type="text/html")
+    job = db.create_job(url, str(dest), name)
+    assert SegmentedDownload(db, job).run() is JobStatus.FAILED
+    assert not (dest / name).exists()
+    assert "session may have expired" in db.get_job(job.id).error
+
+
+def test_legitimate_html_download_still_works(server, db, dest):
+    data = b"<html>Course notes</html>"
+    url = server.add("/notes.html", data, content_type="text/html")
+    job = db.create_job(url, str(dest), "notes.html")
+    assert SegmentedDownload(db, job).run() is JobStatus.COMPLETED
+    assert (dest / "notes.html").read_bytes() == data
+
+
+@pytest.mark.parametrize("supports_ranges", [False, True])
+def test_lms_session_expiring_after_probe_is_rejected(server, db, dest, supports_ranges):
+    import httpx
+
+    from app.core.manager import DownloadManager
+    from app.core.probe import probe
+
+    mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    url = server.add(
+        "/lecture.pptx", b"presentation", content_type=mime, supports_ranges=supports_ranges
+    )
+    with httpx.Client() as client:
+        metadata = probe(client, url)
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        job = manager.add_url(url, dest, probe=metadata)
+    finally:
+        manager.shutdown()
+    server.resources["/lecture.pptx"].content_type = "text/html"
+    server.resources["/lecture.pptx"].data = b"<html>Sign in</html>"
+    assert SegmentedDownload(db, job).run() is JobStatus.FAILED
+    assert not (dest / "lecture.pptx").exists()
+    assert "session may have expired" in db.get_job(job.id).error
+
+
+@pytest.mark.parametrize(
+    "mime,filename",
+    [
+        ("application/pdf", "download.pdf"),
+        (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "download.docx",
+        ),
+        ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "download.xlsx"),
+        ("application/zip", "download.zip"),
+        ("image/jpeg", "download.jpg"),
+        ("audio/mpeg", "download.mp3"),
+        ("video/mp4", "download.mp4"),
+        ("application/x-msdownload", "download.exe"),
+        ("application/vnd.android.package-archive", "download.apk"),
+        ("application/x-custom-file", "download"),
+        ("application/octet-stream", "download"),
+    ],
+)
+def test_direct_download_is_format_independent(server, db, dest, mime, filename):
+    data = payload(200_000, 93)
+    url = server.add("/download", data, content_type=mime)
+    job = db.create_job(url, str(dest), "download")
+    assert SegmentedDownload(db, job).run() is JobStatus.COMPLETED
+    assert (dest / filename).read_bytes() == data
+    assert db.get_job(job.id).filename == filename
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "notes.pdf",
+        "essay.docx",
+        "sheet.xlsx",
+        "file.zip",
+        "setup.exe",
+        "image.jpg",
+        "video.mp4",
+        "audio.mp3",
+    ],
+)
+def test_login_html_is_rejected_for_other_binary_files(server, db, dest, filename):
+    url = server.add("/download", b"<html>Log in</html>", content_type="text/html")
+    job = db.create_job(url, str(dest), filename)
+    assert SegmentedDownload(db, job).run() is JobStatus.FAILED
+    assert not (dest / filename).exists()
+    assert "session may have expired" in db.get_job(job.id).error
+
+
+def test_custom_extension_and_bytes_survive_generic_mime(server, db, dest):
+    data = payload(200_000, 27)
+    url = server.add(
+        "/get",
+        data,
+        content_type="application/octet-stream",
+        content_disposition='attachment; filename="myfile.custom"',
+    )
+    job = db.create_job(url, str(dest), "get")
+    assert SegmentedDownload(db, job).run() is JobStatus.COMPLETED
+    assert (dest / "myfile.custom").read_bytes() == data
+
+
+def test_endpoint_and_redirect_names_download_correctly(server, db, dest):
+    data = payload(200_000, 84)
+    url = server.add("/download.php", data, content_type="application/pdf")
+    job = db.create_job(url, str(dest), "download.php")
+    assert SegmentedDownload(db, job).run() is JobStatus.COMPLETED
+    assert (dest / "download.pdf").read_bytes() == data
+    server.add("/real.custom", data, content_type="application/octet-stream")
+    url = server.add("/get", redirect_to="/real.custom")
+    job = db.create_job(url, str(dest), "get")
+    assert SegmentedDownload(db, job).run() is JobStatus.COMPLETED
+    assert (dest / "real.custom").read_bytes() == data

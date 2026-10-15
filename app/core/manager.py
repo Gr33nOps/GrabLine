@@ -1049,8 +1049,13 @@ class DownloadManager:
         )
         job = self._apply_add_defaults(job)
         if probe is not None:
-            if probe.filename:
-                job.filename = naming.sanitize_filename(probe.filename)
+            job.filename = naming.resolve_download_name(
+                job.filename,
+                url=job.url,
+                final_url=probe.final_url,
+                server_filename=probe.filename,
+                content_type=probe.content_type,
+            )
             job.final_url = probe.final_url
             job.total_size = probe.total_size
             job.resumable = probe.resumable

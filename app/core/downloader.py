@@ -330,6 +330,7 @@ class SegmentedDownload:
         self._checkpointer = _Checkpointer(db, checkpoint_interval)
         self._segments: list[Segment] = []
         self._initial_downloaded = db.stored_progress(job)
+        self._content_type: str | None = None
         self._stop_event = threading.Event()
         self._reason = StopReason.NONE
         self._reason_lock = threading.Lock()
@@ -432,15 +433,22 @@ class SegmentedDownload:
                 result = cached
             else:
                 result = probe(self._client, job.url)
+        resolved_name = naming.resolve_download_name(
+            job.filename,
+            url=job.url,
+            final_url=result.final_url,
+            server_filename=result.filename,
+            content_type=result.content_type,
+        )
+        self._check_response_content(result.content_type, filename=resolved_name)
         part = job.part_path
         if segments and self._must_restart(result, segments, part):
             log.info("job %s: remote file changed or part missing; restarting", job.id)
             part.unlink(missing_ok=True)
             segments = []
         if not segments:
-            if result.filename:
-                job.filename = naming.sanitize_filename(result.filename)
-                part = job.part_path
+            job.filename = resolved_name
+            part = job.part_path
             job.final_url = result.final_url
             job.total_size = result.total_size
             job.resumable = result.resumable
@@ -951,6 +959,22 @@ class SegmentedDownload:
                     f"but claims a total of {declared}"
                 )
 
+    def _check_response_content(
+        self, content_type: str | None, *, filename: str | None = None
+    ) -> None:
+        mime = (content_type or "").split(";", 1)[0].strip().lower()
+        if mime in {"text/html", "application/xhtml+xml"} and (
+            naming.expects_binary_file(self.job.filename)
+            or naming.expects_binary_file(filename or self.job.filename)
+        ):
+            raise DownloadError(
+                "The server returned a web page instead of the requested file. "
+                "Your website session may have expired. Sign in again and download "
+                "the file using the GrabLine browser extension."
+            )
+        if content_type:
+            self._content_type = content_type
+
     def _stream_range(self, handle: IO[bytes], segment: Segment) -> None:
         end = segment.end
         if end is None:  # resumable jobs always have sized segments
@@ -973,6 +997,7 @@ class SegmentedDownload:
             if response.status_code != 206:
                 self._reject_status(response, segment)
             self._reject_encoded(response, segment)
+            self._check_response_content(response.headers.get("content-type"))
             self._check_content_range(response, offset, end, segment)
             # Seek once, then write sequentially: every chunk lands exactly
             # where the previous one left off, so a per-chunk lseek buys
@@ -1018,6 +1043,7 @@ class SegmentedDownload:
             if response.status_code != 200:
                 self._reject_status(response, segment)
             self._reject_encoded(response, segment)
+            self._check_response_content(response.headers.get("content-type"))
             handle.seek(segment.start)
             for chunk in response.iter_raw():
                 if self._stop_event.is_set():
@@ -1067,7 +1093,14 @@ class SegmentedDownload:
             return self._finish_failed(
                 f"size mismatch after download (expected {job.total_size}, got {actual_size})"
             )
-        dest = naming.unique_path(job.dest_path)
+        name = naming.resolve_download_name(
+            job.filename,
+            url=job.url,
+            final_url=job.final_url or job.url,
+            server_filename=None,
+            content_type=self._content_type,
+        )
+        dest = naming.unique_path(Path(job.dest_dir) / name)
         os.replace(part, dest)
         if dest.name != job.filename:
             job.filename = dest.name

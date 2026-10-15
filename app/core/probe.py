@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from email.message import Message
+from email.utils import collapse_rfc2231_value
+from typing import cast
 
 import httpx
 
@@ -36,6 +38,19 @@ def _filename_from_disposition(header: str | None) -> str | None:
         return None
     message = Message()
     message["content-disposition"] = header
+    # filename* is the authoritative Unicode name; get_filename() instead
+    # returns the first filename, often an LMS's extensionless ASCII fallback.
+    # The stdlib returns RFC 2231 triples here, although its type stub only
+    # advertises strings.
+    params = cast(
+        list[tuple[str, str | tuple[str, str, str]]],
+        message.get_params(header="content-disposition") or [],
+    )
+    for key, value in params:
+        if key == "filename" and isinstance(value, tuple):
+            decoded = collapse_rfc2231_value(value).strip()
+            if decoded:
+                return decoded
     return message.get_filename()
 
 

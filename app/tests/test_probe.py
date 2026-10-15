@@ -84,3 +84,20 @@ def test_probe_http_error_is_friendly(server: MediaServer, client: httpx.Client)
 def test_probe_unreachable_server_is_friendly(client: httpx.Client):
     with pytest.raises(DownloadError, match="could not reach server"):
         probe(client, "http://127.0.0.1:1/nothing")
+
+
+@pytest.mark.parametrize(
+    "header, expected",
+    [
+        ("attachment; filename=\"pptx\"; filename*=UTF-8''Lecture%201.pptx", "Lecture 1.pptx"),
+        ("attachment; filename*=UTF-8''Lecture%201.pptx; filename=\"pptx\"", "Lecture 1.pptx"),
+        (
+            "attachment; filename=\"fallback.pptx\"; filename*=UTF-8''%E8%AF%BE%E7%A8%8B.pptx",
+            "课程.pptx",
+        ),
+        ('attachment; filename="Lecture 1.pptx"', "Lecture 1.pptx"),
+    ],
+)
+def test_probe_prefers_encoded_lms_filename(server, client, header, expected):
+    url = server.add("/resource", b"presentation", content_disposition=header)
+    assert probe(client, url).filename == expected
