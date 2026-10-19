@@ -38,6 +38,37 @@ async function requiresBrowserSession(url) {
   }
 }
 
+// Files generated inside these chats can be short-lived or tied to the page's
+// browser session. Keep their automatic downloads in the browser that created
+// them; manually requested GrabLine downloads are unaffected.
+function isAssistantPage(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return [
+      "chatgpt.com", "chat.openai.com", "claude.ai", "gemini.google.com",
+      "aistudio.google.com",
+    ].some((domain) => host === domain || host.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+}
+
+async function downloadSourcePage(item) {
+  if (item.referrer) return item.referrer;
+  if (Number.isInteger(item.tabId) && item.tabId >= 0) {
+    try {
+      const tab = await api.tabs.get(item.tabId);
+      if (tab?.url) return tab.url;
+    } catch { /* some browsers do not expose the originating tab */ }
+  }
+  try {
+    const [active] = await api.tabs.query({ active: true, lastFocusedWindow: true });
+    return active?.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // YouTube (and friends) bot-check signed-in sessions. Media grabs used to
 // omit cookies and rely on the app reading the browser profile later; sending
 // the tab's Cookie up front lets analysis succeed the same way a logged-in
@@ -434,6 +465,9 @@ function shouldIntercept(item) {
   // video, any extension) - true IDM behavior. The only ones we must leave
   // alone are URLs the app can't re-fetch: blob:/data:/filesystem: downloads
   // are generated in the page and exist only inside the browser.
+  // The original URL is authoritative for browser-generated blob/data files;
+  // some browsers also report an HTTP finalUrl for those download items.
+  if (item.url && !/^https?:/i.test(item.url)) return false;
   const url = item.finalUrl || item.url || "";
   return /^https?:/i.test(url);
 }
@@ -508,13 +542,13 @@ api.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-async function handoffDownloadItem(item) {
+async function handoffDownloadItem(item, sourcePage) {
   const url = item.finalUrl || item.url;
   const [active] = await api.tabs.query({ active: true, lastFocusedWindow: true });
   const chosenName = (item.filename || "").split(/[\\/]/).pop() || null;
   return sendToGrabLine(
     url,
-    { url: item.referrer || active?.url || null, title: active?.title || chosenName },
+    { url: sourcePage || active?.url || null, title: active?.title || chosenName },
     { credentials: true, onlyIfRunning: true },
   );
 }
@@ -527,7 +561,12 @@ api.downloads.onCreated.addListener((item) => {
   // closed app made the download vanish from both places. Pausing first can do
   // neither - a pause that lost the race throws, and anything short of the app
   // accepting the URL resumes the browser's own download.
-  if (interceptEnabled === false || !shouldIntercept(item)) return;
+  if (interceptEnabled === false) return;
+  if (!shouldIntercept(item)) {
+    browserDownloadVisible = true;
+    void updateDownloadUi();
+    return;
+  }
   // The same click can spawn several download items (browser retry, parallel
   // Range probes promoted to downloads). Handle each item id once.
   if (handledDownloadIds.has(item.id)) return;
@@ -537,7 +576,8 @@ api.downloads.onCreated.addListener((item) => {
     handledDownloadIds.delete(oldest);
   }
   void (async () => {
-    if (await requiresBrowserSession(item.finalUrl || item.url)) {
+    const sourcePage = await downloadSourcePage(item);
+    if (isAssistantPage(sourcePage) || await requiresBrowserSession(item.finalUrl || item.url)) {
       browserDownloadVisible = true;
       await updateDownloadUi();
       return;
@@ -547,7 +587,7 @@ api.downloads.onCreated.addListener((item) => {
     } catch {
       return; // already finished; leave it to the browser
     }
-    const reply = (await interceptionOn()) ? await handoffDownloadItem(item) : null;
+    const reply = (await interceptionOn()) ? await handoffDownloadItem(item, sourcePage) : null;
     if (reply?.type !== "queued" || !reply.appRunning) {
       try {
         await api.downloads.resume(item.id);
@@ -612,15 +652,15 @@ async function interceptResponse(details) {
   // does both the check and the handoff; forced downloads are rare, so this
   // never touches ordinary browsing.
   if (!(await interceptionOn())) return {};
-  if (await requiresBrowserSession(details.url)) {
-    browserDownloadVisible = true;
-    await updateDownloadUi();
-    return {};
-  }
   const [active] = await api.tabs
     .query({ active: true, lastFocusedWindow: true })
     .catch(() => []);
   const referrer = details.originUrl || details.documentUrl || active?.url || null;
+  if (isAssistantPage(referrer) || await requiresBrowserSession(details.url)) {
+    browserDownloadVisible = true;
+    await updateDownloadUi();
+    return {};
+  }
   const reply = await sendToGrabLine(
     details.url,
     { url: referrer, title: active?.title || null },
