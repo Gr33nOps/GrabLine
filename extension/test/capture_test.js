@@ -54,13 +54,13 @@ Deno.test("protected download is neither paused nor handed off", async () => {
     pause: async () => calls.push("pause"),
     cancel: async () => calls.push("cancel"),
   } };
-  new Function("api", "requiresBrowserSession", "updateDownloadUi", `
+  new Function("api", "requiresBrowserSession", "updateDownloadUi", "downloadSourcePage", "isAssistantPage", `
     const interceptEnabled = true;
     const handledDownloadIds = new Set();
     const shouldIntercept = () => true;
     let browserDownloadVisible = false;
     ${code.slice(start, end)}
-  `)(api, async () => true, async () => calls.push("show-browser-download"));
+  `)(api, async () => true, async () => calls.push("show-browser-download"), async () => null, () => false);
   callback({ id: 1, url: "https://files.example.com/archive.7z" });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assertEquals(calls, ["show-browser-download"]);
@@ -72,7 +72,7 @@ Deno.test("Firefox interception preserves protected responses and captures ordin
   const end = code.indexOf("// Stays synchronous", start);
   for (const protectedSession of [true, false]) {
     const calls = [];
-    const intercept = new Function("api", "requiresBrowserSession", "updateDownloadUi", "sendToGrabLine", `
+    const intercept = new Function("api", "requiresBrowserSession", "updateDownloadUi", "sendToGrabLine", "isAssistantPage", `
       let browserDownloadVisible = false;
       const interceptionOn = async () => true;
       ${code.slice(start, end)}
@@ -82,6 +82,7 @@ Deno.test("Firefox interception preserves protected responses and captures ordin
       async () => protectedSession,
       async () => calls.push("show"),
       async () => { calls.push("handoff"); return { type: "queued", appRunning: true }; },
+      () => false,
     );
     assertEquals(await intercept({ url: "https://files.example.com/archive.7z" }),
       protectedSession ? {} : { cancel: true });
