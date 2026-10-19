@@ -67,46 +67,59 @@ def probe(
         **(extra_headers or {}),
     }
     try:
-        with client.stream("GET", url, headers=headers) as response:
-            status = response.status_code
-            if status == 206:
-                resumable = True
-                total = _parse_content_range(response.headers.get("content-range"))
-                response.read()  # tiny 1-byte body; keeps the connection reusable
-            elif status == 200:
-                resumable = False
-                length = response.headers.get("content-length")
-                total = int(length) if length and length.isdigit() else None
-                # Deliberately do NOT read: a 200 body is the whole file.
-            elif status == 416:
-                # Range not satisfiable happens for zero-byte files; the
-                # Content-Range still tells us the (zero) size.
-                resumable = True
-                match = _CONTENT_RANGE_UNSATISFIED.match(response.headers.get("content-range", ""))
-                total = int(match.group(1)) if match else None
-            elif status in (401, 403):
-                # Reached here despite the browser-like User-Agent and Referer
-                # every client now sends, so this is a real access wall, not the
-                # bot filter those defaults clear. Point the user at the one
-                # thing that fixes it: their own browser session.
-                raise DownloadError(
-                    f"the server refused this download (HTTP {status}). It likely "
-                    "needs you to be signed in - open the page in your browser and "
-                    "use the GrabLine button so your login travels with it"
+        for ranged in (True, False):
+            if not ranged:
+                headers = {key: value for key, value in headers.items() if key.lower() != "range"}
+            with client.stream("GET", url, headers=headers) as response:
+                status = response.status_code
+                if ranged and status in (400, 403, 405, 412, 428, 501):
+                    # Some file hosts reject Range requests even though an ordinary
+                    # GET works. Retry once without Range; do not consume its body.
+                    continue
+                if status == 206:
+                    resumable = True
+                    total = _parse_content_range(response.headers.get("content-range"))
+                    response.read()  # tiny 1-byte body; keeps the connection reusable
+                elif status == 200:
+                    resumable = False
+                    length = response.headers.get("content-length")
+                    total = int(length) if length and length.isdigit() else None
+                    # Deliberately do NOT read: a 200 body is the whole file.
+                elif status == 416:
+                    # Range not satisfiable happens for zero-byte files; the
+                    # Content-Range still tells us the (zero) size.
+                    resumable = True
+                    match = _CONTENT_RANGE_UNSATISFIED.match(
+                        response.headers.get("content-range", "")
+                    )
+                    total = int(match.group(1)) if match else None
+                elif status in (401, 403):
+                    # Reached here despite the browser-like User-Agent and Referer
+                    # every client now sends, so this is a real access wall, not the
+                    # bot filter those defaults clear. Point the user at the one
+                    # thing that fixes it: their own browser session.
+                    raise DownloadError(
+                        f"the server refused this download (HTTP {status}). It likely "
+                        "needs you to be signed in - open the page in your browser and "
+                        "use the GrabLine button so your login travels with it"
+                    )
+                else:
+                    raise DownloadError(f"server responded with HTTP {status}")
+                return ProbeResult(
+                    final_url=str(response.url),
+                    resumable=resumable,
+                    total_size=total,
+                    etag=response.headers.get("etag"),
+                    last_modified=response.headers.get("last-modified"),
+                    filename=_filename_from_disposition(
+                        response.headers.get("content-disposition")
+                    ),
+                    content_type=response.headers.get("content-type"),
                 )
-            else:
-                raise DownloadError(f"server responded with HTTP {status}")
-            return ProbeResult(
-                final_url=str(response.url),
-                resumable=resumable,
-                total_size=total,
-                etag=response.headers.get("etag"),
-                last_modified=response.headers.get("last-modified"),
-                filename=_filename_from_disposition(response.headers.get("content-disposition")),
-                content_type=response.headers.get("content-type"),
-            )
     except httpx.HTTPError as exc:
         raise DownloadError(f"could not reach server: {exc}") from exc
+
+    raise DownloadError("could not determine download metadata")
 
 
 def _parse_content_range(header: str | None) -> int | None:

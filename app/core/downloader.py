@@ -1021,6 +1021,11 @@ class SegmentedDownload:
                 segment.downloaded = position - segment.start
                 self._checkpointer.report(segment.id, segment.downloaded)
                 self._throttle(len(data))
+                # A stolen tail shortened this request. Release the connection
+                # as soon as our bytes are written, without waiting for another
+                # chunk (or EOF) from the original, larger response.
+                if segment.end is not None and position > segment.end:
+                    return
         final_end = segment.end if segment.end is not None else end
         if segment.start + segment.downloaded <= final_end:
             raise _Retry("server closed the connection early")

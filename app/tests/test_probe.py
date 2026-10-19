@@ -101,3 +101,41 @@ def test_probe_unreachable_server_is_friendly(client: httpx.Client):
 def test_probe_prefers_encoded_lms_filename(server, client, header, expected):
     url = server.add("/resource", b"presentation", content_disposition=header)
     assert probe(client, url).filename == expected
+
+
+@pytest.mark.parametrize("status", [400, 403, 405, 412, 428, 501])
+def test_range_rejection_falls_back_without_reading_file(status):
+    calls = []
+
+    class UnreadBody(httpx.SyncByteStream):
+        def __iter__(self):
+            raise AssertionError("probe must not download the full file")
+            yield b""
+
+    def respond(request):
+        calls.append(request)
+        if request.headers.get("range"):
+            return httpx.Response(status)
+        return httpx.Response(200, headers={"Content-Length": "12345"}, stream=UnreadBody())
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        result = probe(client, "https://example.com/file.zip", {"Referer": "https://example.com/"})
+    assert not result.resumable and result.total_size == 12345
+    assert len(calls) == 2
+    assert calls[1].headers["referer"] == "https://example.com/"
+    assert "range" not in calls[1].headers
+
+
+def test_probe_does_not_retry_real_auth_failure_forever():
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(403)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(respond)) as client,
+        pytest.raises(DownloadError, match="HTTP 403"),
+    ):
+        probe(client, "https://example.com/private.zip")
+    assert len(calls) == 2

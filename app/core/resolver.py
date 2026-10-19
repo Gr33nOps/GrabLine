@@ -32,7 +32,9 @@ _MANIFEST_CONTENT_TYPES = (
 _HLS_CONTENT_TYPES = _MANIFEST_CONTENT_TYPES[:3]  # dash+xml goes to FFmpeg unparsed
 _HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
 _HTML_MESSAGE = (
-    "This address is a web page, not a downloadable file. If a video plays "
+    "This address is a web page, not a downloadable file. For files, open it "
+    "in your browser, wait for its download link, and click the website's "
+    "download button with GrabLine browser interception enabled. If a video plays "
     "on it, let it play for a moment, then use the GrabLine button on the "
     "player or the toolbar popup. GrabLine grabs the stream the page loads."
 )
