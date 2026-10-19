@@ -46,7 +46,7 @@ Deno.test("clearance sessions and unreadable cookie stores stay in browser", asy
 Deno.test("protected download is neither paused nor handed off", async () => {
   const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
   const start = code.indexOf("api.downloads.onCreated.addListener");
-  const end = code.indexOf("// ----------------------------------- proactive interception", start);
+  const end = code.indexOf("// Firefox uses downloads.onCreated too.", start);
   let callback;
   const calls = [];
   const api = { downloads: {
@@ -64,28 +64,4 @@ Deno.test("protected download is neither paused nor handed off", async () => {
   callback({ id: 1, url: "https://files.example.com/archive.7z" });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assertEquals(calls, ["show-browser-download"]);
-});
-
-Deno.test("Firefox interception preserves protected responses and captures ordinary files", async () => {
-  const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
-  const start = code.indexOf("async function interceptResponse");
-  const end = code.indexOf("// Stays synchronous", start);
-  for (const protectedSession of [true, false]) {
-    const calls = [];
-    const intercept = new Function("api", "requiresBrowserSession", "updateDownloadUi", "sendToGrabLine", "isAssistantPage", `
-      let browserDownloadVisible = false;
-      const interceptionOn = async () => true;
-      ${code.slice(start, end)}
-      return interceptResponse;
-    `)(
-      { tabs: { query: async () => [] } },
-      async () => protectedSession,
-      async () => calls.push("show"),
-      async () => { calls.push("handoff"); return { type: "queued", appRunning: true }; },
-      () => false,
-    );
-    assertEquals(await intercept({ url: "https://files.example.com/archive.7z" }),
-      protectedSession ? {} : { cancel: true });
-    assertEquals(calls, protectedSession ? ["show"] : ["handoff"]);
-  }
 });

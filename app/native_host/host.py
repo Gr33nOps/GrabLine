@@ -114,6 +114,7 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
             # behind - otherwise the browser finishes the file AND the app
             # downloads it again at next launch.
             return {"type": "notRunning", "appRunning": False}
+        previous = db.latest_job_for_url(url)
         handoff_id = db.add_handoff(
             url,
             page_url=_valid_url(message.get("pageUrl")),
@@ -123,7 +124,13 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
             payload=fallbacks,
             headers=headers,
         )
-        return {"type": "queued", "handoffId": handoff_id, "appRunning": running}
+        return {
+            "type": "queued",
+            "handoffId": handoff_id,
+            "handoffUrl": url,
+            "previousJobId": previous.id if previous else 0,
+            "appRunning": running,
+        }
     if kind == "status":
         # F1.3 progress pill: latest job per URL, straight from the jobs table.
         raw = message.get("urls")
@@ -140,6 +147,7 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
                 jobs.append(
                     {
                         "url": url,
+                        "id": job.id,
                         "status": job.status.value,
                         "downloaded": db.stored_progress(job),
                         "total": job.total_size,

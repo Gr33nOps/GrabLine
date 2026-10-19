@@ -90,6 +90,8 @@ def test_download_creates_handoff(db: Database):
     assert len(handoffs) == 1
     handoff = handoffs[0]
     assert handoff.id == reply["handoffId"]
+    assert reply["handoffUrl"] == handoff.url
+    assert reply["previousJobId"] == 0
     assert handoff.url == "https://example.com/video.mp4"
     assert handoff.page_url == "https://example.com/watch"
     assert handoff.page_title == "A Page"
@@ -214,11 +216,19 @@ def test_status_reports_pending_and_job_progress(db: Database):
     assert reply["type"] == "status"
     assert len(reply["jobs"]) == 2  # the ftp URL is dropped, not echoed
     known, unknown = reply["jobs"]
+    assert known["id"] == job.id
     assert known["status"] == "queued"
     assert known["downloaded"] == 250
     assert known["total"] == 1000
     assert known["name"] == "v.mp4"
     assert unknown == {"url": "https://example.com/unknown", "status": "pending"}
+
+
+def test_handoff_identifies_the_job_that_preceded_it(db: Database):
+    url = "https://example.com/archive.zip"
+    previous = db.create_job(url, "/tmp", "archive.zip")
+    reply = handle_message(db, {"type": "download", "url": url})
+    assert reply["previousJobId"] == previous.id
 
 
 def test_download_stores_sniffed_fallbacks(db: Database):

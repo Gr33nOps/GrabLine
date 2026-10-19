@@ -187,12 +187,10 @@ def test_extension_manifest_pins_match_host_pins():
     assert derived_id in CHROME_EXTENSION_IDS
 
 
-def test_extension_requests_blocking_webrequest():
-    """Proactive interception cancels a download at the network layer, before
-    the browser ever shows it, instead of letting it flash then cancelling via
-    downloads.onCreated. That needs blocking webRequest, which Firefox honours
-    in MV3; without the permission the listener can't register."""
+def test_extension_keeps_browser_download_recoverable():
+    """A blocking webRequest cancel cannot be resumed after a desktop failure."""
     manifest = json.loads(
         (Path(__file__).resolve().parents[2] / "extension" / "manifest.json").read_text()
     )
-    assert "webRequestBlocking" in manifest["permissions"]
+    assert "downloads" in manifest["permissions"]
+    assert "webRequestBlocking" not in manifest["permissions"]

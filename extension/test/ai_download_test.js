@@ -4,13 +4,8 @@ const code = await Deno.readTextFile(new URL("../background.js", import.meta.url
 const helperCode = code.slice(0, code.indexOf("// YouTube (and friends)"));
 const interceptCode = code.slice(
   code.indexOf("api.downloads.onCreated.addListener"),
-  code.indexOf("// ----------------------------------- proactive interception"),
+  code.indexOf("// Firefox uses downloads.onCreated too."),
 );
-const firefoxCode = code.slice(
-  code.indexOf("async function interceptResponse"),
-  code.indexOf("// Stays synchronous"),
-);
-
 Deno.test("assistant source pages are matched by host, not a lookalike URL", () => {
   const matches = new Function("globalThis", helperCode + "\nreturn isAssistantPage;")({ browser: {} });
   for (const url of [
@@ -54,30 +49,6 @@ Deno.test("Chrome leaves generated chat downloads untouched and shows browser Do
     onCreated({ id: 1, url: "https://assets.example.com/generated.pdf", referrer: source });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(calls, ["show-browser-download"]);
-  }
-});
-
-Deno.test("Firefox keeps chat attachments in browser and still captures ordinary files", async () => {
-  const matches = new Function("globalThis", helperCode + "\nreturn isAssistantPage;")({ browser: {} });
-  for (const [referrer, expected] of [
-    ["https://chatgpt.com/c/1", {}],
-    ["https://claude.ai/chat/1", {}],
-    ["https://gemini.google.com/app/1", {}],
-    ["https://example.com/downloads", { cancel: true }],
-  ]) {
-    const calls = [];
-    const intercept = new Function("api", "isAssistantPage", "requiresBrowserSession", "updateDownloadUi", "sendToGrabLine", `
-      let browserDownloadVisible = false;
-      const interceptionOn = async () => true;
-      ${firefoxCode}
-      return interceptResponse;
-    `)(
-      { tabs: { query: async () => [] } }, matches, async () => false,
-      async () => calls.push("show-browser-download"),
-      async () => { calls.push("handoff"); return { type: "queued", appRunning: true }; },
-    );
-    assertEquals(await intercept({ url: "https://assets.example.com/generated.pdf", originUrl: referrer }), expected);
-    assertEquals(calls, referrer.includes("example.com") ? ["handoff"] : ["show-browser-download"]);
   }
 });
 
