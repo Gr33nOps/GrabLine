@@ -1006,3 +1006,66 @@ def test_endpoint_and_redirect_names_download_correctly(server, db, dest):
     job = db.create_job(url, str(dest), "get")
     assert SegmentedDownload(db, job).run() is JobStatus.COMPLETED
     assert (dest / "real.custom").read_bytes() == data
+
+
+def test_stolen_segment_releases_response_without_waiting_for_next_chunk(db, dest):
+    import httpx
+
+    job = db.create_job("https://example.com/file.bin", str(dest), "file.bin")
+    job.resumable = True
+    task = SegmentedDownload(db, job)
+    segment = db.replace_segments(job.id, [(0, 7)])[0]
+    closed = []
+
+    class StolenTail(httpx.SyncByteStream):
+        def __iter__(self):
+            # Another worker owns bytes 4-7 while this response is in flight.
+            segment.end = 3
+            yield b"abcd"
+            raise AssertionError("finished worker waited for the stolen tail")
+
+        def close(self):
+            closed.append(True)
+
+    task._client.close()
+    task._client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                206, headers={"Content-Range": "bytes 0-7/8"}, stream=StolenTail()
+            )
+        )
+    )
+    try:
+        with open(job.part_path, "w+b") as handle:
+            task._stream_range(handle, segment)
+        assert job.part_path.read_bytes() == b"abcd"
+        assert segment.downloaded == 4 and segment.is_complete
+        assert closed == [True]
+    finally:
+        task._client.close()
+
+
+@pytest.mark.parametrize("rejected_status", [403, 428])
+def test_range_rejecting_file_host_downloads_whole_file(db, dest, rejected_status):
+    import httpx
+
+    data = payload(100_000, 83)
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if "range" in request.headers:
+            return httpx.Response(rejected_status)
+        return httpx.Response(
+            200,
+            stream=httpx.ByteStream(data),
+            headers={"Content-Type": "application/zip", "Content-Length": str(len(data))},
+        )
+
+    job = db.create_job("https://example.com/game.zip", str(dest), "game.zip")
+    task = SegmentedDownload(db, job, connections=8)
+    task._client.close()
+    task._client = httpx.Client(transport=httpx.MockTransport(respond))
+    assert task.run() is JobStatus.COMPLETED
+    assert (dest / "game.zip").read_bytes() == data
+    assert ["range" in request.headers for request in requests] == [True, False, False]
