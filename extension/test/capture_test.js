@@ -23,3 +23,68 @@ Deno.test("captured YouTube chunks use the page and its cookies", async () => {
   await send("https://example.com/file.zip", { url: page });
   assertEquals(sent[1].url, "https://example.com/file.zip");
 });
+
+Deno.test("clearance sessions and unreadable cookie stores stay in browser", async () => {
+  const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
+  const prefix = code.slice(0, code.indexOf("// YouTube (and friends)"));
+  for (const [cookies, expected] of [
+    [[{ name: "cf_clearance", value: "test" }], true],
+    [[{ name: "session", value: "test" }], false],
+    [[], false],
+    [null, true],
+  ]) {
+    const check = new Function("globalThis", prefix + "\nreturn requiresBrowserSession;")({
+      browser: { cookies: { getAll: async () => {
+        if (cookies === null) throw new Error("permission unavailable");
+        return cookies;
+      } } },
+    });
+    assertEquals(await check("https://files.example.com/archive.7z"), expected);
+  }
+});
+
+Deno.test("protected download is neither paused nor handed off", async () => {
+  const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
+  const start = code.indexOf("api.downloads.onCreated.addListener");
+  const end = code.indexOf("// ----------------------------------- proactive interception", start);
+  let callback;
+  const calls = [];
+  const api = { downloads: {
+    onCreated: { addListener: (cb) => { callback = cb; } },
+    pause: async () => calls.push("pause"),
+    cancel: async () => calls.push("cancel"),
+  } };
+  new Function("api", "requiresBrowserSession", "updateDownloadUi", `
+    const interceptEnabled = true;
+    const handledDownloadIds = new Set();
+    const shouldIntercept = () => true;
+    let browserDownloadVisible = false;
+    ${code.slice(start, end)}
+  `)(api, async () => true, async () => calls.push("show-browser-download"));
+  callback({ id: 1, url: "https://files.example.com/archive.7z" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assertEquals(calls, ["show-browser-download"]);
+});
+
+Deno.test("Firefox interception preserves protected responses and captures ordinary files", async () => {
+  const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
+  const start = code.indexOf("async function interceptResponse");
+  const end = code.indexOf("// Stays synchronous", start);
+  for (const protectedSession of [true, false]) {
+    const calls = [];
+    const intercept = new Function("api", "requiresBrowserSession", "updateDownloadUi", "sendToGrabLine", `
+      let browserDownloadVisible = false;
+      const interceptionOn = async () => true;
+      ${code.slice(start, end)}
+      return interceptResponse;
+    `)(
+      { tabs: { query: async () => [] } },
+      async () => protectedSession,
+      async () => calls.push("show"),
+      async () => { calls.push("handoff"); return { type: "queued", appRunning: true }; },
+    );
+    assertEquals(await intercept({ url: "https://files.example.com/archive.7z" }),
+      protectedSession ? {} : { cancel: true });
+    assertEquals(calls, protectedSession ? ["show"] : ["handoff"]);
+  }
+});

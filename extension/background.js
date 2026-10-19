@@ -26,6 +26,18 @@ async function cookieHeaderFor(url) {
   }
 }
 
+// Clearance cookies indicate a browser verification session. Replaying its
+// URL/cookie in a separate HTTP client may fail; keep the original transfer.
+async function requiresBrowserSession(url) {
+  try {
+    const cookies = await api.cookies.getAll({ url });
+    return cookies.some((cookie) => cookie.name === "cf_clearance");
+  } catch {
+    // If session metadata cannot be read, do not destroy a working download.
+    return true;
+  }
+}
+
 // YouTube (and friends) bot-check signed-in sessions. Media grabs used to
 // omit cookies and rely on the app reading the browser profile later; sending
 // the tab's Cookie up front lets analysis succeed the same way a logged-in
@@ -434,6 +446,7 @@ function shouldIntercept(item) {
 // downloads-API takeover). Re-shown whenever interception is off or the app
 // isn't running, so native browser downloads stay visible.
 let lastAppRunning = false;
+let browserDownloadVisible = false;
 
 // null until storage answers. An MV3 service worker is restarted constantly,
 // and each restart re-runs this file, so assuming "on" during that gap made a
@@ -452,7 +465,7 @@ async function interceptionOn() {
 }
 
 async function updateDownloadUi() {
-  const visible = !(interceptEnabled === true && lastAppRunning);
+  const visible = browserDownloadVisible || !(interceptEnabled === true && lastAppRunning);
   try {
     if (api.downloads.setUiOptions) await api.downloads.setUiOptions({ enabled: visible });
     else if (api.downloads.setShelfEnabled) api.downloads.setShelfEnabled(visible);
@@ -524,6 +537,11 @@ api.downloads.onCreated.addListener((item) => {
     handledDownloadIds.delete(oldest);
   }
   void (async () => {
+    if (await requiresBrowserSession(item.finalUrl || item.url)) {
+      browserDownloadVisible = true;
+      await updateDownloadUi();
+      return;
+    }
     try {
       await api.downloads.pause(item.id);
     } catch {
@@ -594,6 +612,11 @@ async function interceptResponse(details) {
   // does both the check and the handoff; forced downloads are rare, so this
   // never touches ordinary browsing.
   if (!(await interceptionOn())) return {};
+  if (await requiresBrowserSession(details.url)) {
+    browserDownloadVisible = true;
+    await updateDownloadUi();
+    return {};
+  }
   const [active] = await api.tabs
     .query({ active: true, lastFocusedWindow: true })
     .catch(() => []);

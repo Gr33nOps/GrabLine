@@ -99,9 +99,10 @@ def probe(
                     # bot filter those defaults clear. Point the user at the one
                     # thing that fixes it: their own browser session.
                     raise DownloadError(
-                        f"the server refused this download (HTTP {status}). It likely "
-                        "needs you to be signed in - open the page in your browser and "
-                        "use the GrabLine button so your login travels with it"
+                        f"the server refused this download (HTTP {status}). It may require "
+                        "sign-in, browser security verification, or a fresh download link. "
+                        "If it works only in your browser, turn off GrabLine interception "
+                        "in the extension and retry the website download button."
                     )
                 else:
                     raise DownloadError(f"server responded with HTTP {status}")

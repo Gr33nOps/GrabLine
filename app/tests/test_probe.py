@@ -30,7 +30,8 @@ def test_probe_403_gives_actionable_message(server: MediaServer, client: httpx.C
     with pytest.raises(DownloadError) as exc:
         probe(client, url)
     message = str(exc.value).lower()
-    assert "403" in message and "signed in" in message
+    assert "403" in message and "browser security verification" in message
+    assert "turn off grabline interception" in message
 
 
 def test_probe_server_without_ranges(server: MediaServer, client: httpx.Client):
