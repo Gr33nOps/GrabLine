@@ -1,9 +1,8 @@
 // GrabLine Connect - background (MV3 service worker / Firefox event page).
 //
-// Deliberately thin and stateless: detect, decorate, deliver. Every download
-// happens in the desktop app; this file only relays URLs over Native
-// Messaging and keeps a small per-tab list of sniffed media in session
-// storage (the service worker can die at any time - nothing lives here).
+// Detect, decorate, and deliver URLs over Native Messaging. Automatic browser
+// downloads remain paused and recoverable until the desktop job completes.
+// Session storage restores pending transfers after a service-worker restart.
 
 const api = globalThis.browser ?? globalThis.chrome;
 const HOST_NAME = "dev.grabline.host";
@@ -88,7 +87,7 @@ function needsMediaCookies(url) {
   }
 }
 
-// Takeover paths (webRequest cancel / downloads.onCreated) can fire dozens of
+// The downloads.onCreated path can fire dozens of
 // times for one user gesture when a page retries a cancelled response. A long
 // cooldown collapses that storm into one GrabLine job. Manual grabs
 // (right-click, hover button, popup) skip this on purpose - those are deliberate.
@@ -457,8 +456,8 @@ api.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 // --------------------------------------------------- interception (F1.5)
 // On by default (toggle lives in the popup), but only fires when the app is
-// running - see the listener below. chrome.downloads based: the download is
-// cancelled the moment it starts and the app re-requests it.
+// running - see the listener below. The browser download is paused while the
+// app works, so a failed desktop transfer can continue in the browser.
 
 function shouldIntercept(item) {
   // Take over every real download regardless of type (exe, torrent, image,
@@ -528,7 +527,10 @@ if (api.alarms) {
   try {
     void api.alarms.create("grabline-ping", { periodInMinutes: 1 });
     api.alarms.onAlarm.addListener((alarm) => {
-      if (alarm.name === "grabline-ping") warmAppStatus();
+      if (alarm.name === "grabline-ping") {
+        warmAppStatus();
+        void pollTakeovers();
+      }
     });
   } catch {
     /* alarms permission optional - cold starts still ping above */
@@ -551,6 +553,79 @@ async function handoffDownloadItem(item, sourcePage) {
     { url: sourcePage || active?.url || null, title: active?.title || chosenName },
     { credentials: true, onlyIfRunning: true },
   );
+}
+
+const pendingTakeovers = new Map(); // browser id -> { url, previousJobId, startedAt }
+let takeoverTimer = null;
+let takeoverPolling = false;
+
+api.storage.session.get("pendingTakeovers").then(({ pendingTakeovers: saved }) => {
+  for (const [id, info] of saved ?? []) {
+    if (!pendingTakeovers.has(id)) pendingTakeovers.set(id, info);
+  }
+  scheduleTakeoverPoll();
+}).catch(() => {});
+
+function saveTakeovers() {
+  void api.storage.session.set({ pendingTakeovers: [...pendingTakeovers.entries()] });
+}
+
+function scheduleTakeoverPoll() {
+  if (takeoverTimer == null && pendingTakeovers.size) {
+    takeoverTimer = setTimeout(() => { void pollTakeovers(); }, 2000);
+  }
+}
+
+async function finishTakeover(id, completed) {
+  try {
+    if (completed) {
+      await api.downloads.cancel(id);
+      await api.downloads.erase({ id });
+    } else {
+      browserDownloadVisible = true;
+      await updateDownloadUi();
+      await api.downloads.resume(id);
+    }
+  } catch {
+    // A transient resume error must not strand a paused browser download.
+    // If it is still paused, keep monitoring and retry on the next poll.
+    if (!completed) {
+      try {
+        const [item] = await api.downloads.search({ id });
+        if (item?.paused) return;
+      } catch { /* the browser may have removed the item */ }
+    }
+  }
+  pendingTakeovers.delete(id);
+  saveTakeovers();
+}
+
+async function pollTakeovers() {
+  if (takeoverTimer != null) clearTimeout(takeoverTimer);
+  takeoverTimer = null;
+  if (takeoverPolling || !pendingTakeovers.size) return;
+  takeoverPolling = true;
+  try {
+    const urls = [...new Set([...pendingTakeovers.values()].map((info) => info.url))];
+    const reply = await api.runtime.sendNativeMessage(HOST_NAME, { type: "status", urls });
+    const jobs = new Map((reply?.jobs ?? []).map((job) => [job.url, job]));
+    for (const [id, info] of pendingTakeovers) {
+      const job = jobs.get(info.url);
+      const newJob = job && job.id > info.previousJobId;
+      if (!reply?.appRunning || (!newJob && Date.now() - info.startedAt > 90_000) ||
+          (newJob && ["failed", "cancelled"].includes(job.status))) {
+        await finishTakeover(id, false);
+      } else if (newJob && job.status === "completed") {
+        await finishTakeover(id, true);
+      }
+    }
+  } catch {
+    // If the native host goes away, let the browser finish the original URL.
+    for (const id of pendingTakeovers.keys()) await finishTakeover(id, false);
+  } finally {
+    takeoverPolling = false;
+    scheduleTakeoverPoll();
+  }
 }
 
 api.downloads.onCreated.addListener((item) => {
@@ -590,111 +665,36 @@ api.downloads.onCreated.addListener((item) => {
     const reply = (await interceptionOn()) ? await handoffDownloadItem(item, sourcePage) : null;
     if (reply?.type !== "queued" || !reply.appRunning) {
       try {
+        browserDownloadVisible = true;
+        await updateDownloadUi();
         await api.downloads.resume(item.id);
       } catch {
         /* the browser may have finished it during the pause - fine */
       }
       return;
     }
-    try {
-      await api.downloads.cancel(item.id);
-      await api.downloads.erase({ id: item.id });
-    } catch {
-      /* the browser finished it anyway; GrabLine has it too - harmless */
+    if (reply.deduped || !Number.isInteger(reply.previousJobId)) {
+      // A duplicate belongs to the first monitored item. Older native hosts
+      // do not report a job baseline, so retain their established behaviour.
+      try {
+        await api.downloads.cancel(item.id);
+        await api.downloads.erase({ id: item.id });
+      } catch { /* the browser may already have completed it */ }
+      return;
     }
+    pendingTakeovers.set(item.id, {
+      url: reply.handoffUrl || item.finalUrl || item.url,
+      previousJobId: reply.previousJobId,
+      startedAt: Date.now(),
+    });
+    saveTakeovers();
+    scheduleTakeoverPoll();
   })();
 });
 
-// ----------------------------------- proactive interception (Firefox, F1.5b)
-// downloads.onCreated (above) fires only after the browser has already
-// committed to the download, so the item flashes in the download panel before
-// we cancel it - the reported "it shows in the browser for a millisecond" bug.
-// Blocking webRequest cancels the response at the network layer, before any
-// download item exists, so nothing ever appears in the browser. Firefox
-// honours blocking webRequest in MV3; Chrome does not (policy-only), so there
-// this listener simply isn't installed and the onCreated path (with the shelf
-// hidden via setUiOptions) stands.
-
-// Content-types with no inline viewer: the browser always downloads these, so
-// taking them over matches its own decision. An allowlist by design - anything
-// the browser renders itself (html, pdf, images, video, audio) must NEVER be
-// here, or ordinary browsing breaks: a video/* match on this list once
-// cancelled the fetches that in-page players stream through. Media the user
-// actually wants saved still arrives here as Content-Disposition: attachment,
-// or as a downloads.onCreated item handled above.
-const DOWNLOAD_CONTENT_TYPES =
-  /^application\/(?:octet-stream|zip|gzip|x-gzip|x-tar|x-rar-compressed|vnd\.rar|x-7z-compressed|x-bzip2|x-xz|x-msdownload|x-msdos-program|vnd\.microsoft\.portable-executable|x-apple-diskimage|x-iso9660-image|x-bittorrent|x-debian-package|vnd\.android\.package-archive)/i;
-
-function isForcedDownload(details) {
-  // Only frame navigations reach this function (see the listener filter). A
-  // top-level / iframe navigation that the server marks as a download is the
-  // one case where cancelling before downloads.onCreated prevents the Firefox
-  // download panel flash. XHR/fetch/object traffic must never be cancelled
-  // here: sites stream attachment-disposition responses for APIs, fonts, and
-  // range probes, and cancelling them made every click queue dozens of
-  // GrabLine jobs as the page retried.
-  const disposition = (headerValue(details.responseHeaders, "content-disposition") ?? "")
-    .trim()
-    .toLowerCase();
-  if (disposition.startsWith("attachment")) return true;
-  const type = (headerValue(details.responseHeaders, "content-type") ?? "")
-    .split(";")[0]
-    .trim()
-    .toLowerCase();
-  return DOWNLOAD_CONTENT_TYPES.test(type);
-}
-
-async function interceptResponse(details) {
-  // Cancel only once the app has actually accepted the URL. The response is
-  // held until this resolves, so there is no race to lose - and if the app is
-  // closed (or the toggle turns out to be off) we simply let the browser have
-  // its download instead of cancelling it into nowhere. One native message
-  // does both the check and the handoff; forced downloads are rare, so this
-  // never touches ordinary browsing.
-  if (!(await interceptionOn())) return {};
-  const [active] = await api.tabs
-    .query({ active: true, lastFocusedWindow: true })
-    .catch(() => []);
-  const referrer = details.originUrl || details.documentUrl || active?.url || null;
-  if (isAssistantPage(referrer) || await requiresBrowserSession(details.url)) {
-    browserDownloadVisible = true;
-    await updateDownloadUi();
-    return {};
-  }
-  const reply = await sendToGrabLine(
-    details.url,
-    { url: referrer, title: active?.title || null },
-    { credentials: true, onlyIfRunning: true },
-  );
-  if (reply?.type !== "queued" || !reply.appRunning) return {};
-  return { cancel: true };
-}
-
-// Stays synchronous for the common case (returns {} at once), so navigation is
-// never delayed; only an actual download awaits the handoff.
-function onDownloadHeaders(details) {
-  if (interceptEnabled === false || details.tabId < 0) return {};
-  if (!isForcedDownload(details)) return {};
-  return interceptResponse(details);
-}
-
-try {
-  api.webRequest.onHeadersReceived.addListener(
-    onDownloadHeaders,
-    {
-      urls: ["<all_urls>"],
-      // Frames ONLY. XHR/fetch/object used to be listed so "forced" downloads
-      // never flashed in Firefox's panel - but cancelling those responses is
-      // what flooded GrabLine: pages retry attachment XHRs, and each retry
-      // became another job. Real button-triggered downloads still become
-      // chrome.downloads items and are taken over by onCreated above.
-      types: ["main_frame", "sub_frame"],
-    },
-    ["blocking", "responseHeaders"],
-  );
-} catch {
-  // Blocking webRequest unavailable (Chrome MV3) - the onCreated path stands.
-}
+// Firefox uses downloads.onCreated too. Blocking a response before the browser
+// creates a download item cannot be undone if GrabLine later fails. Keeping the
+// browser item paused gives every site the same recoverable handoff.
 
 // ------------------------------------------------------------- messages
 
