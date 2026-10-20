@@ -861,7 +861,14 @@ class SettingsDialog(chrome.Dialog):
         )
         proxy_form.addRow(t("Proxy:"), self.proxy_edit)
         net_layout.addLayout(proxy_form)
-        net_layout.addWidget(_note(self._vpn_status_text()))
+        self._vpn_note = _note("")
+        net_layout.addWidget(self._vpn_note)
+        # Interface drivers can take seconds to answer. Never probe them in
+        # the constructor: that blocks navigation to every Settings section.
+        vpn_worker = threads.CallableThread(self._vpn_status_text)
+        vpn_worker.done.connect(self._vpn_note.setText)
+        threads.retain(vpn_worker)
+        vpn_worker.start()
 
         throttle_group = QGroupBox(t("Automatic throttle (polite mode)"))
         throttle_layout = QFormLayout(throttle_group)

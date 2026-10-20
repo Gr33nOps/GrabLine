@@ -69,6 +69,7 @@ def test_active_vpn_interfaces(monkeypatch: pytest.MonkeyPatch):
 
     import psutil
 
+    monkeypatch.setattr(Path, "is_dir", lambda self: False)
     monkeypatch.setattr(psutil, "net_if_stats", lambda: {"wg0": _Stat(), "eth0": _Stat()})
     assert net.active_vpn_interfaces() == ["wg0"]
 
@@ -339,3 +340,20 @@ def test_build_client_header_user_agent_wins_over_default():
     # A User-Agent already in headers (the browser handoff's real UA) is kept.
     with net.build_client(headers={"User-Agent": "Handoff/2.0"}) as client:
         assert client.headers["user-agent"] == "Handoff/2.0"
+
+
+def test_linux_vpn_detection_does_not_query_link_speed(tmp_path, monkeypatch):
+    import psutil
+
+    for name, flags in (("wg0", "0x1003"), ("tun0", "0x1002"), ("eth0", "0x1003")):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "flags").write_text(flags)
+    (tmp_path / "tun-gone").mkdir()
+    monkeypatch.setattr(net, "Path", lambda _: tmp_path)
+
+    def slow_driver():
+        pytest.fail("VPN detection must not query driver link speed on Linux")
+
+    monkeypatch.setattr(psutil, "net_if_stats", slow_driver)
+    assert net.active_vpn_interfaces() == ["wg0"]

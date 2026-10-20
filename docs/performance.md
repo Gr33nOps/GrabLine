@@ -122,3 +122,41 @@ second) and then holds - no bouncing.
 
 The same rounding waste was in the connection budget: 8 connections across 3
 downloads used to be 2+2+2, idling a quarter of the pool. It is 3+3+2 now.
+
+## Navigation and recurring UI stalls (2026-10-20)
+
+An offscreen Qt profile on Linux, using a temporary empty database, measured
+Settings construction plus `show()` and one `processEvents()` call at **4.20 s
+before and 0.55 s after** this pass (about 87% less time). These are single
+profiled runs on the same machine, not a cross-platform latency guarantee.
+
+The dominant cost was VPN detection: `psutil.net_if_stats()` spent **3.13 s**
+querying interface link speed/duplex, even though the UI only needed to know
+whether a tunnel was up. Merely moving this call to a Python thread did not
+fix the Linux stall: the driver call held the interpreter lock. Linux now
+reads the flags of VPN-like interfaces from sysfs, avoiding link-speed queries.
+Other platforms retain the existing psutil detection.
+
+Settings probes VPN status in a retained background worker and wraps/layouts
+sections only when selected. All setting fields still exist for Save, including
+sections that have not been visited. Dashboard aggregates and VPN detection
+run in one background worker at a time; returning to the page reuses recent
+readouts, and the refresh interval begins when the worker completes. Tables
+update existing items instead of clearing/recreating every row.
+
+The main window continues tracking completion and speed history on other
+pages, but defers Downloads table updates until navigation returns to it.
+Changing the dashboard sampling interval now takes effect without restarting.
+
+Regression checks:
+
+```sh
+QT_QPA_PLATFORM=offscreen python -m pytest \
+  app/tests/test_ui_performance.py app/tests/test_ui_smoke.py \
+  app/tests/test_dashboard.py app/tests/test_network.py -m 'not network'
+```
+
+The responsiveness tests deliberately block VPN detection while checking that
+Qt timers still fire, navigation still works, and repeated refreshes do not
+launch additional probes. They also cover Linux driver-query avoidance,
+section layout on demand, table-item reuse, and Downloads catching up on return.

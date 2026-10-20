@@ -723,6 +723,8 @@ class MainWindow(QMainWindow):
             btn.set_active(nav_key == key)
         self._pages.setCurrentIndex(index)
         self._current_page = key
+        if key == "downloads":
+            self.refresh()
 
     def _on_settings_applied(self) -> None:
         """Live-apply after the Settings page saves: theme (may have changed),
@@ -731,6 +733,7 @@ class MainWindow(QMainWindow):
         if isinstance(app, QApplication):
             theme.apply_theme(app, self.settings.theme, accent=self.settings.accent_color or None)
         self.manager.reload_settings()
+        self._dashboard_view._timer.setInterval(self.settings.dashboard_refresh_ms)
         self._apply_table_prefs()
         self._retint_all()
         # A rebind in Settings -> Shortcuts takes effect now, no restart.
@@ -962,6 +965,7 @@ class MainWindow(QMainWindow):
         bounded operations (a subprocess convert, a network resolve), so the
         wait terminates."""
         self._shutting_down = True
+        self._dashboard_view.shutdown()
         for timer in (self._timer, self._handoff_timer, self._rss_timer, self._watch_timer):
             timer.stop()
         # Ask any unbounded op (an in-flight installer download) to stop first, so
@@ -3254,6 +3258,11 @@ class MainWindow(QMainWindow):
         self._measure_speeds(views)
         self._update_speed_line(views)
         self._last_views = {view.id: view for view in views}
+        self._update_status_info(views)
+        # Keep completion notifications and speed history alive on other
+        # pages, but defer download-table work until it is actually visible.
+        if self._current_page != "downloads":
+            return
         ids = [view.id for view in views]
         if ids != self._row_job_ids:
             self._rebuild_rows(views)
@@ -3268,7 +3277,6 @@ class MainWindow(QMainWindow):
             self._update_row(row, view)
             self._rendered[view.id] = view
         self._update_filter_counts(views)
-        self._update_status_info(views)
         self._apply_filter()
         self._empty_label.setGeometry(self.table.viewport().rect())
         self._empty_label.setVisible(not views)
