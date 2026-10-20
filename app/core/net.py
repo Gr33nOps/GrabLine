@@ -17,6 +17,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -409,6 +410,24 @@ _VPN_HINTS = ("tun", "tap", "wg", "ppp", "utun", "ipsec", "nordlynx", "proton", 
 
 def active_vpn_interfaces() -> list[str]:
     """The names of the up VPN-like interfaces (for the dashboard tooltip)."""
+    interfaces = Path("/sys/class/net")
+    if interfaces.is_dir():
+        # Linux: psutil.net_if_stats also asks every driver for link speed /
+        # duplex. Some drivers block for seconds while holding the GIL, even
+        # from a worker thread. We only need IFF_UP, available directly in sysfs.
+        try:
+            active = []
+            for interface in interfaces.iterdir():
+                if not any(h in interface.name.lower() for h in _VPN_HINTS):
+                    continue
+                try:
+                    if int((interface / "flags").read_text().strip(), 16) & 1:
+                        active.append(interface.name)
+                except (OSError, ValueError):
+                    continue  # interface disappeared during enumeration
+            return active
+        except OSError:
+            return []
     try:
         import psutil
 

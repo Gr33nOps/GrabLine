@@ -87,34 +87,16 @@ class SettingsView(QWidget):
         tabs = self._dialog.tabs
         self._titles: list[str] = []
         pages = [(tabs.tabText(i).replace("&&", "&"), tabs.widget(i)) for i in range(tabs.count())]
+        self._pending_pages: dict[int, QWidget] = {}
         for title, page in pages:
             if page is None:
                 continue
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.Shape.NoFrame)
-            holder = QWidget()
-            # Let free-form pages (Video, About, …) shrink with the viewport so
-            # wrapping labels reflow instead of forcing a horizontal clip.
-            holder.setMinimumWidth(0)
-            hl = QVBoxLayout(holder)
-            hl.setContentsMargins(24, 8, 24, 20)
-            # A page that manages its own scrolling (Shortcuts) fills the height
-            # so its list uses the whole pane instead of a short box over a gap;
-            # a form page keeps its natural height with a stretch below it.
-            if getattr(page, "fills_height", False):
-                hl.addWidget(page, 1)
-            else:
-                hl.addWidget(page)
-                hl.addStretch(1)
-            # The QTabWidget explicitly hides its pages; lifting one out keeps it
-            # hidden, so re-show it or the content pane renders blank.
-            page.show()
-            scroll.setWidget(holder)
-            self._stack.addWidget(scroll)
+            # Only lay out the selected section. QScrollArea.setWidget polishes
+            # and measures its entire widget tree even while hidden.
+            index = self._stack.addWidget(QWidget())
+            self._pending_pages[index] = page
             self._titles.append(title)
-            item = QListWidgetItem(title)
-            self._list.addItem(item)
+            self._list.addItem(QListWidgetItem(title))
         clay.addWidget(self._stack, 1)
 
         footer = QFrame()
@@ -132,8 +114,33 @@ class SettingsView(QWidget):
         row.addWidget(content, 1)
         self._list.setCurrentRow(0)
 
+    def _ensure_section(self, index: int) -> None:
+        page = self._pending_pages.pop(index, None)
+        if page is None:
+            return
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        holder = QWidget()
+        holder.setMinimumWidth(0)
+        layout = QVBoxLayout(holder)
+        layout.setContentsMargins(24, 8, 24, 20)
+        if getattr(page, "fills_height", False):
+            layout.addWidget(page, 1)
+        else:
+            layout.addWidget(page)
+            layout.addStretch(1)
+        page.show()
+        scroll.setWidget(holder)
+        placeholder = self._stack.widget(index)
+        assert placeholder is not None
+        self._stack.removeWidget(placeholder)
+        self._stack.insertWidget(index, scroll)
+        placeholder.deleteLater()
+
     def _on_nav(self, index: int) -> None:
         if 0 <= index < self._stack.count():
+            self._ensure_section(index)
             self._stack.setCurrentIndex(index)
             self._title.setText(self._titles[index])
             self._saved.setText("")

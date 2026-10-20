@@ -6,8 +6,9 @@ per-category tables. Its timer only runs while the page is on screen.
 from __future__ import annotations
 
 import time
+from typing import cast
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -25,8 +26,9 @@ from app.core.i18n import t
 from app.core.manager import DownloadManager
 from app.core.models import JobStatus
 from app.core.stats import SpeedTracker, SystemSampler
-from app.ui import components, motion, theme
+from app.ui import components, motion, theme, threads
 from app.ui.format import human_bytes
+from app.ui.work_threads import FileOpThread
 
 #: How often the heavier, slow-changing dashboard readouts (volume rollups, VPN
 #: status, per-host/category tables) refresh - seldom enough not to stutter the
@@ -45,6 +47,9 @@ class DashboardView(QWidget):
         self._speed = SpeedTracker()
         self._system = SystemSampler()
         self._heavy_at = 0.0  # monotonic time of the last heavy refresh
+        self._heavy_pending = False
+        self._summary_worker: FileOpThread | None = None
+        self._stopped = False
         p = theme.current()
 
         scroll = QScrollArea()
@@ -162,10 +167,13 @@ class DashboardView(QWidget):
 
     def showEvent(self, event: object) -> None:
         super().showEvent(event)  # type: ignore[arg-type]
-        self._heavy_at = 0.0  # force the volume tiles + tables to refresh now
-        self._tick()  # an immediate refresh so the tiles aren't a beat stale
+        # Keep recent readouts when switching back; a slow interface driver
+        # must never hold up painting the page.
+        QTimer.singleShot(0, self._tick)
 
     def _tick(self) -> None:
+        if self._stopped:
+            return
         # Hidden to the tray: nobody can see the graphs and showEvent refills
         # them on the way back, so sampling here would only burn a full jobs
         # query (and a psutil read) twice a second for no one.
@@ -216,18 +224,47 @@ class DashboardView(QWidget):
         # table rebuilds): refresh a few times a second, not every frame, so the
         # graph animation stays smooth. Still effectively live for these values.
         now = time.monotonic()
-        if now - self._heavy_at < _HEAVY_INTERVAL:
+        if self._heavy_pending or now - self._heavy_at < _HEAVY_INTERVAL:
             return
-        self._heavy_at = now
+        self._heavy_pending = True
+        manager = self.manager
 
-        totals = self.manager.stat_totals()
+        def collect() -> object:
+            return (
+                manager.stat_totals(),
+                net.active_vpn_interfaces(),
+                manager.stats_by_host(),
+                manager.stats_by_category(),
+            )
+
+        worker = FileOpThread(collect)
+        self._summary_worker = worker
+        worker.done.connect(self._apply_summary)
+        threads.retain(worker)
+        worker.start()
+
+    @Slot(object, object)
+    def _apply_summary(self, result: object, error: object) -> None:
+        self._heavy_pending = False
+        self._summary_worker = None
+        # Measure the interval from completion, so a slow probe cannot cause
+        # an endless queue of work or immediately launch another probe.
+        self._heavy_at = time.monotonic()
+        if error is not None or self._stopped:
+            return
+        totals, vpn, hosts, categories = cast(
+            tuple[
+                dict[str, int], list[str], list[tuple[str, int, int]], list[tuple[str, int, int]]
+            ],
+            result,
+        )
+
         self._tiles["today"].set_value(human_bytes(totals["today"]))
         self._tiles["week"].set_value(human_bytes(totals["week"]))
         self._tiles["month"].set_value(human_bytes(totals["month"]))
         self._tiles["lifetime"].set_value(human_bytes(totals["lifetime"]))
         self._tiles["files"].set_value(f"{totals['files']:,}", t("total"))
 
-        vpn = net.active_vpn_interfaces()
         if vpn:
             self._vpn.setText(
                 t(
@@ -238,19 +275,31 @@ class DashboardView(QWidget):
         else:
             self._vpn.setText(t("VPN not detected"))
 
-        self._fill(self.server_tree, self.manager.stats_by_host())
-        self._fill(self.category_tree, self.manager.stats_by_category())
+        self._fill(self.server_tree, hosts)
+        self._fill(self.category_tree, categories)
+
+    def shutdown(self) -> None:
+        self._stopped = True
+        self._timer.stop()
+        if self._summary_worker is not None:
+            self._summary_worker.wait()
 
     @staticmethod
     def _fill(tree: QTreeWidget, rows: list[tuple[str, int, int]]) -> None:
         p = theme.current()
-        tree.clear()
         right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         from PySide6.QtGui import QColor
 
-        for name, byte_count, files in rows:
-            item = QTreeWidgetItem([name, human_bytes(byte_count), str(files)])
+        while tree.topLevelItemCount() > len(rows):
+            tree.takeTopLevelItem(tree.topLevelItemCount() - 1)
+        for index, (name, byte_count, files) in enumerate(rows):
+            item = tree.topLevelItem(index)
+            if item is None:
+                item = QTreeWidgetItem()
+                tree.addTopLevelItem(item)
+            for column, value in enumerate((name, human_bytes(byte_count), str(files))):
+                if item.text(column) != value:
+                    item.setText(column, value)
             item.setForeground(1, QColor(p.accent))
             item.setTextAlignment(1, right)
             item.setTextAlignment(2, right)
-            tree.addTopLevelItem(item)
