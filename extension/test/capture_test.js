@@ -1,5 +1,20 @@
 import { assertEquals } from "./harness.js";
 
+Deno.test("sniffer ignores YouTube playback chunks but keeps other media", async () => {
+  const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
+  const start = code.indexOf("const MEDIA_CONTENT_TYPES =");
+  const end = code.indexOf("async function recordMedia", start);
+  const classify = new Function(`${code.slice(start, end)}\nreturn classify;`)();
+  const details = (url) => ({
+    url,
+    responseHeaders: [{ name: "Content-Type", value: "video/mp4" }],
+  });
+  assertEquals(classify(details("https://rr1---sn.googlevideo.com/videoplayback?range=0-999")), null);
+  assertEquals(classify(details("https://googlevideo.com/videoplayback?range=0-999")), null);
+  assertEquals(classify(details("https://notgooglevideo.com/movie.mp4")), { kind: "video", size: null });
+  assertEquals(classify(details("https://cdn.example.com/movie.mp4")), { kind: "video", size: null });
+});
+
 Deno.test("captured YouTube chunks use the page and its cookies", async () => {
   const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
   const prefix = code.slice(0, code.indexOf("async function pingGrabLine"));

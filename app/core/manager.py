@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from app.core import categories, connectivity, naming, net, power
+from app.core import categories, cloudlinks, connectivity, naming, net, power
 from app.core.credentials import CredentialStore
 from app.core.downloader import RATE_LIMIT_MARKER, SegmentedDownload
 from app.core.errors import DownloadError
@@ -901,6 +901,8 @@ class DownloadManager:
         """Duplicate detection at add time: the first job (any status) already
         pointing at this exact URL, or None. Indexed lookup, so a long download
         history doesn't turn every add into a full-table scan."""
+        if cloudlinks.is_google_drive_file(url):
+            url = cloudlinks.direct_download_url(url) or url
         return self.db.first_job_for_url(url)
 
     def move_job_file(self, job_id: int, dest_dir: str | Path) -> Path:
@@ -1033,6 +1035,8 @@ class DownloadManager:
         ``queue_id`` is the named queue the user picked (``AUTO_QUEUE`` = apply
         the category/default rules); ``insecure`` accepts an invalid HTTPS
         certificate for this download only, leaving the global setting alone."""
+        if cloudlinks.is_google_drive_file(url):
+            url = cloudlinks.direct_download_url(url) or url
         name = naming.sanitize_filename(filename) if filename else naming.filename_from_url(url)
         name = naming.apply_rename_rules(name, self.settings.rename_rules)
         options: dict[str, Any] = {"http_headers": dict(headers)} if headers else {}

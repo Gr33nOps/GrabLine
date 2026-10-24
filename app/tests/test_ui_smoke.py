@@ -37,6 +37,29 @@ def test_human_bytes():
     assert human_bytes(5 * 1024 * 1024) == "5.0 MB"
 
 
+def test_browser_handoff_treats_drive_file_as_direct(db: Database, monkeypatch):
+    from app.tests.test_cloud import DRIVE_CONFIRMED, DRIVE_DOWNLOAD
+
+    _qapp()
+    settings = Settings(db)
+    settings.confirm_downloads = False
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    window = MainWindow(manager, settings)
+    try:
+
+        def unexpected_smart_match(_url: str) -> bool:
+            pytest.fail("Drive download was routed through yt-dlp")
+
+        monkeypatch.setattr(window.resolver.smart, "matches", unexpected_smart_match)
+        window._browser_add(DRIVE_DOWNLOAD, None, (), None)
+        jobs = db.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].url == DRIVE_CONFIRMED
+    finally:
+        window.shutdown()
+        manager.shutdown()
+
+
 def test_duration_text():
     assert duration_text(None) == ""
     assert duration_text(75) == "1:15"

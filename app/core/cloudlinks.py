@@ -12,21 +12,42 @@ from __future__ import annotations
 
 import base64
 import re
-from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qs, urlencode, urlsplit, urlunsplit
 
 _DRIVE_ID = re.compile(r"/file/d/([-\w]+)")
 _DRIVE_HOSTS = {"drive.google.com", "docs.google.com"}
+_DRIVE_CONTENT_HOST = "drive.usercontent.google.com"
 
 
 def _google_drive(url: str, parts: SplitResult) -> str | None:
-    if parts.netloc not in _DRIVE_HOSTS:
+    host = (parts.hostname or "").lower()
+    if host == _DRIVE_CONTENT_HOST:
+        if parts.path != "/download" or not parse_qs(parts.query).get("id"):
+            return None
+        if parse_qs(parts.query).get("confirm"):
+            return url  # already a confirmed download URL
+        query = f"{parts.query}&confirm=t" if parts.query else "confirm=t"
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+    if host not in _DRIVE_HOSTS:
         return None
     match = _DRIVE_ID.search(parts.path)
     file_id = match.group(1) if match else parse_qs(parts.query).get("id", [None])[0]
     if not file_id:
         return None
-    # confirm=t skips the "can't scan for viruses" interstitial on big files.
-    return f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+    # The old drive.google.com/uc endpoint can still return a virus-scan HTML
+    # page even with confirm=t. The content host serves the file directly.
+    direct_query = {"id": file_id, "export": "download", "confirm": "t"}
+    source_query = parse_qs(parts.query)
+    for key in ("resourcekey", "authuser"):
+        if source_query.get(key):
+            direct_query[key] = source_query[key][-1]
+    return f"https://{_DRIVE_CONTENT_HOST}/download?{urlencode(direct_query)}"
+
+
+def is_google_drive_file(url: str) -> bool:
+    """Whether this is a Drive file URL that should use the direct engine."""
+    parts = urlsplit(url)
+    return parts.scheme in ("http", "https") and _google_drive(url, parts) is not None
 
 
 def _dropbox(url: str, parts: SplitResult) -> str | None:

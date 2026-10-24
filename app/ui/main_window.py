@@ -65,6 +65,7 @@ from app import __version__
 from app.core import (
     archive,
     categories,
+    cloudlinks,
     convert,
     crawler,
     dupes,
@@ -1505,7 +1506,8 @@ class MainWindow(QMainWindow):
         same rich flow a pasted URL gets. A stream or a plain file takes the fast
         Download Info dialog with no analysis, unless that dialog is turned off.
         """
-        if not self.resolver.smart.warm:
+        drive_file = cloudlinks.is_google_drive_file(url)
+        if not drive_file and not self.resolver.smart.warm:
             # matches() below needs the extractor list, and building it costs
             # the GUI thread a couple of seconds of yt-dlp import - which is
             # exactly when a browser handoff tends to arrive, giving the "I
@@ -1513,9 +1515,11 @@ class MainWindow(QMainWindow):
             # and pick this up again after.
             self._when_smart_ready(lambda: self._browser_add(url, page_title, fallbacks, headers))
             return
-        is_video = self.resolver.smart.matches(url)
+        if drive_file:
+            url = cloudlinks.direct_download_url(url) or url
+        is_video = not drive_file and self.resolver.smart.matches(url)
         is_stream = urlsplit(url).path.lower().endswith((".m3u8", ".mpd"))
-        if not is_video and not is_stream and fallbacks:
+        if not drive_file and not is_video and not is_stream and fallbacks:
             # A blob-backed player: the sniffed stream the page loaded is the
             # real media, so grab that instead of the page's HTML.
             url = next(
@@ -1680,7 +1684,8 @@ class MainWindow(QMainWindow):
         # at download time, the file is named from the real title). This is
         # what makes a hover-button YouTube add start as fast as any other
         # site: one extraction instead of two.
-        if quality and not self.resolver.smart.warm:
+        drive_file = cloudlinks.is_google_drive_file(url)
+        if quality and not drive_file and not self.resolver.smart.warm:
             # Answering "is this a smart-engine URL?" needs the extractor list;
             # building it on the GUI thread is a multi-second freeze. Warm it
             # behind the window and come straight back here.
@@ -1696,7 +1701,7 @@ class MainWindow(QMainWindow):
                 )
             )
             return
-        if quality and self.resolver.smart.matches(url):
+        if quality and not drive_file and self.resolver.smart.matches(url):
             option = option_for_label(quality)
             if option is not None:
                 # The page title is often just the site name ("YouTube") -
@@ -1720,6 +1725,7 @@ class MainWindow(QMainWindow):
                 return
         instant = (
             quality is None
+            and not drive_file
             and self.resolver.smart.warm
             and _looks_like_one_video(url)
             and self.resolver.smart.matches(url)

@@ -219,6 +219,40 @@ def test_unknown_content_length(server: MediaServer, db: Database, dest: Path):
     assert fresh.total_size == len(data)
 
 
+@pytest.mark.parametrize(
+    "probe_body,download_body", [(b"short", b"longer body"), (b"long probe", b"new")]
+)
+def test_non_range_download_uses_the_transfer_size_not_a_stale_probe(
+    db: Database,
+    dest: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    probe_body: bytes,
+    download_body: bytes,
+):
+    import httpx
+
+    requests = 0
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        body = probe_body if requests == 1 else download_body
+        return httpx.Response(
+            200, headers={"Content-Length": str(len(body))}, stream=httpx.ByteStream(body)
+        )
+
+    monkeypatch.setattr(
+        "app.core.downloader.net.build_client",
+        lambda **_kwargs: httpx.Client(transport=httpx.MockTransport(respond)),
+    )
+    job = db.create_job("https://example.test/changing", str(dest), "changing")
+    assert SegmentedDownload(db, job, connections=4).run() is JobStatus.COMPLETED
+    assert (dest / "changing").read_bytes() == download_body
+    fresh = db.get_job(job.id)
+    assert fresh is not None and fresh.total_size == len(download_body)
+    assert requests == 2
+
+
 def test_download_follows_redirects(server: MediaServer, db: Database, dest: Path):
     data = payload(2 * MB, 17)
     server.add("/actual.bin", data)
