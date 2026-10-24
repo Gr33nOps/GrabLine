@@ -155,6 +155,7 @@ class Resolver:
         # A cloud *share* link (Drive/Dropbox/OneDrive/Nextcloud) becomes a
         # plain direct URL and downloads through the normal segmented engine.
         direct = cloudlinks.direct_download_url(url)
+        drive_file = cloudlinks.is_google_drive_file(url)
         if direct is not None:
             url = direct
             scheme = urlsplit(url).scheme.lower()
@@ -166,7 +167,7 @@ class Resolver:
         if refusal is not None:
             return Resolution(url=url, kind=None, message=refusal)
 
-        if self.smart.matches(url):
+        if not drive_file and self.smart.matches(url):
             try:
                 inspected = self.smart.inspect(
                     url,

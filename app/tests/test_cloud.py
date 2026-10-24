@@ -8,15 +8,23 @@ import base64
 import threading
 from pathlib import Path
 
+import httpx
 import pytest
 
-from app.core import cloudlinks
+from app.core import cloudlinks, net
 from app.core.credentials import CloudAccount, CredentialStore
+from app.core.manager import DownloadManager
 from app.core.models import JobKind, JobStatus
 from app.core.resolver import Resolver
 from app.db.database import Database
 from app.engines import cloud
 from app.tests.test_resolver import FakeSmart
+
+DRIVE_ID = "1osMDMFzUW6N3-SOQfPFCWchrSLjdL7u3"
+DRIVE_DOWNLOAD = (
+    f"https://drive.usercontent.google.com/download?id={DRIVE_ID}&export=download&authuser=0"
+)
+DRIVE_CONFIRMED = DRIVE_DOWNLOAD + "&confirm=t"
 
 # --------------------------------------------------------- share-link forms
 
@@ -28,7 +36,70 @@ def test_google_drive_transforms():
         "https://drive.google.com/uc?id=ABC123xyz",
     ):
         direct = cloudlinks.direct_download_url(url)
-        assert direct == "https://drive.google.com/uc?export=download&confirm=t&id=ABC123xyz"
+        assert direct == (
+            "https://drive.usercontent.google.com/download?id=ABC123xyz&export=download&confirm=t"
+        )
+
+
+def test_google_drive_content_url_is_confirmed_without_losing_query_parameters():
+    assert cloudlinks.direct_download_url(DRIVE_DOWNLOAD) == DRIVE_CONFIRMED
+    assert cloudlinks.direct_download_url(DRIVE_CONFIRMED) == DRIVE_CONFIRMED
+    assert cloudlinks.direct_download_url(DRIVE_DOWNLOAD + "#section") == (
+        DRIVE_CONFIRMED + "#section"
+    )
+    assert cloudlinks.is_google_drive_file(DRIVE_DOWNLOAD)
+    assert cloudlinks.direct_download_url(
+        "https://drive.google.com/file/d/ABC123xyz/view?resourcekey=0-key"
+    ) == (
+        "https://drive.usercontent.google.com/download?"
+        "id=ABC123xyz&export=download&confirm=t&resourcekey=0-key"
+    )
+    assert not cloudlinks.is_google_drive_file(
+        "https://drive.usercontent.google.com.evil.example/download?id=ABC123xyz"
+    )
+    assert not cloudlinks.is_google_drive_file("https://drive.usercontent.google.com/open?id=x")
+
+
+def test_google_drive_download_uses_direct_probe_not_yt_dlp(monkeypatch: pytest.MonkeyPatch):
+    requested: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        assert request.url.params["confirm"] == "t"
+        return httpx.Response(
+            206,
+            headers={
+                "Content-Range": "bytes 0-0/926572254",
+                "Content-Disposition": 'attachment; filename="drive-file.zip"',
+                "Content-Type": "application/octet-stream",
+            },
+            content=b"x",
+        )
+
+    monkeypatch.setattr(
+        net,
+        "build_client",
+        lambda **_kwargs: httpx.Client(transport=httpx.MockTransport(respond)),
+    )
+    resolver = Resolver(FakeSmart(match=True, error="metadata HTTP 400"))
+    result = resolver.resolve(DRIVE_DOWNLOAD)
+    assert result.kind is JobKind.DIRECT
+    assert result.url == DRIVE_CONFIRMED
+    assert result.probe is not None
+    assert result.probe.filename == "drive-file.zip"
+    assert result.probe.total_size == 926572254
+    assert requested == [DRIVE_CONFIRMED]
+
+
+def test_direct_queue_normalizes_drive_links(db: Database):
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        job = manager.add_url(DRIVE_DOWNLOAD)
+        assert job.url == DRIVE_CONFIRMED
+        assert job.kind is JobKind.DIRECT
+        assert manager.find_existing(DRIVE_DOWNLOAD) == job
+    finally:
+        manager.shutdown()
 
 
 def test_dropbox_forces_direct_download():

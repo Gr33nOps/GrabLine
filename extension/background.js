@@ -389,6 +389,15 @@ function headerValue(headers, name) {
 function classify(details) {
   const contentType = (headerValue(details.responseHeaders, "content-type") ?? "").split(";")[0];
   const url = details.url;
+  // YouTube playback is fetched as many googlevideo.com responses. Each is a
+  // transient chunk, not a useful media URL to show in the sniffer; recording
+  // them also triggers tab lookups and extension-storage writes during playback.
+  if (url.includes("googlevideo.com")) {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      if (host === "googlevideo.com" || host.endsWith(".googlevideo.com")) return null;
+    } catch { /* Let the ordinary classification handle an invalid URL. */ }
+  }
   if (SEGMENT_PATTERN.test(url) || SEGMENT_PATTERN.test(contentType)) return null;
   const isManifest = /mpegurl|dash\+xml/i.test(contentType) || /\.(m3u8|mpd)(\?|$)/i.test(url);
   if (isManifest) return { kind: "stream" };

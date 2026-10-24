@@ -1049,6 +1049,8 @@ class SegmentedDownload:
                 self._reject_status(response, segment)
             self._reject_encoded(response, segment)
             self._check_response_content(response.headers.get("content-type"))
+            length = response.headers.get("content-length")
+            expected = int(length) if length and length.isdigit() else None
             handle.seek(segment.start)
             for chunk in response.iter_raw():
                 if self._stop_event.is_set():
@@ -1059,13 +1061,17 @@ class SegmentedDownload:
                 segment.downloaded += len(chunk)
                 self._checkpointer.report(segment.id, segment.downloaded)
                 self._throttle(len(chunk))
-        if segment.end is None:
-            # Stream ended cleanly: now we finally know the size.
-            segment.end = segment.downloaded - 1
-            self.db.set_segment_end(segment.id, segment.end)
-            handle.truncate(segment.downloaded)
-        elif segment.downloaded < segment.end - segment.start + 1:
+        if expected is not None and segment.downloaded != expected:
             raise _Retry("server closed the connection early")
+        # A non-range response is a fresh transfer. Dynamic endpoints can
+        # legitimately return a different length from the earlier GET probe;
+        # its completed body, not the probe's estimate, is authoritative.
+        segment.end = segment.downloaded - 1
+        self.db.set_segment_end(segment.id, segment.end)
+        handle.truncate(segment.downloaded)
+        if self.job.total_size != segment.downloaded:
+            self.job.total_size = segment.downloaded
+            self.db.update_job_total(self.job.id, segment.downloaded)
 
     @staticmethod
     def _write(handle: IO[bytes], data: bytes) -> None:
