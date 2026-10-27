@@ -15,12 +15,12 @@ import time
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 
+from app.tests.qt_app import ensure_app
 from app.ui import threads
 
 
 def _qapp() -> QApplication:
-    instance = QApplication.instance()
-    return instance if isinstance(instance, QApplication) else QApplication([])
+    return ensure_app()
 
 
 class _Sleeper(QThread):

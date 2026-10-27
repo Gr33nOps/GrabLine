@@ -167,13 +167,10 @@ def test_a_queue_deleted_between_choosing_and_confirming_falls_back(db: Database
 def test_the_add_download_dialog_returns_the_selected_queue(db: Database):
     """The UI half of the contract: what the dialog hands back is a real queue
     id the manager can use, and Default comes back as None."""
-    from PySide6.QtWidgets import QApplication
-
+    from app.tests.qt_app import ensure_app
     from app.ui.add_download_dialog import AddDownloadDialog, queue_choices
 
-    instance = QApplication.instance()
-    if not isinstance(instance, QApplication):
-        instance = QApplication([])
+    ensure_app()
 
     manager = DownloadManager(db, max_concurrent=1)
     try:
@@ -513,13 +510,11 @@ def test_auto_queue_is_the_default_for_every_add(db: Database, dest: Path):
 def _window(db: Database, tmp_path: Path):
     """A real MainWindow with an idle scheduler, so an add can be inspected in
     the database without a download ever starting."""
-    from PySide6.QtWidgets import QApplication
-
     from app.core.settings import Settings
+    from app.tests.qt_app import ensure_app
     from app.ui.main_window import MainWindow
 
-    if not isinstance(QApplication.instance(), QApplication):
-        QApplication([])
+    ensure_app()
     settings = Settings(db)
     settings.download_dir = tmp_path
     manager = DownloadManager(db, settings=settings, max_concurrent=0)
@@ -923,12 +918,10 @@ def test_moving_a_queue_at_the_edge_does_nothing(db: Database):
 
 
 def test_the_queue_page_shows_a_card_per_queue_plus_the_default_one(db: Database, dest: Path):
-    from PySide6.QtWidgets import QApplication
-
+    from app.tests.qt_app import ensure_app
     from app.ui.queue_view import QueueView
 
-    if not isinstance(QApplication.instance(), QApplication):
-        QApplication([])
+    ensure_app()
     manager = DownloadManager(db, max_concurrent=0)
     try:
         first = manager.create_queue("Sequential Test")
@@ -958,10 +951,10 @@ def test_a_long_job_name_never_widens_the_queue_page(db: Database, dest: Path):
     from PySide6.QtWidgets import QApplication
 
     from app.core.manager import QueueStats
+    from app.tests.qt_app import ensure_app
     from app.ui.queue_view import QueueView, _active_text, _live_text
 
-    if not isinstance(QApplication.instance(), QApplication):
-        QApplication([])
+    ensure_app()
     manager = DownloadManager(db, max_concurrent=0)
     try:
         queue = manager.create_queue("movies")
@@ -1010,13 +1003,11 @@ def test_a_long_job_name_never_widens_the_queue_page(db: Database, dest: Path):
 
 def test_the_torrent_dialog_offers_and_returns_a_queue(db: Database, tmp_path: Path):
     """The reported gap: no way to choose a queue before a torrent starts."""
-    from PySide6.QtWidgets import QApplication
-
+    from app.tests.qt_app import ensure_app
     from app.ui.add_download_dialog import queue_choices
     from app.ui.torrent_dialog import AddTorrentDialog
 
-    if not isinstance(QApplication.instance(), QApplication):
-        QApplication([])
+    ensure_app()
     manager = DownloadManager(db, max_concurrent=0)
     try:
         queue = manager.create_queue("Torrents")

@@ -20,6 +20,7 @@ from app.core.manager import DownloadManager
 from app.core.settings import Settings
 from app.db.database import Database
 from app.engines.smart import MediaInfo, QualityOption
+from app.tests.qt_app import ensure_app
 from app.ui.clipboard import is_probable_url
 from app.ui.format import duration_text, human_bytes
 from app.ui.main_window import MainWindow
@@ -27,8 +28,7 @@ from app.ui.quality_panel import QualityPanel, parse_timestamp
 
 
 def _qapp() -> QApplication:
-    instance = QApplication.instance()
-    return instance if isinstance(instance, QApplication) else QApplication([])
+    return ensure_app()
 
 
 def test_human_bytes():

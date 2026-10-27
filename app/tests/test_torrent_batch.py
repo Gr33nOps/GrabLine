@@ -454,10 +454,9 @@ def test_watch_seen_list_is_capped_in_settings(db: Database):
 def _qapp() -> Any:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication
+    from app.tests.qt_app import ensure_app
 
-    instance = QApplication.instance()
-    return instance if isinstance(instance, QApplication) else QApplication([])
+    return ensure_app()
 
 
 def _row(dialog: Any, index: int) -> Any:

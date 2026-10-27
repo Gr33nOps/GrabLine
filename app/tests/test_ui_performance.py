@@ -12,11 +12,11 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QCoreApplication, QTimer
-from PySide6.QtWidgets import QApplication
 
 from app.core import net
 from app.core.manager import DownloadManager
 from app.core.settings import Settings
+from app.tests.qt_app import ensure_app
 from app.ui import threads
 from app.ui.dashboard_view import DashboardView
 from app.ui.settings_view import SettingsView
@@ -31,7 +31,7 @@ def pump(app: QCoreApplication, predicate: Callable[[], bool]) -> None:
 
 
 def test_settings_opens_while_vpn_probe_is_blocked(db, monkeypatch):
-    app = QApplication.instance() or QApplication([])
+    app = ensure_app()
     entered, release = threading.Event(), threading.Event()
     caller_threads = []
 
@@ -64,7 +64,7 @@ def test_settings_opens_while_vpn_probe_is_blocked(db, monkeypatch):
 
 
 def test_dashboard_probe_is_single_flight_and_does_not_block_navigation(db, monkeypatch):
-    app = QApplication.instance() or QApplication([])
+    app = ensure_app()
     entered, release = threading.Event(), threading.Event()
     calls = []
 
@@ -102,7 +102,7 @@ def test_dashboard_probe_is_single_flight_and_does_not_block_navigation(db, monk
 
 
 def test_dashboard_tables_preserve_rows_and_selection(db):
-    app = QApplication.instance() or QApplication([])
+    app = ensure_app()
     manager = DownloadManager(db, settings=Settings(db), max_concurrent=0)
     view = DashboardView(manager)
     try:
@@ -126,7 +126,7 @@ def test_dashboard_tables_preserve_rows_and_selection(db):
 
 
 def test_download_rows_catch_up_after_visiting_another_page(db, tmp_path):
-    app = QApplication.instance() or QApplication([])
+    app = ensure_app()
     from app.ui.main_window import MainWindow
 
     settings = Settings(db)
@@ -153,7 +153,7 @@ def test_download_rows_catch_up_after_visiting_another_page(db, tmp_path):
 
 
 def test_dashboard_recovers_after_summary_failure(db, monkeypatch):
-    app = QApplication.instance() or QApplication([])
+    app = ensure_app()
     manager = DownloadManager(db, settings=Settings(db), max_concurrent=0)
     view = DashboardView(manager)
     calls = []
