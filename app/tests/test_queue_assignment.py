@@ -778,6 +778,34 @@ def test_queue_stats_count_every_state_and_include_the_default_queue(db: Databas
         manager.shutdown()
 
 
+def test_force_removed_running_job_disappears_from_list_and_queue_stats(db: Database, dest: Path):
+    """A worker may take time to stop after the user removes its row."""
+    manager = DownloadManager(db, max_concurrent=0)
+
+    class PendingWorker:
+        bytes_downloaded = 0
+
+        def cancel(self) -> None:
+            pass
+
+    try:
+        job = db.create_job("http://x.test/old.bin", str(dest), "old.bin")
+        db.set_job_status(job.id, JobStatus.DOWNLOADING)
+        with manager._cond:
+            manager._active[job.id] = PendingWorker()  # type: ignore[assignment]
+        assert [view.id for view in manager.snapshot()] == [job.id]
+        assert manager.queue_stats()[None].downloading == 1
+
+        manager.remove(job.id, force=True)
+        assert manager.snapshot() == []
+        assert manager.queue_stats()[None].total == 0
+    finally:
+        with manager._cond:
+            manager._active.clear()
+            manager._pending_removal.clear()
+        manager.shutdown()
+
+
 def test_queue_stats_progress_covers_only_unfinished_work(db: Database, dest: Path):
     manager = DownloadManager(db, max_concurrent=0)
     try:

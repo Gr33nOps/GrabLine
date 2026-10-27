@@ -41,8 +41,7 @@ function harness(reply, status, { resumeFailsOnce = false } = {}) {
     const requiresBrowserSession = async () => false;
     const interceptionOn = async () => true;
     const handoffDownloadItem = async () => reply;
-    let browserDownloadVisible = false;
-    const updateDownloadUi = async () => {};
+    const showBrowserDownload = async () => {};
     ${takeoverCode}
     return { pollTakeovers, pendingTakeovers };
   `)(api, reply, () => 1, () => {});

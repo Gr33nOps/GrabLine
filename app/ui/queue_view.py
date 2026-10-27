@@ -261,7 +261,7 @@ class QueueView(QWidget):
         """A read-only card for downloads with no named queue. It has no
         settings of its own - it runs under the global 'Downloads at once' -
         so it offers no edit or delete, only the same live view."""
-        card, body = self._card_shell(str(index), t("Default"))
+        card, body = self._card_shell(str(index), t("Downloads outside named queues"))
         traits = components.ElidingLabel(
             t(
                 "Every download not put in a queue  ·  global limit: {count} at once",
