@@ -21,13 +21,13 @@ from PySide6.QtWidgets import QApplication, QWidget
 from app.core.manager import DownloadManager
 from app.core.settings import Settings
 from app.db.database import Database
+from app.tests.qt_app import ensure_app
 from app.ui.main_window import MainWindow
 from app.ui.shortcuts import DEFAULTS, ShortcutManager, by_category, conflicts, normalize
 
 
 def _qapp() -> QApplication:
-    instance = QApplication.instance()
-    return instance if isinstance(instance, QApplication) else QApplication([])
+    return ensure_app()
 
 
 def test_ids_are_unique():
