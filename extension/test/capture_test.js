@@ -69,11 +69,10 @@ Deno.test("protected download is neither paused nor handed off", async () => {
     pause: async () => calls.push("pause"),
     cancel: async () => calls.push("cancel"),
   } };
-  new Function("api", "requiresBrowserSession", "updateDownloadUi", "downloadSourcePage", "isAssistantPage", `
+  new Function("api", "requiresBrowserSession", "showBrowserDownload", "downloadSourcePage", "isAssistantPage", `
     const interceptEnabled = true;
     const handledDownloadIds = new Set();
     const shouldIntercept = () => true;
-    let browserDownloadVisible = false;
     ${code.slice(start, end)}
   `)(api, async () => true, async () => calls.push("show-browser-download"), async () => null, () => false);
   callback({ id: 1, url: "https://files.example.com/archive.7z" });

@@ -1366,6 +1366,7 @@ class DownloadManager:
     def snapshot(self) -> list[JobView]:
         with self._cond:
             active = dict(self._active)
+            pending_removal = frozenset(self._pending_removal)
         # What comes out of here is a pure function of the stored rows and the
         # live byte counters, so when neither has moved the previous answer is
         # still exactly right. Worth caching: the UI polls this twice a second
@@ -1373,7 +1374,7 @@ class DownloadManager:
         # and re-parses each one's JSON options - the main reason a long
         # download history made the whole app feel heavier.
         live = tuple(sorted((job_id, task.bytes_downloaded) for job_id, task in active.items()))
-        token = (self.db.revision, live)
+        token = (self.db.revision, live, pending_removal)
         cached = self._snapshot_cache
         if cached is not None and cached[0] == token:
             return list(cached[1])
@@ -1382,6 +1383,8 @@ class DownloadManager:
         segment_progress = self.db.all_segment_progress()
         views: list[JobView] = []
         for job in self.db.list_jobs():
+            if job.id in pending_removal:
+                continue
             task = active.get(job.id)
             if task is not None:
                 downloaded = task.bytes_downloaded

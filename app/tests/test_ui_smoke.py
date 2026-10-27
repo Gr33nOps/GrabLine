@@ -118,8 +118,8 @@ def test_main_window_lists_jobs(db: Database, tmp_path: Path):
         assert name_item is not None and name_item.text() == "x.bin"
         # Progress is a SmoothProgressBar and status a StatusPill (widget cells).
         assert isinstance(window._progress_bars[job.id], SmoothProgressBar)
-        # The pill text carries a leading status dot ("●  Queued").
-        assert window._pills[job.id].text().endswith("Queued")
+        # The pill describes scheduler state, not named-queue membership.
+        assert window._pills[job.id].text().endswith("Waiting to start")
     finally:
         manager.shutdown()
 

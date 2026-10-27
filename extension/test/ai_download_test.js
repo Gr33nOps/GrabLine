@@ -36,11 +36,10 @@ Deno.test("Chrome leaves generated chat downloads untouched and shows browser Do
       pause: async () => calls.push("pause"),
       cancel: async () => calls.push("cancel"),
     } };
-    const fn = new Function("api", "downloadSourcePage", "isAssistantPage", "requiresBrowserSession", "updateDownloadUi", `
+    const fn = new Function("api", "downloadSourcePage", "isAssistantPage", "requiresBrowserSession", "showBrowserDownload", `
       const interceptEnabled = true;
       const handledDownloadIds = new Set();
       const shouldIntercept = () => true;
-      let browserDownloadVisible = false;
       ${interceptCode}
     `);
     const matches = new Function("globalThis", helperCode + "\nreturn isAssistantPage;")({ browser: {} });

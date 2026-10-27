@@ -28,7 +28,7 @@ _GRAPH_HISTORY = 120
 
 _STATUS_LABEL = {
     "downloading": N_("Downloading"),
-    "queued": N_("Queued"),
+    "queued": N_("Waiting to start"),
     "paused": N_("Paused"),
     "completed": N_("Completed"),
     "failed": N_("Failed"),

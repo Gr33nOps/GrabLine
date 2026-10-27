@@ -488,7 +488,32 @@ function shouldIntercept(item) {
 // downloads-API takeover). Re-shown whenever interception is off or the app
 // isn't running, so native browser downloads stay visible.
 let lastAppRunning = false;
-let browserDownloadVisible = false;
+// A browser-owned download should be visible only while it is still active.
+// The old boolean was never cleared: one bypassed download left the UI on for
+// every later GrabLine takeover until the service worker restarted.
+const browserVisibleIds = new Set();
+
+async function showBrowserDownload(id) {
+  browserVisibleIds.add(id);
+  await updateDownloadUi();
+  // The download may have finished while an earlier cookie/tab lookup was
+  // pending, before onChanged could observe this id in the set.
+  try {
+    const [item] = await api.downloads.search({ id });
+    if (!item || item.state !== "in_progress") clearBrowserDownload(id);
+  } catch { /* onChanged/onErased can still clear it later */ }
+}
+
+function clearBrowserDownload(id) {
+  if (browserVisibleIds.delete(id)) void updateDownloadUi();
+}
+
+api.downloads.onChanged.addListener((delta) => {
+  if (["complete", "interrupted"].includes(delta.state?.current)) {
+    clearBrowserDownload(delta.id);
+  }
+});
+api.downloads.onErased.addListener(clearBrowserDownload);
 
 // null until storage answers. An MV3 service worker is restarted constantly,
 // and each restart re-runs this file, so assuming "on" during that gap made a
@@ -506,14 +531,20 @@ async function interceptionOn() {
   return interceptEnabled === null ? interceptLoaded : interceptEnabled;
 }
 
-async function updateDownloadUi() {
-  const visible = browserDownloadVisible || !(interceptEnabled === true && lastAppRunning);
-  try {
-    if (api.downloads.setUiOptions) await api.downloads.setUiOptions({ enabled: visible });
-    else if (api.downloads.setShelfEnabled) api.downloads.setShelfEnabled(visible);
-  } catch {
-    /* permission not granted in this build - keep the browser UI as is */
-  }
+let downloadUiUpdate = Promise.resolve();
+function updateDownloadUi() {
+  // Keep asynchronous UI calls in order. The latest state wins even when a
+  // native download finishes while an earlier show request is still pending.
+  downloadUiUpdate = downloadUiUpdate.then(async () => {
+    const visible = browserVisibleIds.size > 0 || !(interceptEnabled === true && lastAppRunning);
+    try {
+      if (api.downloads.setUiOptions) await api.downloads.setUiOptions({ enabled: visible });
+      else if (api.downloads.setShelfEnabled) api.downloads.setShelfEnabled(visible);
+    } catch {
+      /* permission not granted in this build - keep the browser UI as is */
+    }
+  });
+  return downloadUiUpdate;
 }
 
 function noteAppRunning(running) {
@@ -591,8 +622,7 @@ async function finishTakeover(id, completed) {
       await api.downloads.cancel(id);
       await api.downloads.erase({ id });
     } else {
-      browserDownloadVisible = true;
-      await updateDownloadUi();
+      await showBrowserDownload(id);
       await api.downloads.resume(id);
     }
   } catch {
@@ -645,10 +675,12 @@ api.downloads.onCreated.addListener((item) => {
   // closed app made the download vanish from both places. Pausing first can do
   // neither - a pause that lost the race throws, and anything short of the app
   // accepting the URL resumes the browser's own download.
-  if (interceptEnabled === false) return;
+  if (interceptEnabled === false) {
+    void showBrowserDownload(item.id);
+    return;
+  }
   if (!shouldIntercept(item)) {
-    browserDownloadVisible = true;
-    void updateDownloadUi();
+    void showBrowserDownload(item.id);
     return;
   }
   // The same click can spawn several download items (browser retry, parallel
@@ -662,8 +694,7 @@ api.downloads.onCreated.addListener((item) => {
   void (async () => {
     const sourcePage = await downloadSourcePage(item);
     if (isAssistantPage(sourcePage) || await requiresBrowserSession(item.finalUrl || item.url)) {
-      browserDownloadVisible = true;
-      await updateDownloadUi();
+      await showBrowserDownload(item.id);
       return;
     }
     try {
@@ -674,8 +705,7 @@ api.downloads.onCreated.addListener((item) => {
     const reply = (await interceptionOn()) ? await handoffDownloadItem(item, sourcePage) : null;
     if (reply?.type !== "queued" || !reply.appRunning) {
       try {
-        browserDownloadVisible = true;
-        await updateDownloadUi();
+        await showBrowserDownload(item.id);
         await api.downloads.resume(item.id);
       } catch {
         /* the browser may have finished it during the pause - fine */
