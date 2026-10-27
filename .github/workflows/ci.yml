@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # Apt mirrors and a hung test must not burn a runner for half an hour+.
     timeout-minutes: 25
     steps:
