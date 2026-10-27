@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Qt runtime libraries (offscreen) and FFmpeg
+      - name: Install Qt runtime libraries (offscreen)
         timeout-minutes: 5
         run: |
           set -euo pipefail
@@ -37,13 +37,21 @@ jobs:
             -o Acquire:http:Timeout=30 \
             -o Acquire:https:Timeout=30 \
             install -y --no-install-recommends \
-            libegl1 libgl1 libxkbcommon0 ffmpeg
+            libegl1 libgl1 libxkbcommon0
 
       - name: Install project
         timeout-minutes: 5
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+
+      - name: Provide FFmpeg for media tests
+        timeout-minutes: 5
+        run: |
+          python -m pip install "imageio-ffmpeg==0.6.0"
+          mkdir -p "$RUNNER_TEMP/ci-bin"
+          ln -s "$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" "$RUNNER_TEMP/ci-bin/ffmpeg"
+          echo "$RUNNER_TEMP/ci-bin" >> "$GITHUB_PATH"
 
       - name: "Shell-surface gate (S1: no shell=True anywhere)"
         run: |
