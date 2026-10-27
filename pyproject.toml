@@ -14,7 +14,7 @@ dependencies = [
     "httpx[http2,socks]>=0.27",
     # SOCKS4/4a proxy transports (httpx does SOCKS5 itself, not SOCKS4).
     "httpx-socks>=0.9",
-    "PySide6>=6.6",
+    "PySide6>=6.6,<6.12",
     # curl-cffi: yt-dlp's TLS-impersonation backend: Dailymotion (and a
     # growing list of sites) refuse plain-python TLS fingerprints outright.
     "yt-dlp[curl-cffi]>=2026.8.19",
