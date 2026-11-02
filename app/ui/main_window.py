@@ -71,6 +71,7 @@ from app.core import (
     dupes,
     listio,
     naming,
+    net,
     reputation,
     reveal,
     rss,
@@ -1516,16 +1517,20 @@ class MainWindow(QMainWindow):
             self._when_smart_ready(lambda: self._browser_add(url, page_title, fallbacks, headers))
             return
         if drive_file:
-            url = cloudlinks.direct_download_url(url) or url
+            direct_url = cloudlinks.direct_download_url(url) or url
+            headers = net.scoped_headers(headers, direct_url, url)
+            url = direct_url
         is_video = not drive_file and self.resolver.smart.matches(url)
         is_stream = urlsplit(url).path.lower().endswith((".m3u8", ".mpd"))
         if not drive_file and not is_video and not is_stream and fallbacks:
             # A blob-backed player: the sniffed stream the page loaded is the
             # real media, so grab that instead of the page's HTML.
-            url = next(
+            fallback_url = next(
                 (f for f in fallbacks if urlsplit(f).path.lower().endswith((".m3u8", ".mpd"))),
                 fallbacks[0],
             )
+            headers = net.scoped_headers(headers, fallback_url, url)
+            url = fallback_url
             is_stream = urlsplit(url).path.lower().endswith((".m3u8", ".mpd"))
 
         if is_video:
@@ -1940,7 +1945,7 @@ class MainWindow(QMainWindow):
                     page_title=page_title,
                     quality=quality,
                     fallbacks=tuple(fallbacks[1:]),
-                    headers=headers,
+                    headers=net.scoped_headers(headers, fallbacks[0], resolution.url),
                     queue_id=queue_id,
                     insecure=insecure,
                 )

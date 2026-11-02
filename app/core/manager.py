@@ -1035,8 +1035,13 @@ class DownloadManager:
         ``queue_id`` is the named queue the user picked (``AUTO_QUEUE`` = apply
         the category/default rules); ``insecure`` accepts an invalid HTTPS
         certificate for this download only, leaving the global setting alone."""
+        original_url = url
         if cloudlinks.is_google_drive_file(url):
             url = cloudlinks.direct_download_url(url) or url
+        # Browser credentials belong to the share URL, even when a provider
+        # transform sends the file request to a separate content host.
+        if headers:
+            headers = net.scoped_headers(headers, url, original_url)
         name = naming.sanitize_filename(filename) if filename else naming.filename_from_url(url)
         name = naming.apply_rename_rules(name, self.settings.rename_rules)
         options: dict[str, Any] = {"http_headers": dict(headers)} if headers else {}
@@ -1768,6 +1773,8 @@ class DownloadManager:
         next_url = mirrors.pop(0)
         options = dict(job.options)
         options["mirrors"] = mirrors
+        if options.get("http_headers"):
+            options["http_headers"] = net.scoped_headers(options["http_headers"], next_url, job.url)
         self.db.update_job_options(job_id, options)
         # A different URL is a different file as far as resume is concerned:
         # drop the partial data and checkpoints so nothing gets stitched wrong.

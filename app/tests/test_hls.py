@@ -389,7 +389,7 @@ def test_ffmpeg_protocol_whitelist(db: Database, dest: Path):
 
 
 def test_command_forwards_browser_headers_to_ffmpeg(db: Database, dest: Path):
-    """Cookie/Referer/User-Agent from a browser handoff must reach FFmpeg -
+    """Identifying headers from a browser handoff must reach FFmpeg -
     many CDNs check Referer against the requesting page and refuse the stream
     (or serve an HTML error FFmpeg can't parse) without it. -headers is a
     per-input option like -protocol_whitelist, so it must precede each -i."""
@@ -403,11 +403,9 @@ def test_command_forwards_browser_headers_to_ffmpeg(db: Database, dest: Path):
         },
     )
     task = HlsDownload(db, job, ffmpeg_path="ffmpeg")
-    # FFmpeg applies one header block to every request it makes and resolves
-    # the playlist itself, so the credentials ride along only once a manifest
-    # has been read and proved to reference nothing off-origin. That is the
-    # state after a successful native pass.
-    task._note_manifest_origins(["https://cdn.example/seg1.ts", "https://cdn.example/seg2.ts"])
+    # Even statically same-host segments can redirect elsewhere. Parsing a
+    # playlist must never authorize a global credential block in FFmpeg.
+    task._localize("#EXTM3U\nseg1.ts\nseg2.ts\n", "https://cdn.example/master.m3u8", "video")
     command = task._command(job.part_path)
 
     for i, arg in enumerate(command):
@@ -415,7 +413,7 @@ def test_command_forwards_browser_headers_to_ffmpeg(db: Database, dest: Path):
             assert command[i - 2] == "-headers"
             block = command[i - 1]
             assert "Referer: https://site.example/watch\r\n" in block
-            assert "Cookie: sess=abc123\r\n" in block
+            assert "Cookie:" not in block
 
 
 def test_ffmpeg_gets_no_credentials_until_the_playlist_has_been_vetted(db: Database, dest: Path):
@@ -452,7 +450,7 @@ def test_ffmpeg_gets_no_credentials_when_the_playlist_points_off_origin(db: Data
         options={"http_headers": {"Cookie": "sess=abc123", "Referer": "https://site.example/"}},
     )
     task = HlsDownload(db, job, ffmpeg_path="ffmpeg")
-    task._note_manifest_origins(["https://cdn.example/seg1.ts", "https://attacker.example/seg2.ts"])
+    task._localize("#EXTM3U\nhttps://attacker.example/seg2.ts\n", job.url, "video")
     block = task._ffmpeg_headers() or ""
     assert "sess=abc123" not in block
     assert "Referer: https://site.example/" in block

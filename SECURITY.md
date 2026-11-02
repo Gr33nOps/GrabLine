@@ -11,6 +11,11 @@ Advisories:
 **Security → Report a vulnerability** on
 https://github.com/Gr33nOps/GrabLine
 
+Signed-in reporters can open the private form directly:
+https://github.com/Gr33nOps/GrabLine/security/advisories/new
+
+We credit reporters who request attribution when we publish a fix or advisory.
+
 Do not open a public issue for exploitable findings until a fix has shipped.
 
 ## Scope

@@ -305,6 +305,7 @@ class SegmentedDownload:
             # so a redirect cannot carry the exemption somewhere else.
             insecure=insecure,
             trusted_host=net.host_of(job.url),
+            credential_origin=job.url,
             follow_redirects=True,
             # HTTP/1.1 on purpose. This is a segmented downloader: its whole
             # point is N range requests carried on N *separate* TCP connections,

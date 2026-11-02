@@ -58,11 +58,13 @@ def test_credentials_are_dropped_for_another_origin():
     assert off["Referer"] == "https://site.example/watch"
     assert off["User-Agent"] == "Mozilla/5.0"
 
-    # The approved origin and its subdomains keep everything.
+    # A flattened browser Cookie cannot authorize subdomains: it may have
+    # originally been a host-only cookie.
     # A different port on the same host is a different service.
     assert "Cookie" not in net.scoped_headers(headers, "https://site.example:8443/s.ts", origin)
 
-    for same in ("https://site.example/seg.ts", "https://cdn.site.example/seg.ts"):
+    assert "Cookie" not in net.scoped_headers(headers, "https://cdn.site.example/seg.ts", origin)
+    for same in ("https://site.example/seg.ts", "https://site.example:443/seg.ts"):
         assert net.scoped_headers(headers, same, origin)["Cookie"] == "session=secret"
 
 
@@ -73,8 +75,7 @@ def test_credentials_are_not_downgraded_to_plain_http():
 
 
 def test_a_redirect_cannot_carry_the_session_off_origin(server: MediaServer):
-    """httpx's own follow_redirects keeps an explicitly-set Cookie across a
-    cross-host redirect. stream_scoped re-decides at every hop instead."""
+    """stream_scoped re-decides credential scope at every hop."""
     secret = "session=secret"
     server.add("/landing.ts", payload(64, 1))
     server.add("/bounce.ts", b"", redirect_to="/landing.ts")

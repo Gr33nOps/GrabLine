@@ -76,13 +76,25 @@ what comes back over the wire.
   choose URLs. An HLS playlist can name an absolute segment, key or init-map
   URL on any host it likes, so every such fetch is re-scoped through
   `net.scoped_headers`: those three headers travel only to the origin the user
-  approved (same host or a subdomain, same port, never downgraded to http).
-  Redirects are followed by `net.stream_scoped` rather than by httpx, so the
-  decision is remade at every hop instead of the first one. Identifying
+  approved (exact host, same port, never downgraded to http). A flattened
+  browser Cookie cannot authorize subdomains because its original host-only
+  attributes are no longer available.
+  Direct downloads and resolver probes enforce scope in the HTTP client's
+  final request hook, including redirects, cached final URLs, retries and
+  resumes. Native HLS uses `net.stream_scoped` and the same final hook.
+  Response cookies retain their normal domain-aware jar behavior, so a CDN
+  can establish its own session without receiving the source's literal cookie.
+  URL rewrites, fallback streams and mirror changes strip credentials before
+  rebinding them to another host. Identifying
   headers (`Referer`, `User-Agent`) still travel everywhere, which is what
   keeps hotlink-protected CDNs working. FFmpeg takes one header block for a
-  whole input and resolves the playlist itself, so it is given the credentials
-  only once a manifest has been read and every URI in it proved on-origin.
+  whole input and resolves the playlist itself, so remote FFmpeg inputs never
+  receive browser credentials. Authenticated HLS is fetched natively and
+  FFmpeg combines local files. Credentialed Smart sessions use the policy-aware
+  Urllib transport, a scoped cookie jar, and native downloaders. Adapters that
+  discard cookie policy are excluded for these sessions; cookies are withheld
+  from lossy metadata and external-downloader exports. FFmpeg-only remote
+  inputs that require cookies may fail safely rather than expose the session.
 - **Resume identity**: a partial file is only a valid head of the resource it
   was started against. Direct downloads send `If-Range` and restart when the
   validator they began with has changed or disappeared; cloud downloads record

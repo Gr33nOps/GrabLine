@@ -333,6 +333,7 @@ def build_client(
     user_agent: str | None = None,
     insecure: bool = False,
     trusted_host: str | None = None,
+    credential_origin: str | None = None,
     force_ipv4: bool | None = None,
     **kwargs: Any,
 ) -> httpx.Client:
@@ -401,7 +402,33 @@ def build_client(
     headers = dict(kwargs.pop("headers", None) or {})
     headers.setdefault("User-Agent", user_agent or DEFAULT_USER_AGENT)
     kwargs["headers"] = headers
-    return httpx.Client(**client_kwargs, **kwargs)
+    # Request hooks run after httpx merges defaults, cookie jars and auth, and
+    # run again for every redirect. Filtering only the caller's header dict
+    # leaves client defaults able to reintroduce a browser session.
+    credentials = {k: v for k, v in headers.items() if k.lower() in CREDENTIAL_HEADERS}
+
+    def scope_credentials(request: httpx.Request) -> None:
+        origin = credential_origin or request.extensions.get("grabline_credential_origin")
+        if not isinstance(origin, str):
+            return
+        if not same_origin(str(request.url), origin):
+            for name in CREDENTIAL_HEADERS:
+                request.headers.pop(name, None)
+            # A destination may establish its own session while serving the
+            # file. Rebuild Cookie from the domain-aware response cookie jar,
+            # never from the source's literal browser header/client defaults.
+            client.cookies.set_cookie_header(request)
+        else:
+            # httpx drops a literal Cookie even on same-host redirects. Restore
+            # the approved session only within its original credential scope.
+            for name, value in credentials.items():
+                request.headers.setdefault(name, value)
+
+    hooks = {name: list(values) for name, values in (kwargs.pop("event_hooks", None) or {}).items()}
+    hooks.setdefault("request", []).append(scope_credentials)
+    kwargs["event_hooks"] = hooks
+    client = httpx.Client(**client_kwargs, **kwargs)
+    return client
 
 
 #: Interface-name fragments that strongly suggest a VPN / tunnel is up.
@@ -455,7 +482,7 @@ MAX_REDIRECTS = 10
 def same_origin(url: str, origin: str) -> bool:
     """Is ``url`` within ``origin``'s credential scope?
 
-    The rule: the same host (or a subdomain of it), on the same port, without
+    The rule: the exact same host, on the same port, without
     downgrading https to http - a credential sent in the clear is a credential
     given away.
 
@@ -471,15 +498,22 @@ def same_origin(url: str, origin: str) -> bool:
         target_port, source_port = _effective_port(target), _effective_port(source)
     except ValueError:
         return False
-    host = (target.hostname or "").lower().rstrip(".")
-    origin_host = (source.hostname or "").lower().rstrip(".")
+    try:
+        host = httpx.URL(url).raw_host.decode("ascii").lower().rstrip(".")
+        origin_host = httpx.URL(origin).raw_host.decode("ascii").lower().rstrip(".")
+    except (httpx.InvalidURL, UnicodeError):
+        return False
     if not host or not origin_host:
+        return False
+    if target.scheme not in ("http", "https") or source.scheme not in ("http", "https"):
         return False
     if source.scheme == "https" and target.scheme != "https":
         return False
     if target_port != source_port:
         return False
-    return host == origin_host or host.endswith(f".{origin_host}")
+    # A flattened browser Cookie has lost its Domain/host-only attributes.
+    # A child host therefore cannot be assumed entitled to the parent session.
+    return host == origin_host
 
 
 def _effective_port(parts: Any) -> int | None:
@@ -532,11 +566,9 @@ def stream_scoped(
     """Stream ``url``, following redirects ourselves so credentials are
     re-scoped at every hop.
 
-    httpx's own ``follow_redirects`` carries the request headers to wherever it
-    lands. It does drop ``Authorization`` when the host changes, but it keeps an
-    explicitly-set ``Cookie`` - so a 302 to another origin would hand over the
-    session that a same-origin check on the first URL had just protected.
-    Following the chain here means every hop gets its own decision.
+    Following the chain here means every hop gets its own credential decision,
+    independent of httpx's redirect-header policy. The client factory's request
+    hook also filters after default headers, cookies and auth have been merged.
     """
     current = url
     for hop in range(MAX_REDIRECTS + 1):
@@ -546,7 +578,11 @@ def stream_scoped(
         if extra_headers:
             request_headers.update(extra_headers)
         with client.stream(
-            method, current, headers=request_headers or None, follow_redirects=False
+            method,
+            current,
+            headers=request_headers or None,
+            follow_redirects=False,
+            extensions={"grabline_credential_origin": origin},
         ) as response:
             target = redirect_target(response)
             if target is None:

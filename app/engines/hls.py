@@ -129,12 +129,8 @@ class HlsDownload:
         #: variants, segments, keys, init maps - comes out of a remote playlist,
         #: which is attacker-controllable content: it can name an absolute URL
         #: on any host it likes. The browser's Cookie/Authorization go only to
-        #: this origin (and its subdomains); see net.scoped_headers.
+        #: this exact host; see net.scoped_headers.
         self._origin = job.url
-        #: Set once a manifest has been read and every URI in it proved to be
-        #: on the approved origin. False until then, so FFmpeg is never handed
-        #: credentials for a playlist nobody has checked.
-        self._manifest_is_same_origin = False
 
     def pause(self) -> None:
         self._stop_event.set()
@@ -209,19 +205,17 @@ class HlsDownload:
         FFmpeg applies one header block to *every* request it makes for this
         input, and it resolves the playlist itself, so there is no per-URL
         decision to make here the way there is in the native fetch. The
-        credentials therefore travel only when we have read the manifest and
-        seen that everything it references is on the approved origin. When we
-        could not read it (the FFmpeg fallback after a failed fetch), the safe
-        answer is the one that cannot leak a session to a host the playlist
-        chose: send the identifying headers, hold the credentials back.
+        native fetch therefore handles authenticated requests. Even a vetted
+        same-host segment can redirect off-host later, and FFmpeg offers no
+        per-request enforcement for a raw header block. Its remote fallback
+        receives identifying headers only.
         """
         headers = self._headers
         if not headers:
             return None
-        if not self._manifest_is_same_origin:
-            headers = {k: v for k, v in headers.items() if k.lower() not in net.CREDENTIAL_HEADERS}
-            if not headers:
-                return None
+        headers = {k: v for k, v in headers.items() if k.lower() not in net.CREDENTIAL_HEADERS}
+        if not headers:
+            return None
         return "".join(f"{key}: {value}\r\n" for key, value in headers.items())
 
     def _uses_tls(self) -> bool:
@@ -555,7 +549,6 @@ class HlsDownload:
         """Rewrite a media playlist to point at local files, fetch them, and
         write the local manifest. None if there is nothing to fetch or a stop."""
         rewritten, downloads = self._localize(text, base_url, prefix)
-        self._note_manifest_origins([url for url, _name in downloads])
         if not any(name.endswith(".ts") for _, name in downloads):
             return None  # no media segments - not a playlist we can fetch locally
         if not self._fetch_segments(downloads, work):
@@ -614,17 +607,6 @@ class HlsDownload:
             elif not stripped.startswith("#"):
                 digest.update(urljoin(base_url, stripped).encode("utf-8", "replace") + b"\n")
         return digest.hexdigest()
-
-    def _note_manifest_origins(self, urls: list[str]) -> None:
-        """Record whether every URI a manifest references is on the approved
-        origin - the condition under which FFmpeg may be given credentials."""
-        self._manifest_is_same_origin = all(net.same_origin(url, self._origin) for url in urls)
-        if not self._manifest_is_same_origin:
-            log.info(
-                "hls job %s: playlist references other origins; "
-                "withholding browser credentials from them",
-                self.job.id,
-            )
 
     def _localize(self, text: str, base_url: str, prefix: str) -> tuple[str, list[tuple[str, str]]]:
         """Rewrite every segment / key / init URI to a local filename, collecting

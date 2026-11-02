@@ -15,6 +15,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from app.core import net
 from app.core.errors import DownloadError
 from app.core.resolver import Resolution, Resolver
 from app.core.settings import Settings
@@ -80,7 +81,11 @@ class ResolveThread(QThread):
             log.exception("resolving %s failed", self._url)
             resolution = Resolution(url=self._url, kind=None, message=str(exc))
         self.resolved.emit(
-            resolution, self._page_title, self._quality, self._fallbacks, self._headers
+            resolution,
+            self._page_title,
+            self._quality,
+            self._fallbacks,
+            net.scoped_headers(self._headers, resolution.url, self._url),
         )
 
 
