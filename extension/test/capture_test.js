@@ -61,7 +61,7 @@ Deno.test("clearance sessions and unreadable cookie stores stay in browser", asy
 Deno.test("protected download is neither paused nor handed off", async () => {
   const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
   const start = code.indexOf("api.downloads.onCreated.addListener");
-  const end = code.indexOf("// Firefox uses downloads.onCreated too.", start);
+  const end = code.indexOf("// ------------------------------------------------ early Firefox takeover", start);
   let callback;
   const calls = [];
   const api = { downloads: {
@@ -71,6 +71,7 @@ Deno.test("protected download is neither paused nor handed off", async () => {
   } };
   new Function("api", "requiresBrowserSession", "showBrowserDownload", "downloadSourcePage", "isAssistantPage", `
     const interceptEnabled = true;
+    const earlyTakeoverEnabled = false;
     const handledDownloadIds = new Set();
     const shouldIntercept = () => true;
     ${code.slice(start, end)}

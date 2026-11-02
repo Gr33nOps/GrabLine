@@ -29,9 +29,14 @@ whole extension is meant to be readable in one sitting.
   plus the gallery grabber already cover images. There is a per-site off
   switch and a master switch in the popup.
 - **Download takeover** (on by default): browser downloads of
-  media, images (Save As), archives and other files are cancelled and
-  re-dispatched to GrabLine for segmented downloading. Toggle off in the
-  popup to keep the browser's own download UI.
+  files are handed to GrabLine. Firefox intercepts attachment and binary-file
+  responses before the browser creates a download item; once accepted, retries
+  and failures stay in GrabLine. Chromium uses a paused browser fallback until
+  the desktop download completes because store-installed MV3 extensions cannot
+  block responses. Toggle off in the popup to use browser downloads.
+  Browser-generated blobs, POST exports, assistant-generated files, and sites
+  requiring a browser verification session stay in the browser. If GrabLine is
+  closed or rejects a handoff, the original browser response proceeds normally.
 
 It talks to the desktop app over Native Messaging only: the browser launches
 GrabLine's host process and pipes JSON over stdio. There is no localhost

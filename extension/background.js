@@ -1,8 +1,8 @@
 // GrabLine Connect - background (MV3 service worker / Firefox event page).
 //
-// Detect, decorate, and deliver URLs over Native Messaging. Automatic browser
-// downloads remain paused and recoverable until the desktop job completes.
-// Session storage restores pending transfers after a service-worker restart.
+// Detect, decorate, and deliver URLs over Native Messaging.
+// Firefox hands off download responses before a browser download is created.
+// Chromium keeps a recoverable downloads-API fallback (MV3 cannot block).
 
 const api = globalThis.browser ?? globalThis.chrome;
 const HOST_NAME = "dev.grabline.host";
@@ -93,6 +93,7 @@ function needsMediaCookies(url) {
 // (right-click, hover button, popup) skip this on purpose - those are deliberate.
 const HANDOFF_COOLDOWN_MS = 60_000;
 const recentHandoffs = new Map(); // url -> timestamp
+const automaticHandoffs = new Map(); // url -> pending native reply
 const handledDownloadIds = new Set(); // browser download item ids already claimed
 
 function canonicalHandoffUrl(url) {
@@ -112,7 +113,6 @@ function takeoverAlreadyQueued(url) {
     if (now - at > HANDOFF_COOLDOWN_MS) recentHandoffs.delete(seen);
   }
   if (recentHandoffs.has(key)) return true;
-  recentHandoffs.set(key, now);
   return false;
 }
 
@@ -137,12 +137,31 @@ async function sendToGrabLine(
       fallbackUrls = [];
     }
   } catch { /* URL validation belongs to the native host. */ }
+  const key = canonicalHandoffUrl(url);
+  const pending = onlyIfRunning ? automaticHandoffs.get(key) : null;
+  if (pending) {
+    const reply = await pending;
+    return reply?.type === "queued" && reply.appRunning ? { ...reply, deduped: true } : reply;
+  }
   if (onlyIfRunning && takeoverAlreadyQueued(url)) {
     // Same URL was handed off moments ago - tell the caller it already landed
     // so they still cancel the browser's duplicate attempt, without queuing
     // another job.
     return { type: "queued", appRunning: lastAppRunning, deduped: true };
   }
+  const handoff = deliverToGrabLine(url, tab, {
+    quality, fallbackUrls, credentials, title, onlyIfRunning,
+  });
+  if (!onlyIfRunning) return handoff;
+  automaticHandoffs.set(key, handoff);
+  try { return await handoff; } finally {
+    if (automaticHandoffs.get(key) === handoff) automaticHandoffs.delete(key);
+  }
+}
+
+async function deliverToGrabLine(
+  url, tab, { quality, fallbackUrls, credentials, title, onlyIfRunning },
+) {
   const message = {
     type: "download",
     url,
@@ -165,6 +184,9 @@ async function sendToGrabLine(
     const reply = await api.runtime.sendNativeMessage(HOST_NAME, message);
     await api.storage.session.set({ lastNativeError: null });
     if (typeof reply?.appRunning === "boolean") noteAppRunning(reply.appRunning);
+    if (onlyIfRunning && reply?.type === "queued" && reply.appRunning) {
+      recentHandoffs.set(canonicalHandoffUrl(url), Date.now());
+    }
     if (reply?.type === "queued" && tab?.id != null) track(url, tab.id);
     return reply ?? { type: "error", message: "empty reply from host" };
   } catch (error) {
@@ -372,7 +394,8 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // ------------------------------------------------- network sniffer (F1.4)
-// Observe-only webRequest (MV3 removed blocking; we never wanted it).
+// Observe media without interrupting playback. Firefox's separate download
+// interceptor below only blocks responses that would become file downloads.
 
 const MEDIA_CONTENT_TYPES =
   /^(video\/|audio\/|application\/(vnd\.apple\.mpegurl|x-mpegurl|dash\+xml))/i;
@@ -465,8 +488,8 @@ api.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 // --------------------------------------------------- interception (F1.5)
 // On by default (toggle lives in the popup), but only fires when the app is
-// running - see the listener below. The browser download is paused while the
-// app works, so a failed desktop transfer can continue in the browser.
+// running. Firefox holds download response headers; Chromium pauses a browser
+// item while the app works so a failed desktop transfer can resume there.
 
 function shouldIntercept(item) {
   // Take over every real download regardless of type (exe, torrent, image,
@@ -668,6 +691,13 @@ async function pollTakeovers() {
 }
 
 api.downloads.onCreated.addListener((item) => {
+  // Firefox's response handler already made the takeover decision. Items
+  // reaching this event belong to the browser (disabled/unavailable app,
+  // protected sessions, or browser-generated files); never pause them.
+  if (earlyTakeoverEnabled) {
+    void showBrowserDownload(item.id);
+    return;
+  }
   // Pause synchronously (it is reversible), decide asynchronously, and only
   // then take the download away. Two orderings were tried and both lost a
   // file: awaiting storage/a ping before cancelling let small downloads finish
@@ -731,9 +761,62 @@ api.downloads.onCreated.addListener((item) => {
   })();
 });
 
-// Firefox uses downloads.onCreated too. Blocking a response before the browser
-// creates a download item cannot be undone if GrabLine later fails. Keeping the
-// browser item paused gives every site the same recoverable handoff.
+// ------------------------------------------------ early Firefox takeover
+// Firefox supports async blocking in MV3; Chromium store builds omit this
+// permission. Hold only download headers until the native host accepts the
+// URL, then cancel before Firefox creates an item or writes file bytes.
+const earlyTakeoverEnabled = typeof api.runtime.getBrowserInfo === "function" &&
+  api.runtime.getManifest().permissions.includes("webRequestBlocking");
+const DOWNLOAD_CONTENT_TYPES = new Set([
+  "application/octet-stream", "binary/octet-stream", "application/x-bittorrent",
+  "application/zip", "application/x-zip-compressed", "application/x-7z-compressed",
+  "application/x-rar-compressed", "application/vnd.rar", "application/gzip",
+  "application/x-gzip", "application/x-tar", "application/x-msdownload",
+  "application/x-msdos-program", "application/vnd.microsoft.portable-executable",
+  "application/x-apple-diskimage", "application/x-iso9660-image",
+]);
+
+function isDownloadResponse(details) {
+  // Never grab POST exports, page API calls, playback, error pages, or a
+  // redirect response. Only a successful, replayable file response qualifies.
+  if (details.method !== "GET" || details.statusCode < 200 || details.statusCode >= 300 ||
+      details.statusCode === 204 || !/^https?:/i.test(details.url) ||
+      !["main_frame", "sub_frame", "other"].includes(details.type)) return false;
+  if (details.tabId < 0 && !/^https?:/i.test(details.originUrl || "")) return false;
+  const disposition = headerValue(details.responseHeaders, "content-disposition") || "";
+  if (/^\s*attachment(?:\s*;|\s*$)/i.test(disposition)) return true;
+  const contentType = (headerValue(details.responseHeaders, "content-type") || "")
+    .split(";")[0].trim().toLowerCase();
+  return DOWNLOAD_CONTENT_TYPES.has(contentType);
+}
+
+async function interceptDownloadResponse(details) {
+  if (!isDownloadResponse(details) || !await interceptionOn()) return {};
+  try {
+    let tab = null;
+    if (details.tabId >= 0) {
+      try { tab = await api.tabs.get(details.tabId); } catch { /* closed tab */ }
+    }
+    const sourcePage = details.originUrl || details.documentUrl || tab?.url || null;
+    if (isAssistantPage(sourcePage) || await requiresBrowserSession(details.url)) return {};
+    const reply = await sendToGrabLine(details.url, {
+      id: tab?.id, url: sourcePage, title: tab?.title,
+    }, { credentials: true, onlyIfRunning: true });
+    // On rejection or host failure, let the original response proceed. Once
+    // accepted, errors/retries belong to GrabLine; no paused browser fallback.
+    return reply?.type === "queued" && reply.appRunning ? { cancel: true } : {};
+  } catch {
+    return {}; // leave the original response usable if metadata lookup fails
+  }
+}
+
+if (earlyTakeoverEnabled) {
+  api.webRequest.onHeadersReceived.addListener(
+    interceptDownloadResponse,
+    { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "other"] },
+    ["blocking", "responseHeaders"],
+  );
+}
 
 // ------------------------------------------------------------- messages
 

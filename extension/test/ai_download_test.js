@@ -4,7 +4,7 @@ const code = await Deno.readTextFile(new URL("../background.js", import.meta.url
 const helperCode = code.slice(0, code.indexOf("// YouTube (and friends)"));
 const interceptCode = code.slice(
   code.indexOf("api.downloads.onCreated.addListener"),
-  code.indexOf("// Firefox uses downloads.onCreated too."),
+  code.indexOf("// ------------------------------------------------ early Firefox takeover"),
 );
 Deno.test("assistant source pages are matched by host, not a lookalike URL", () => {
   const matches = new Function("globalThis", helperCode + "\nreturn isAssistantPage;")({ browser: {} });
@@ -38,6 +38,7 @@ Deno.test("Chrome leaves generated chat downloads untouched and shows browser Do
     } };
     const fn = new Function("api", "downloadSourcePage", "isAssistantPage", "requiresBrowserSession", "showBrowserDownload", `
       const interceptEnabled = true;
+    const earlyTakeoverEnabled = false;
       const handledDownloadIds = new Set();
       const shouldIntercept = () => true;
       ${interceptCode}

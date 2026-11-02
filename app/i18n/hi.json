@@ -514,6 +514,7 @@
   "Queued {count} file(s)": "{count} फ़ाइल(ें) कतार में",
   "Queued {name}": "{name} कतार में",
   "Queued {name} ({label})": "{name} कतार में ({label})",
+  "Queued: {queue}": "कतार में: {queue}",
   "Quiet hours between": "शांत समय इनके बीच",
   "Quiet hours silence notifications and sounds; downloads keep running.": "शांत समय सूचनाएँ और ध्वनियाँ मौन कर देता है; डाउनलोड चलते रहते हैं।",
   "Quit GrabLine": "GrabLine से बाहर निकलें",

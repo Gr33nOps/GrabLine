@@ -3,7 +3,7 @@ import { assertEquals } from "./harness.js";
 const source = await Deno.readTextFile(new URL("../background.js", import.meta.url));
 const takeoverCode = source.slice(
   source.indexOf("const pendingTakeovers = new Map()"),
-  source.indexOf("// Firefox uses downloads.onCreated too."),
+  source.indexOf("// ------------------------------------------------ early Firefox takeover"),
 );
 
 function harness(reply, status, { resumeFailsOnce = false } = {}) {
@@ -35,6 +35,7 @@ function harness(reply, status, { resumeFailsOnce = false } = {}) {
     const HOST_NAME = "test";
     const handledDownloadIds = new Set();
     const interceptEnabled = true;
+    const earlyTakeoverEnabled = false;
     const shouldIntercept = () => true;
     const downloadSourcePage = async () => null;
     const isAssistantPage = () => false;

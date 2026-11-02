@@ -107,27 +107,32 @@ class ElidingLabel(QLabel):
         super().setText(self.fontMetrics().elidedText(self._full, self._mode, width))
 
 
-class StatusPill(QLabel):
+class StatusPill(ElidingLabel):
     """A quiet status readout: colored dot + tinted label, no fill. Eight
     filled chips in a column read as a wall of buttons; text reads as state."""
 
     def __init__(self, status: str = "queued", parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__(parent=parent)
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self._rendered: tuple[str, str] | None = None
+        self._rendered: tuple[str, str, str | None] | None = None
         self.set_status(status)
 
-    def set_status(self, status: str) -> None:
+    def set_status(self, status: str, queue_name: str | None = None) -> None:
         p = theme.current()
         color = design.status_color(p, status)
         # setStyleSheet re-polishes the widget on every call, identical string
         # or not. The download list re-sends each row's status twice a second,
         # so skipping the unchanged ones is the difference between a quiet list
         # and a full-table restyle at 2Hz.
-        if self._rendered == (status, color):
+        queue_name = queue_name if status == "queued" else None
+        if self._rendered == (status, color, queue_name):
             return
-        self._rendered = (status, color)
-        label = t(_STATUS_LABEL.get(status, status.title()))
+        self._rendered = (status, color, queue_name)
+        label = (
+            t("Queued: {queue}", queue=queue_name)
+            if queue_name is not None
+            else t(_STATUS_LABEL.get(status, status.title()))
+        )
         self.setText(f"●  {label}")
         self.setStyleSheet(
             f"QLabel {{ color: {color}; background: transparent;"

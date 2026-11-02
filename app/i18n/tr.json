@@ -514,6 +514,7 @@
   "Queued {count} file(s)": "{count} dosya kuyruğa alındı",
   "Queued {name}": "{name} kuyruğa alındı",
   "Queued {name} ({label})": "{name} kuyruğa alındı ({label})",
+  "Queued: {queue}": "Kuyrukta: {queue}",
   "Quiet hours between": "Sessiz saatler aralığı",
   "Quiet hours silence notifications and sounds; downloads keep running.": "Sessiz saatler bildirimleri ve sesleri susturur; indirmeler çalışmaya devam eder.",
   "Quit GrabLine": "GrabLine'dan çık",

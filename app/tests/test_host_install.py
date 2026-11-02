@@ -187,10 +187,9 @@ def test_extension_manifest_pins_match_host_pins():
     assert derived_id in CHROME_EXTENSION_IDS
 
 
-def test_extension_keeps_browser_download_recoverable():
-    """A blocking webRequest cancel cannot be resumed after a desktop failure."""
+def test_extension_keeps_downloads_api_for_browser_owned_items():
+    """Browser-owned items and Chromium's fallback still use the downloads API."""
     manifest = json.loads(
         (Path(__file__).resolve().parents[2] / "extension" / "manifest.json").read_text()
     )
     assert "downloads" in manifest["permissions"]
-    assert "webRequestBlocking" not in manifest["permissions"]
