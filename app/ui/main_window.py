@@ -207,6 +207,7 @@ class MainWindow(QMainWindow):
         self._nav: dict[str, components.SidebarButton] = {}
         self._progress_bars: dict[int, motion.SmoothProgressBar] = {}
         self._pills: dict[int, components.StatusPill] = {}
+        self._status_width_dirty = True
         #: job id -> the icon state each row currently shows, so the poll can
         #: skip setIcon (which always repaints) when nothing changed.
         self._row_icons: dict[int, tuple[str, str, bool, str]] = {}
@@ -641,8 +642,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(_COL_PROGRESS, 150)
         self.table.setColumnWidth(_COL_SPEED, 100)
         self.table.setColumnWidth(_COL_ETA, 84)
-        # Hugging pills need less room than the old filled chips did.
-        self.table.setColumnWidth(_COL_STATUS, 116)
+        self.table.setColumnWidth(_COL_STATUS, 160)
         header.setStretchLastSection(False)
         # Header alignment matches its column's content: text left, numbers
         # right. (Qt centers headers by default, matching nothing.)
@@ -693,7 +693,20 @@ class MainWindow(QMainWindow):
             self.table.setColumnHidden(column, key in hidden or (narrow and key in {"size", "eta"}))
         self.table.setColumnWidth(_COL_PROGRESS, 80 if narrow else 150)
         self.table.setColumnWidth(_COL_SPEED, 90 if narrow else 100)
-        self.table.setColumnWidth(_COL_STATUS, 106 if narrow else 116)
+        self._fit_status_column()
+
+    def _fit_status_column(self) -> None:
+        # Measure the actual styled font, including cell padding. Long queue
+        # names elide with a full tooltip rather than consuming the name column.
+        width = max(
+            (
+                pill.fontMetrics().horizontalAdvance(pill.full_text()) + 20
+                for pill in self._pills.values()
+            ),
+            default=160,
+        )
+        self.table.setColumnWidth(_COL_STATUS, max(160, min(width, 240)))
+        self._status_width_dirty = False
 
     def _make_queue_page(self) -> QWidget:
         from app.ui.queue_view import QueueView
@@ -3287,6 +3300,8 @@ class MainWindow(QMainWindow):
                 continue
             self._update_row(row, view)
             self._rendered[view.id] = view
+        if self._status_width_dirty:
+            self._fit_status_column()
         self._update_filter_counts(views)
         self._apply_filter()
         self._empty_label.setGeometry(self.table.viewport().rect())
@@ -3451,6 +3466,7 @@ class MainWindow(QMainWindow):
             bar.release()
         self._progress_bars.clear()
         self._pills.clear()
+        self._status_width_dirty = True
         self._row_icons.clear()
         self._rendered.clear()  # new cells: everything must be drawn again
 
@@ -3561,8 +3577,11 @@ class MainWindow(QMainWindow):
 
         pill = self._pills.get(view.id)
         if pill is not None:
-            pill.set_status(view.status.value)
-            pill.setToolTip(view.error or "")
+            previous = pill.full_text()
+            pill.set_status(view.status.value, view.queue_name)
+            pill.setToolTip(view.error or pill.full_text())
+            if pill.full_text() != previous:
+                self._status_width_dirty = True
 
     @staticmethod
     def _type_color(view: JobView) -> str:

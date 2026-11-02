@@ -173,6 +173,7 @@ class JobView:
     tags: str = ""
     notes: str = ""
     queue_id: int | None = None
+    queue_name: str | None = None
 
     @property
     def display_name(self) -> str:
@@ -1386,6 +1387,7 @@ class DownloadManager:
         # One query for all segment progress instead of one per direct job:
         # the UI polls snapshot() every 500ms, so this is a real hot path.
         segment_progress = self.db.all_segment_progress()
+        queue_names = {queue.id: queue.name for queue in self.db.list_queues()}
         views: list[JobView] = []
         for job in self.db.list_jobs():
             if job.id in pending_removal:
@@ -1416,6 +1418,7 @@ class DownloadManager:
                     tags=str(job.options.get("tags") or ""),
                     notes=str(job.options.get("notes") or ""),
                     queue_id=job.queue_id,
+                    queue_name=queue_names.get(job.queue_id) if job.queue_id is not None else None,
                 )
             )
         self._snapshot_cache = (token, views)

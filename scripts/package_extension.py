@@ -46,6 +46,10 @@ def _manifest_for(target: str, manifest: dict[str, Any]) -> dict[str, Any]:
     if target == "chrome":
         result.pop("browser_specific_settings", None)
         result["background"] = {"service_worker": manifest["background"]["service_worker"]}
+        # Async response blocking is available in Firefox MV3 only.
+        result["permissions"] = [
+            p for p in manifest.get("permissions", []) if p != "webRequestBlocking"
+        ]
     elif target == "firefox":
         result["background"] = {"scripts": manifest["background"]["scripts"]}
         # Chromium-only permissions (download-shelf hiding); Firefox has no

@@ -514,6 +514,7 @@
   "Queued {count} file(s)": "{count} файлов в очереди",
   "Queued {name}": "{name} в очереди",
   "Queued {name} ({label})": "{name} в очереди ({label})",
+  "Queued: {queue}": "В очереди: {queue}",
   "Quiet hours between": "Тихие часы с",
   "Quiet hours silence notifications and sounds; downloads keep running.": "Тихие часы отключают уведомления и звуки; загрузки продолжаются.",
   "Quit GrabLine": "Выйти из GrabLine",

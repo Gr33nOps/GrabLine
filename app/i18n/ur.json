@@ -514,6 +514,7 @@
   "Queued {count} file(s)": "قطار میں لگی {count} فائل(فائلیں)",
   "Queued {name}": "قطار میں لگائے گئے {name}",
   "Queued {name} ({label})": "قطار میں موجود {name} ({label})",
+  "Queued: {queue}": "قطار میں: {queue}",
   "Quiet hours between": "کے درمیان پرسکون گھنٹے",
   "Quiet hours silence notifications and sounds; downloads keep running.": "پرسکون گھنٹے خاموش اطلاعات اور آوازیں ؛ ڈاؤن لوڈ چلتے رہتے ہیں ۔",
   "Quit GrabLine": "GrabLine سے باہر نکلیں",

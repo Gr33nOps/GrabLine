@@ -514,6 +514,7 @@
   "Queued {count} file(s)": "{count} 个文件已加入队列",
   "Queued {name}": "{name} 已加入队列",
   "Queued {name} ({label})": "{name} 已加入队列（{label}）",
+  "Queued: {queue}": "队列中：{queue}",
   "Quiet hours between": "免打扰时段",
   "Quiet hours silence notifications and sounds; downloads keep running.": "免打扰时段会静音通知和声音；下载继续进行。",
   "Quit GrabLine": "退出 GrabLine",

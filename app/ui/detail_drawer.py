@@ -304,8 +304,7 @@ class DetailDrawer(QFrame):
 
         pill_row = QHBoxLayout()
         self._pill = components.StatusPill("queued")
-        pill_row.addWidget(self._pill)
-        pill_row.addStretch(1)
+        pill_row.addWidget(self._pill, 1)
         outer.addLayout(pill_row)
 
         prow = QHBoxLayout()
@@ -567,7 +566,8 @@ class DetailDrawer(QFrame):
             self._fill_static(view, palette)
             self._start_probe(view)
         # live header
-        self._pill.set_status(view.status.value)
+        self._pill.set_status(view.status.value, view.queue_name)
+        self._source_grid.set("Queue", view.queue_name or t("Default"))
         self._progress.set_color(design.status_color(palette, view.status.value))
         self._update_progress(view)
         self._update_overview(view, speed_bps, new)
@@ -607,7 +607,6 @@ class DetailDrawer(QFrame):
             self._source_grid.set("Connections", str(self.manager.connections))
         self._source_grid.set("Segments", self._segment_count(view))
         self._source_grid.set("Priority", self._priority_label())
-        self._source_grid.set("Queue", self._queue_name(view.queue_id))
         if view.speed_limit_kbps:
             self._source_grid.set("Speed limit", f"{view.speed_limit_kbps} KB/s")
         self._det_url.setText(_wrappable(view.url))
@@ -857,11 +856,3 @@ class DetailDrawer(QFrame):
             self._tags_layout.addWidget(components.Chip(tag))
         self._tags_layout.addStretch(1)
         self._tags_box.setVisible(bool(tags))
-
-    def _queue_name(self, queue_id: int | None) -> str:
-        if queue_id is None:
-            return "Default"
-        for queue in self.manager.list_queues():
-            if queue.id == queue_id:
-                return queue.name
-        return "Default"

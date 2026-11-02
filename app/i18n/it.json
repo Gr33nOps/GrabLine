@@ -514,6 +514,7 @@
   "Queued {count} file(s)": "{count} file in coda",
   "Queued {name}": "{name} in coda",
   "Queued {name} ({label})": "{name} in coda ({label})",
+  "Queued: {queue}": "In coda: {queue}",
   "Quiet hours between": "Ore silenziose tra",
   "Quiet hours silence notifications and sounds; downloads keep running.": "Le ore silenziose disattivano notifiche e suoni; i download continuano.",
   "Quit GrabLine": "Esci da GrabLine",

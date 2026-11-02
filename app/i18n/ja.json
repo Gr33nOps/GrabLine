@@ -514,6 +514,7 @@
   "Queued {count} file(s)": "{count} 件のファイルをキューに追加しました",
   "Queued {name}": "{name} をキューに追加しました",
   "Queued {name} ({label})": "{name} をキューに追加しました ({label})",
+  "Queued: {queue}": "キュー: {queue}",
   "Quiet hours between": "サイレント時間帯",
   "Quiet hours silence notifications and sounds; downloads keep running.": "サイレント時間帯は通知と音を消しますが、ダウンロードは続行します。",
   "Quit GrabLine": "GrabLine を終了",

@@ -514,6 +514,7 @@
   "Queued {count} file(s)": "{count}개의 파일이 대기열에 추가됨",
   "Queued {name}": "{name}이(가) 대기열에 추가됨",
   "Queued {name} ({label})": "{name}이(가) 대기열에 추가됨({label})",
+  "Queued: {queue}": "대기열: {queue}",
   "Quiet hours between": "방해 금지 시간대",
   "Quiet hours silence notifications and sounds; downloads keep running.": "방해 금지 시간대에는 알림과 소리가 꺼지지만 다운로드는 계속됩니다.",
   "Quit GrabLine": "GrabLine 종료",
