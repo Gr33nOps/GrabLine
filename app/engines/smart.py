@@ -23,9 +23,13 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from http.cookiejar import Cookie, DefaultCookiePolicy
+from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+import httpx
 
 from app.core import naming, net
 from app.core.errors import DownloadError
@@ -196,21 +200,112 @@ def _apply_network_guards(
         opts["nocheckcertificate"] = True
 
 
-def _handoff_headers(raw: Any, *, has_cookie_source: bool) -> dict[str, str]:
-    """The browser handoff's Referer/Cookie/User-Agent to hand yt-dlp, or ``{}``
+def _handoff_headers(raw: Any) -> dict[str, str]:
+    """The browser handoff's identifying headers to hand yt-dlp, or ``{}``
     when there are none. Many gated CDNs refuse a stream (or serve an HTML error
     yt-dlp can't use) without the page's Referer, so the same headers the HLS and
     direct engines forward ride into yt-dlp too. yt-dlp merges these under each
     extractor's own headers, so a site extractor still wins where it sets them.
-    The Cookie is dropped when yt-dlp is already loading cookies itself
-    (cookiefile / cookiesfrombrowser), so the two jars can't fight.
+    Browser credentials never enter a global header block. Cookies are seeded
+    separately with their original host scope, instead of letting yt-dlp's
+    header compatibility path apply them to each newly extracted URL.
     """
     if not isinstance(raw, dict) or not raw:
         return {}
-    headers = {str(key): str(value) for key, value in raw.items()}
-    if has_cookie_source:
-        headers.pop("Cookie", None)
-    return headers
+    return {str(k): str(v) for k, v in raw.items() if str(k).lower() not in net.CREDENTIAL_HEADERS}
+
+
+class _HandoffCookiePolicy(DefaultCookiePolicy):
+    def __init__(self, origin: str, handoff: set[tuple[str, str]]) -> None:
+        super().__init__(strict_ns_domain=DefaultCookiePolicy.DomainStrictNonDomain)
+        self.origin = origin
+        self.handoff = handoff
+
+    def return_ok(self, cookie: Cookie, request: Any) -> bool:
+        if (cookie.name, cookie.value) in self.handoff and not net.same_origin(
+            request.get_full_url(), self.origin
+        ):
+            return False
+        return super().return_ok(cookie, request)
+
+    def return_ok_port(self, cookie: Cookie, request: Any) -> bool:
+        # stdlib's Netscape policy assumes port 80 when the URL omits a port,
+        # including HTTPS URLs. Use the actual scheme default for scoped cookies.
+        if cookie.port is None:
+            return True
+        url = httpx.URL(request.get_full_url())
+        port = url.port or (443 if url.scheme == "https" else 80)
+        return str(port) in cookie.port.split(",")
+
+
+def _seed_handoff_cookies(ydl: Any, raw: Any, url: str, *, has_cookie_source: bool = False) -> None:
+    """Keep credentialed media requests in the policy-aware native transport.
+
+    Requests and curl copy jars without preserving their policy; FFmpeg and
+    metadata exports also discard host-only/port restrictions. Do not export
+    cookies to those paths. Urllib uses the actual policy for each redirect.
+    """
+    header = ""
+    if isinstance(raw, dict) and not has_cookie_source:
+        header = next((str(v) for k, v in raw.items() if str(k).lower() == "cookie"), "")
+    if not header and not has_cookie_source:
+        return
+    from yt_dlp.cookies import YoutubeDLCookieJar
+
+    class NativeSessionJar(YoutubeDLCookieJar):  # type: ignore[misc]  # yt-dlp has no type stubs
+        def get_cookies_for_url(self, url: str) -> list[Cookie]:
+            # This API feeds yt-dlp's lossy metadata and external downloader
+            # exports. Native networking uses add_cookie_header instead.
+            return []
+
+    source = httpx.URL(url)
+    if source.scheme not in ("http", "https") or not source.host:
+        return
+    cookies = SimpleCookie()
+    cookies.load(header)
+    domain = source.raw_host.decode("ascii")
+    if ":" in domain:
+        domain = f"[{domain}]"
+    if "." not in domain:
+        domain += ".local"
+    original_jar = ydl.cookiejar
+    jar = NativeSessionJar(filename=original_jar.filename)
+    for cookie in original_jar:
+        jar.set_cookie(cookie)
+    # stdlib's default Netscape policy sends even host-only cookies to child
+    # hosts unless this flag is enabled.
+    jar.set_policy(
+        _HandoffCookiePolicy(url, {(name, item.value) for name, item in cookies.items()})
+    )
+    ydl.cookiejar = jar
+    # Build handlers only after installing the jar, then remove adapters that
+    # silently discard its policy. This is local to this YoutubeDL instance.
+    for backend in ("Requests", "CurlCFFI"):
+        ydl._request_director.handlers.pop(backend, None)
+    for handler in ydl._request_director.handlers.values():
+        handler.cookiejar = jar
+    ydl.params["external_downloader"] = {"default": "native"}
+    for name, morsel in cookies.items():
+        jar.set_cookie(
+            Cookie(
+                version=0,
+                name=name,
+                value=morsel.value,
+                port=str(source.port or (443 if source.scheme == "https" else 80)),
+                port_specified=True,
+                domain=domain,
+                domain_specified=False,
+                domain_initial_dot=False,
+                path="/",
+                path_specified=True,
+                secure=source.scheme == "https",
+                expires=None,
+                discard=True,
+                comment=None,
+                comment_url=None,
+                rest={},
+            )
+        )
 
 
 def _normalize_error_text(message: str) -> str:
@@ -1090,11 +1185,12 @@ class SmartEngine:
             opts["proxy"] = proxy
         # The browser handoff's Referer/Cookie/User-Agent, so a gated video
         # analyses with the same credentials its page had (matching the download).
-        forwarded = _handoff_headers(headers, has_cookie_source=use_session)
+        forwarded = _handoff_headers(headers)
         if forwarded:
             opts["http_headers"] = forwarded
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
+                _seed_handoff_cookies(ydl, headers, url, has_cookie_source=use_session)
                 info = ydl.extract_info(url, download=False)
         except yt_dlp.utils.DownloadError as exc:
             # Keep the raw message on __cause__ so callers can still match
@@ -1525,10 +1621,7 @@ class SmartDownload:
             ydl_opts["postprocessor_args"] = {"default": list(extra_ffmpeg)}
         if self.proxy:
             ydl_opts["proxy"] = self.proxy
-        forwarded = _handoff_headers(
-            options.get("http_headers"),
-            has_cookie_source="cookiefile" in ydl_opts or "cookiesfrombrowser" in ydl_opts,
-        )
+        forwarded = _handoff_headers(options.get("http_headers"))
         if forwarded:
             ydl_opts["http_headers"] = forwarded
         ydl_opts["postprocessors"] = postprocessors
@@ -1638,6 +1731,12 @@ class SmartDownload:
             log.info("job %s: downloading from the cached analysis", self.job.id)
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
+                    _seed_handoff_cookies(
+                        ydl,
+                        self.job.options.get("http_headers"),
+                        self.job.url,
+                        has_cookie_source="cookiefile" in opts or "cookiesfrombrowser" in opts,
+                    )
                     info = ydl.process_ie_result(cached, download=True)
                 if isinstance(info, dict):
                     return info
@@ -1648,6 +1747,12 @@ class SmartDownload:
                     "job %s: cached analysis rejected (%s); extracting fresh", self.job.id, exc
                 )
         with yt_dlp.YoutubeDL(opts) as ydl:
+            _seed_handoff_cookies(
+                ydl,
+                self.job.options.get("http_headers"),
+                self.job.url,
+                has_cookie_source="cookiefile" in opts or "cookiesfrombrowser" in opts,
+            )
             info = ydl.extract_info(self.job.url, download=True)
         if not isinstance(info, dict):
             raise DownloadError("No downloadable media was found at this address.")

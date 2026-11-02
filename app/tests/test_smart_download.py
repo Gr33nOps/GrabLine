@@ -582,6 +582,9 @@ def test_download_reuses_panel_prefetch_even_with_cookies(db: Database, dest: Pa
 
     from app.engines import smart
 
+    # Cache-selection test; the real credential boundary is covered separately.
+    monkeypatch.setattr(smart, "_seed_handoff_cookies", lambda *args, **kwargs: None)
+
     smart._info_cache.clear()
     smart._ready_cache.clear()
     smart._remember_download_ready(
@@ -671,6 +674,9 @@ def test_download_waits_for_inflight_prefetch_instead_of_reextracting(
     import yt_dlp
 
     from app.engines import smart
+
+    # Cache-selection test; the real credential boundary is covered separately.
+    monkeypatch.setattr(smart, "_seed_handoff_cookies", lambda *args, **kwargs: None)
 
     smart._info_cache.clear()
     smart._ready_cache.clear()
@@ -1085,7 +1091,7 @@ def test_build_options_forwards_browser_headers(db: Database, dest: Path):
     }
     job = _smart_job(db, "https://site.example/v", dest, "v.mp4", http_headers=headers)
     opts = SmartDownload(db, job, ffmpeg_path=None)._build_options()
-    assert opts["http_headers"] == headers
+    assert opts["http_headers"] == {k: v for k, v in headers.items() if k != "Cookie"}
 
 
 def test_browser_cookie_yields_to_a_cookie_file(db: Database, dest: Path, tmp_path: Path):

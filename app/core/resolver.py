@@ -109,9 +109,15 @@ def _hls_variants(
         request_headers.setdefault("Referer", referer)
     try:
         with net.build_client(
-            proxy=proxy, insecure=insecure, follow_redirects=True, http2=True, timeout=10
+            proxy=proxy,
+            insecure=insecure,
+            follow_redirects=True,
+            http2=True,
+            timeout=10,
+            credential_origin=url,
+            headers=request_headers,
         ) as client:
-            response = client.get(url, headers=request_headers or None)
+            response = client.get(url)
             if response.status_code != 200:
                 return ()
             return parse_master_playlist(response.text, str(response.url))
@@ -157,6 +163,7 @@ class Resolver:
         direct = cloudlinks.direct_download_url(url)
         drive_file = cloudlinks.is_google_drive_file(url)
         if direct is not None:
+            headers = net.scoped_headers(headers, direct, url)
             url = direct
             scheme = urlsplit(url).scheme.lower()
         if urlsplit(url).path.lower().endswith(".torrent"):
@@ -205,11 +212,13 @@ class Resolver:
                 # download will: otherwise an opted-in self-signed host is
                 # rejected here and the download never gets to start.
                 insecure=insecure,
+                credential_origin=url,
+                headers=probe_headers,
                 follow_redirects=True,
                 http2=True,
                 timeout=httpx.Timeout(20.0, connect=10.0),
             ) as client:
-                result = probe(client, url, probe_headers or None)
+                result = probe(client, url)
         except DownloadError as exc:
             return Resolution(
                 url=url,
