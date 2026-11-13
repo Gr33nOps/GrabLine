@@ -475,7 +475,8 @@ def _connect_ftp(
 ) -> ftplib.FTP:
     parts = urlsplit(url)
     user, password = _creds(url, store)
-    port = parts.port or _DEFAULT_PORTS["ftp"]
+    account = store.account_for(parts.scheme.lower(), parts.hostname or "", user) if store else None
+    port = parts.port or (account.port if account else 0) or _DEFAULT_PORTS["ftp"]
     # ftplib.FTP (plain, unencrypted) is deliberate: ftp:// is a scheme
     # GrabLine supports because users have servers that only speak it. It is
     # opt-in per URL - nothing upgrades or downgrades a scheme behind the user,
@@ -543,8 +544,8 @@ def _sftp_client(url: str, store: CredentialStore | None) -> tuple[Any, Any]:
 
     parts = urlsplit(url)
     user, secret = _creds(url, store)
-    port = parts.port or _DEFAULT_PORTS["sftp"]
-    account = store.account_for("sftp", parts.hostname or "", user) if store else None
+    account = store.account_for(parts.scheme.lower(), parts.hostname or "", user) if store else None
+    port = parts.port or (account.port if account else 0) or _DEFAULT_PORTS["sftp"]
     client = paramiko.SSHClient()
     # The user's own ~/.ssh/known_hosts first (a server they already trust in a
     # terminal is a server they trust here), then GrabLine's own store.
@@ -587,8 +588,8 @@ def _s3_client(url: str, store: CredentialStore | None, *, insecure: bool = Fals
     user, secret = _creds(url, store)
     account = store.account_for("s3", parts.hostname or "", user) if store else None
     kwargs: dict[str, Any] = {}
-    if account is not None and account.host and "." in account.host:
-        kwargs["endpoint_url"] = f"https://{account.host}"  # S3-compatible host
+    if account is not None and account.endpoint_url:
+        kwargs["endpoint_url"] = account.endpoint_url
     if user and secret:
         kwargs["aws_access_key_id"] = user
         kwargs["aws_secret_access_key"] = secret
@@ -682,13 +683,21 @@ def _list_s3(
     bucket = parts.netloc
     prefix = unquote(parts.path).lstrip("/")
     client = _s3_client(url, store, insecure=insecure)
-    result = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
     files: list[RemoteFile] = []
-    for obj in result.get("Contents", []):
-        key = obj["Key"]
-        if key.endswith("/"):
-            continue
-        files.append(RemoteFile(f"s3://{bucket}/{key}", key.rsplit("/", 1)[-1], int(obj["Size"])))
+    continuation: dict[str, str] = {}
+    while True:
+        result = client.list_objects_v2(Bucket=bucket, Prefix=prefix, **continuation)
+        for obj in result.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            files.append(
+                RemoteFile(f"s3://{bucket}/{key}", key.rsplit("/", 1)[-1], int(obj["Size"]))
+            )
+        token = result.get("NextContinuationToken")
+        if not result.get("IsTruncated") or not token:
+            break
+        continuation["ContinuationToken"] = token
     return files
 
 

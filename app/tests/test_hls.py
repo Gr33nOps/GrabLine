@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,19 @@ def _hls_job(db: Database, url: str, dest: Path, options: dict[str, Any] | None 
     return db.create_job(
         url, str(dest), "lecture.mp4", kind=JobKind.HLS, title="Lecture", options=options
     )
+
+
+def _failing_ffmpeg(dest: Path) -> Path:
+    """Launch a real failing process on each OS and record every invocation."""
+    if sys.platform == "win32":
+        stub = dest / "fake-ffmpeg.cmd"
+        stub.write_text('@echo off\n>> "%~dp0invocations.txt" echo run\nexit /b 1\n')
+    else:
+        stub = dest / "fake-ffmpeg.sh"
+        marker = dest / "invocations.txt"
+        stub.write_text(f'#!/bin/sh\necho run >> "{marker}"\nexit 1\n')
+        stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    return stub
 
 
 def test_hls_requires_ffmpeg(db: Database, dest: Path):
@@ -117,9 +131,7 @@ def test_transient_failure_is_retried_once(server: MediaServer, db: Database, de
     vod = b"#EXTM3U\n#EXTINF:2.0,\nseg000.ts\n#EXT-X-ENDLIST\n"
     server.add("/vod.m3u8", vod, content_type="application/vnd.apple.mpegurl")
     marker = dest / "invocations.txt"
-    stub = dest / "fake-ffmpeg.sh"
-    stub.write_text(f'#!/bin/sh\necho run >> "{marker}"\nexit 1\n')
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    stub = _failing_ffmpeg(dest)
 
     job = _hls_job(db, server.url("/vod.m3u8"), dest)
     status = HlsDownload(db, job, ffmpeg_path=str(stub)).run()
@@ -141,9 +153,7 @@ def test_remux_failure_keeps_segments_and_does_not_redownload(
         ct = "application/vnd.apple.mpegurl" if name.endswith(".m3u8") else "video/mp2t"
         server.add(f"/hls/{name}", content, content_type=ct)
     marker = dest / "invocations.txt"
-    stub = dest / "fake-ffmpeg.sh"
-    stub.write_text(f'#!/bin/sh\necho run >> "{marker}"\nexit 1\n')  # remux always fails
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    stub = _failing_ffmpeg(dest)
 
     job = _hls_job(db, server.url("/hls/index.m3u8"), dest)
     status = HlsDownload(db, job, ffmpeg_path=str(stub)).run()
@@ -608,8 +618,9 @@ def test_dash_reassembles_complete_video_and_audio(server, db, dest, tmp_path):
             "dash",
             "-seg_duration",
             "1",
-            str(directory / "index.mpd"),
+            "index.mpd",
         ],
+        cwd=directory,
         check=True,
         capture_output=True,
     )

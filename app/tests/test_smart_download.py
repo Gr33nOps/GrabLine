@@ -451,7 +451,7 @@ def test_downloads_deno_when_no_runtime_and_only_for_youtube_or_session(
     # YouTube, no session: Deno fetched because nothing is installed.
     yt = SmartDownload(db, _smart_job(db, "https://youtu.be/x", dest, "v.mp4"), ffmpeg_path=None)
     yt._ensure_js_runtime()
-    assert calls == ["deno"] and yt._js_runtime == ("deno", "/x/deno")
+    assert calls == ["deno"] and yt._js_runtime == ("deno", str(Path("/x/deno")))
 
 
 def test_js_runtime_failure_is_non_fatal(db: Database, dest: Path, monkeypatch: pytest.MonkeyPatch):

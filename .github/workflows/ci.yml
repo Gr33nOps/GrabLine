@@ -123,4 +123,5 @@ jobs:
             app/tests/test_instance.py \
             app/tests/test_proc.py \
             app/tests/test_host_install.py \
-            app/tests/test_browser_setup.py
+            app/tests/test_browser_setup.py \
+            app/tests/test_cloud_connections.py

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -15,6 +16,10 @@ from app.core.settings import Settings
 from app.db.database import Database
 from app.tests.media_server import MediaServer
 
+FFMPEG_NAME = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+FFPROBE_NAME = "ffprobe.exe" if sys.platform == "win32" else "ffprobe"
+
+# Synthetic archive payload: real FFmpeg execution is covered by the media tests.
 FAKE_BINARY = b"#!/bin/sh\necho 'ffmpeg version fake-1.0'\n"
 
 
@@ -49,31 +54,31 @@ def _pins_for(
 def test_install_from_tar_extracts_only_binaries(server: MediaServer, tmp_path: Path):
     archive = _tar_xz(
         {
-            "ffmpeg-test/bin/ffmpeg": FAKE_BINARY,
-            "ffmpeg-test/bin/ffprobe": FAKE_BINARY,
+            f"ffmpeg-test/bin/{FFMPEG_NAME}": FAKE_BINARY,
+            f"ffmpeg-test/bin/{FFPROBE_NAME}": FAKE_BINARY,
             "ffmpeg-test/doc/README.txt": b"docs",
         }
     )
     url = server.add("/ff.tar.xz", archive)
     bin_dir = tmp_path / "bin"
 
-    path = ensure_ffmpeg(bin_dir=bin_dir, pins=_pins_for(url, archive, "tar.xz"))
+    path = ensure_ffmpeg(bin_dir=bin_dir, pins=_pins_for(url, archive, "tar.xz"), verify_run=False)
 
-    assert path == bin_dir / "ffmpeg"
-    assert (bin_dir / "ffprobe").exists()
+    assert path == bin_dir / FFMPEG_NAME
+    assert (bin_dir / FFPROBE_NAME).exists()
     assert not (bin_dir / "README.txt").exists()
 
 
 def test_install_from_zip(server: MediaServer, tmp_path: Path):
-    archive = _zip({"ffmpeg": FAKE_BINARY})
+    archive = _zip({FFMPEG_NAME: FAKE_BINARY})
     url = server.add("/ff.zip", archive)
     bin_dir = tmp_path / "bin"
-    path = ensure_ffmpeg(bin_dir=bin_dir, pins=_pins_for(url, archive, "zip"))
+    path = ensure_ffmpeg(bin_dir=bin_dir, pins=_pins_for(url, archive, "zip"), verify_run=False)
     assert path.exists()
 
 
 def test_checksum_mismatch_refuses_install(server: MediaServer, tmp_path: Path):
-    archive = _tar_xz({"bin/ffmpeg": FAKE_BINARY})
+    archive = _tar_xz({f"bin/{FFMPEG_NAME}": FAKE_BINARY})
     url = server.add("/evil.tar.xz", archive)
     pins: dict[str, tuple[PinnedArchive, ...]] = {
         platform_key(): (PinnedArchive(url=url, sha256="0" * 64, format="tar.xz"),)
@@ -81,7 +86,7 @@ def test_checksum_mismatch_refuses_install(server: MediaServer, tmp_path: Path):
     bin_dir = tmp_path / "bin"
     with pytest.raises(DownloadError, match="integrity"):
         ensure_ffmpeg(bin_dir=bin_dir, pins=pins)
-    assert not (bin_dir / "ffmpeg").exists()
+    assert not (bin_dir / FFMPEG_NAME).exists()
 
 
 def test_unknown_platform_is_friendly(tmp_path: Path):

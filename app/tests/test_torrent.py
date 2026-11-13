@@ -41,9 +41,9 @@ def test_create_and_parse_roundtrip(tmp_path: Path):
     meta = parse_torrent(data)
     assert meta.name == "share"
     assert meta.total_size == 80_000  # pad files don't count
-    assert [(f.path, f.size) for f in meta.files] == [
-        ("share/a.bin", 50_000),
-        ("share/b.bin", 30_000),
+    assert [(Path(f.path), f.size) for f in meta.files] == [
+        (Path("share") / "a.bin", 50_000),
+        (Path("share") / "b.bin", 30_000),
     ]
     assert meta.comment == "hello"
     assert meta.trackers == ("http://tr.example/announce",)

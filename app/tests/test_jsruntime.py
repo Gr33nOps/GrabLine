@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import sys
 import zipfile
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from app.core import jsruntime
 from app.core.errors import DownloadError
 from app.core.ffmpeg_pins import PinnedArchive
 from app.tests.media_server import MediaServer
+
+DENO_NAME = "deno.exe" if sys.platform == "win32" else "deno"
 
 FAKE_DENO = b"#!/bin/sh\necho 'deno 2.9.2'\n"
 
@@ -46,7 +49,7 @@ def test_deno_pin_covers_every_platform():
 
 
 def test_ensure_deno_installs_and_verifies_hash(server: MediaServer, tmp_path: Path):
-    archive = _zip({"deno": FAKE_DENO})  # release zips carry the binary at the root
+    archive = _zip({DENO_NAME: FAKE_DENO})  # release zips carry the binary at the root
     url = server.add("/deno.zip", archive)
     bin_dir = tmp_path / "bin"
 
@@ -61,7 +64,7 @@ def test_ensure_deno_installs_once_under_concurrency(server: MediaServer, tmp_pa
     # the same dir (Windows would lock the file); the lock installs it once.
     import threading
 
-    archive = _zip({"deno": FAKE_DENO})
+    archive = _zip({DENO_NAME: FAKE_DENO})
     url = server.add("/deno.zip", archive)
     pin = _pin_for(url, archive)
     bin_dir = tmp_path / "bin"
@@ -76,12 +79,13 @@ def test_ensure_deno_installs_once_under_concurrency(server: MediaServer, tmp_pa
     for t in threads:
         t.join()
 
+    assert len(results) == 5
     assert all(r == jsruntime.managed_deno(bin_dir) for r in results)
     assert server.request_count("/deno.zip") == 1  # downloaded exactly once
 
 
 def test_ensure_deno_rejects_a_bad_hash(server: MediaServer, tmp_path: Path):
-    archive = _zip({"deno": FAKE_DENO})
+    archive = _zip({DENO_NAME: FAKE_DENO})
     url = server.add("/deno.zip", archive)
     bad = PinnedArchive(url=url, sha256="00" * 32, format="zip")
 
@@ -97,7 +101,7 @@ def test_ensure_deno_reuses_existing_on_path(tmp_path: Path, monkeypatch: pytest
         bin_dir=tmp_path / "bin",
         pin=PinnedArchive(url="http://127.0.0.1:1/none.zip", sha256="x", format="zip"),
     )
-    assert str(path) == "/usr/bin/deno"
+    assert path == Path("/usr/bin/deno")
 
 
 def test_detect_js_runtime_prefers_managed_deno(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -588,7 +588,7 @@ def test_create_torrent_dialog_fields(db: Database):
     dialog.trackers_edit.setPlainText("http://tr1/announce\n\nhttp://tr2/announce")
     dialog.webseeds_edit.setPlainText("https://mirror.example/share/")
     dialog.private_check.setChecked(True)
-    assert str(dialog.source()) == "/data/share"
+    assert dialog.source() == Path("/data/share")
     assert dialog.trackers() == ("http://tr1/announce", "http://tr2/announce")
     assert dialog.web_seeds() == ("https://mirror.example/share/",)
     assert dialog.private() is True

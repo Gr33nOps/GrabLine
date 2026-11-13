@@ -992,7 +992,10 @@ def test_a_long_job_name_never_widens_the_queue_page(db: Database, dest: Path):
         # Nothing on the page demands more width than the window offers.
         assert view._body_holder.minimumSizeHint().width() <= view.width()
 
-        view.resize(1200, 600)
+        extra = (
+            widgets.active.fontMetrics().horizontalAdvance(enormous) - widgets.active.width() + 32
+        )
+        view.resize(view.width() + max(extra, 0), 600)
         QApplication.processEvents()
         assert widgets.active.text() == enormous  # room again: shown in full
         view.hide()

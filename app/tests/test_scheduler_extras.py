@@ -5,6 +5,7 @@ the completion script, and the completion sound plumbing.
 
 from __future__ import annotations
 
+import shlex
 import sys
 import time
 from datetime import datetime, timedelta
@@ -52,10 +53,12 @@ def test_on_battery_reads_psutil_and_caches(monkeypatch: pytest.MonkeyPatch):
 def test_run_script_appends_file_path(tmp_path: Path):
     marker = tmp_path / "ran.txt"
     target = tmp_path / "movie.mkv"
-    script = tmp_path / "hook.sh"
-    script.write_text(f'#!/bin/sh\necho "$1" > "{marker}"\n')
-    script.chmod(0o755)
-    assert scripts.run_script(str(script), str(target))
+    script = tmp_path / "hook.py"
+    script.write_text(
+        "import sys\nfrom pathlib import Path\nPath(sys.argv[1]).write_text(sys.argv[2])\n"
+    )
+    command = shlex.join([sys.executable, str(script), str(marker)])
+    assert scripts.run_script(command, str(target))
     deadline = time.time() + 5
     while time.time() < deadline and not marker.exists():
         time.sleep(0.05)
