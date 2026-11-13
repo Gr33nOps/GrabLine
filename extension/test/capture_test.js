@@ -1,5 +1,33 @@
 import { assertEquals } from "./harness.js";
 
+Deno.test("simultaneous MP4 and HLS responses both survive in the popup media list", async () => {
+  const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
+  const start = code.indexOf("const MEDIA_CONTENT_TYPES =");
+  const end = code.indexOf("api.webRequest.onHeadersReceived.addListener", start);
+  const saved = {};
+  const api = {
+    tabs: { get: async () => ({ title: "QA media page" }) },
+    storage: { session: {
+      get: async (key) => structuredClone({ [key]: saved[key] ?? [] }),
+      set: async (values) => Object.assign(saved, structuredClone(values)),
+    } },
+    action: { setBadgeText: () => {}, setBadgeBackgroundColor: () => {} },
+  };
+  const record = new Function("api", `
+    const MAX_ITEMS_PER_TAB = 64;
+    ${code.slice(start, end)}
+    return recordMedia;
+  `)(api);
+  await Promise.all([
+    record(7, { url: "https://fixture.example/video.mp4", kind: "video" }),
+    record(7, { url: "https://fixture.example/index.m3u8", kind: "stream" }),
+  ]);
+  assertEquals(saved["tab:7"].map((item) => item.url).sort(), [
+    "https://fixture.example/index.m3u8",
+    "https://fixture.example/video.mp4",
+  ]);
+});
+
 Deno.test("sniffer ignores YouTube playback chunks but keeps other media", async () => {
   const code = await Deno.readTextFile(new URL("../background.js", import.meta.url));
   const start = code.indexOf("const MEDIA_CONTENT_TYPES =");

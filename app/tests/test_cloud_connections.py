@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from app.core import net
 from app.core.credentials import CloudAccount, CredentialStore
 from app.db.database import Database
 from app.engines import cloud
@@ -173,3 +174,68 @@ def test_s3_folder_collects_all_pages_and_skips_directory_markers(monkeypatch):
         "s3://qa-bucket/folder/first.bin",
         "s3://qa-bucket/folder/second.bin",
     ]
+
+
+@pytest.mark.parametrize("scheme", ["ftp", "sftp", "s3", "webdav"])
+def test_connection_rejection_marks_job_failed_instead_of_escaping(db, dest, monkeypatch, scheme):
+    from app.core.models import JobKind, JobStatus
+
+    def rejected(*args, **kwargs):
+        raise PermissionError("test server rejected credentials")
+
+    if scheme == "webdav":
+        monkeypatch.setattr(net, "build_client", rejected)
+    else:
+        monkeypatch.setattr(
+            cloud,
+            {"ftp": "_connect_ftp", "sftp": "_sftp_client", "s3": "_s3_client"}[scheme],
+            rejected,
+        )
+    job = db.create_job(
+        f"{scheme}://files.example/file.bin", str(dest), "file.bin", kind=JobKind.CLOUD
+    )
+    assert cloud.CloudDownload(db, job).run() is JobStatus.FAILED
+    fresh = db.get_job(job.id)
+    assert fresh is not None and fresh.status is JobStatus.FAILED
+    assert fresh.error is not None and "rejected credentials" in fresh.error
+
+
+@pytest.mark.parametrize("scheme", ["webdav", "webdavs"])
+def test_saved_webdav_login_is_available_over_http_and_https(store, scheme):
+    store.save_account(CloudAccount("webdav", "files.example", "qa"), "qa-password")
+    assert cloud._creds(f"{scheme}://files.example/file.bin", store) == ("qa", "qa-password")
+
+
+@pytest.mark.parametrize(
+    ("scheme", "url_port", "expected"),
+    [("webdav", "", 9123), ("webdavs", "", 9123), ("webdavs", ":9999", 9999)],
+)
+def test_webdav_saved_port_and_explicit_url_precedence(
+    db, dest, store, monkeypatch, scheme, url_port, expected
+):
+    import httpx
+
+    from app.core.models import JobKind, JobStatus
+
+    seen = []
+
+    def respond(request):
+        seen.append(request.url.port)
+        return httpx.Response(200, content=b"test", headers={"Content-Length": "4"})
+
+    monkeypatch.setattr(
+        net, "build_client", lambda **kwargs: httpx.Client(transport=httpx.MockTransport(respond))
+    )
+    store.save_account(CloudAccount("webdav", "files.example", "qa", 9123), "qa-password")
+    job = db.create_job(
+        f"{scheme}://files.example{url_port}/file.bin", str(dest), "file.bin", kind=JobKind.CLOUD
+    )
+    assert cloud.CloudDownload(db, job, credentials=store).run() is JobStatus.COMPLETED
+    assert seen == [expected]
+    assert job.dest_path.read_bytes() == b"test"
+
+
+def test_webdav_ipv6_url_keeps_host_brackets():
+    assert cloud._webdav_http_url("webdavs://qa:secret@[::1]:9123/file.bin?token=qa") == (
+        "https://[::1]:9123/file.bin?token=qa"
+    )

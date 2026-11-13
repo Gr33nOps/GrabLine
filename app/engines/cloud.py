@@ -63,6 +63,8 @@ def _creds(url: str, store: CredentialStore | None) -> tuple[str, str]:
         return user, password
     if store is not None:
         account = store.account_for(scheme, parts.hostname or "", user)
+        if account is None and scheme == "webdavs":
+            account = store.account_for("webdav", parts.hostname or "", user)
         if account is not None:
             secret = store.secret_for(account) or ""
             return account.username or user, secret
@@ -134,8 +136,6 @@ class CloudDownload:
             return self._paused()
         except _Cancelled:
             return self._cancelled()
-        except (DownloadError, OSError, ssl.SSLError, ftplib.all_errors) as exc:  # type: ignore[misc]
-            return self._failed(str(exc))
         except Exception as exc:  # paramiko/boto3 raise their own error trees
             return self._failed(str(exc))
         return self._failed(f"unsupported cloud scheme: {scheme}")
@@ -329,8 +329,16 @@ class CloudDownload:
     # --------------------------------------------------------------- WebDAV
 
     def _run_webdav(self) -> JobStatus:
-        http_url = _webdav_http_url(self.job.url)
         user, secret = _creds(self.job.url, self.store)
+        parts = urlsplit(self.job.url)
+        account = (
+            self.store.account_for(parts.scheme.lower(), parts.hostname or "", user)
+            if self.store
+            else None
+        )
+        if account is None and self.store and parts.scheme.lower() == "webdavs":
+            account = self.store.account_for("webdav", parts.hostname or "", user)
+        http_url = _webdav_http_url(self.job.url, default_port=account.port if account else 0)
         auth = httpx.BasicAuth(user, secret) if user else None
         part, offset = self._sink()
         headers = {"Range": f"bytes={offset}-"} if offset else {}
@@ -435,7 +443,7 @@ def _range_starts_at(header: str | None, offset: int) -> bool:
     return total == "*" or int(total) > end >= start
 
 
-def _webdav_http_url(url: str) -> str:
+def _webdav_http_url(url: str, *, default_port: int = 0) -> str:
     """The http(s) URL behind a ``webdav://`` / ``webdavs://`` address.
 
     The query survives: plenty of WebDAV endpoints (Nextcloud public shares,
@@ -447,9 +455,12 @@ def _webdav_http_url(url: str) -> str:
     parts = urlsplit(url)
     scheme = "https" if parts.scheme == "webdavs" else "http"
     netloc = parts.hostname or ""
+    if ":" in netloc:
+        netloc = f"[{netloc}]"
     with contextlib.suppress(ValueError):  # malformed port: fall back to the host
-        if parts.port:
-            netloc += f":{parts.port}"
+        port = parts.port or default_port
+        if port:
+            netloc += f":{port}"
     return urlunsplit((scheme, netloc, parts.path, parts.query, parts.fragment))
 
 

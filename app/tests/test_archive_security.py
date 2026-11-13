@@ -113,3 +113,39 @@ def test_external_normal_still_extracts(tmp_path: Path):
     subprocess.run([sevenz, "a", str(bundle), str(payload)], capture_output=True, check=True)
     out = archive.extract(bundle, tmp_path / "out")
     assert (out / "hello.txt").read_text() == "hi there"
+
+
+@pytest.mark.skipif(_seven_zip() is None, reason="needs 7z")
+def test_external_listing_reports_members_not_tool_error_text(tmp_path: Path):
+    import subprocess
+
+    payload = tmp_path / "hello.txt"
+    payload.write_text("hi there")
+    bundle = tmp_path / "listing.7z"
+    tool = _seven_zip()
+    assert tool is not None
+    subprocess.run([tool, "a", str(bundle), str(payload)], capture_output=True, check=True)
+    entries = archive.list_entries(bundle)
+    assert [(entry.name, entry.size, entry.is_dir) for entry in entries] == [
+        ("hello.txt", 8, False)
+    ]
+
+
+@pytest.mark.skipif(_seven_zip() is None, reason="needs 7z")
+def test_external_encrypted_archive_requires_correct_password(tmp_path: Path):
+    import subprocess
+
+    payload = tmp_path / "secret.txt"
+    payload.write_text("test-only payload")
+    bundle = tmp_path / "encrypted.7z"
+    tool = _seven_zip()
+    assert tool is not None
+    subprocess.run(
+        [tool, "a", "-pqa-test-password", str(bundle), str(payload)],
+        capture_output=True,
+        check=True,
+    )
+    with pytest.raises(archive.PasswordRequired):
+        archive.extract(bundle, tmp_path / "denied", passwords=("wrong-password",))
+    out = archive.extract(bundle, tmp_path / "accepted", passwords=("qa-test-password",))
+    assert (out / "secret.txt").read_text() == "test-only payload"

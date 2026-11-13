@@ -180,7 +180,7 @@ def _gzip_size(path: Path) -> int | None:
 
 def _list_external(path: Path) -> tuple[ArchiveEntry, ...]:
     tool = _external_tool(path, listing=True)
-    name = Path(tool).name
+    name = Path(tool).stem.lower()
     if name in ("7z", "7za"):
         result = _run_tool([tool, "l", "-slt", "-p", str(path)])
         return _parse_7z_listing(result.stdout)
@@ -375,7 +375,7 @@ def _extract_external(
 ) -> None:
     _guard_external_entries(path, target, members)
     tool = _external_tool(path)
-    name = Path(tool).name
+    name = Path(tool).stem.lower()
     selected = list(members or ())
     last_output = ""
     for password in ["", *passwords]:

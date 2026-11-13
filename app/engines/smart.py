@@ -528,11 +528,23 @@ def _snap_to_tier(height: int) -> int | None:
 def curate_formats(info: dict[str, Any]) -> tuple[QualityOption, ...]:
     """Boil the raw format list down to the curated picker (F0.3)."""
     formats: list[dict[str, Any]] = info.get("formats") or []
-    video_formats = [f for f in formats if f.get("vcodec") not in (None, "none")]
+    video_formats = [
+        f
+        for f in formats
+        if f.get("vcodec") not in (None, "none", "images")
+        or (
+            f.get("vcodec") is None
+            and f.get("height")
+            and f.get("ext")
+            in ("mp4", "webm", "mkv", "mov", "flv", "ts", "m4v", "avi", "3gp", "ogv")
+        )
+    ]
     audio_formats = [
         f
         for f in formats
-        if f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none")
+        if f.get("acodec") not in (None, "none")
+        and f.get("vcodec") in (None, "none")
+        and f not in video_formats
     ]
 
     best_audio = max(audio_formats, key=lambda f: f.get("abr") or 0, default=None)

@@ -431,7 +431,22 @@ function classify(details) {
   return null;
 }
 
+const mediaWriteQueues = new Map();
+
 async function recordMedia(tabId, item) {
+  // MP4 and manifest responses often arrive together. Serialize each tab's
+  // read/modify/write so one storage update cannot erase another response.
+  const previous = mediaWriteQueues.get(tabId) ?? Promise.resolve();
+  const pending = previous.catch(() => {}).then(() => storeMedia(tabId, item));
+  mediaWriteQueues.set(tabId, pending);
+  try {
+    await pending;
+  } finally {
+    if (mediaWriteQueues.get(tabId) === pending) mediaWriteQueues.delete(tabId);
+  }
+}
+
+async function storeMedia(tabId, item) {
   // Name the media by what the tab is showing right now - the URL leaf of a
   // stream is usually a meaningless hash, but the tab title is the video.
   try {

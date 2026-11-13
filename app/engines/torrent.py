@@ -126,10 +126,13 @@ def parse_torrent(data: bytes) -> TorrentMeta:
     preview and the file-priority list)."""
     lt = _lt()
     try:
-        info = lt.torrent_info(lt.bdecode(data))
+        params = lt.load_torrent_buffer(data)
+        info = params.ti
     except (RuntimeError, ValueError) as exc:
         raise DownloadError(f"not a valid torrent file ({exc})") from exc
-    storage = info.files()
+    # layout/list_files are new in 2.1; keep support for the 2.0 wheels.
+    layout = getattr(info, "layout", None)
+    storage = layout() if layout is not None else info.files()
     # Hybrid v1/v2 torrents carry hidden .pad alignment files - skip them but
     # keep the real libtorrent index so priorities still line up.
     files = tuple(
@@ -142,8 +145,8 @@ def parse_torrent(data: bytes) -> TorrentMeta:
         name=str(info.name()),
         total_size=sum(entry.size for entry in files),
         files=files,
-        comment=str(info.comment() or ""),
-        trackers=tuple(t.url for t in info.trackers()),
+        comment=str(getattr(params, "comment", None) or info.comment() or ""),
+        trackers=tuple(params.trackers),
         num_raw_files=int(storage.num_files()),
         info_hash=hashes[0] if hashes else "",
         info_hashes=hashes,
@@ -269,9 +272,15 @@ def create_torrent_file(
     lt = _lt()
     if not source.exists():
         raise DownloadError(f"nothing to share at {source}")
-    storage = lt.file_storage()
-    lt.add_files(storage, str(source))
-    if storage.num_files() == 0:
+    list_files = getattr(lt, "list_files", None)
+    if list_files is not None:
+        storage = list_files(str(source))
+        file_count = len(storage)
+    else:
+        storage = lt.file_storage()
+        lt.add_files(storage, str(source))
+        file_count = storage.num_files()
+    if file_count == 0:
         raise DownloadError("the folder is empty, nothing to share")
     creator = lt.create_torrent(storage)
     creator.set_creator("GrabLine")

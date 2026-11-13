@@ -514,3 +514,16 @@ def test_extract_does_not_implicitly_search_windows_path(monkeypatch, with_runti
         force_generic=False,
     )
     assert result["id"] == "test"
+
+
+def test_height_bearing_mp4_without_codec_metadata_has_video_choices():
+    # A real Twitch clip format carries height/ext but omits both codec keys.
+    options = curate_formats({"formats": [{"format_id": "1080", "height": 1080, "ext": "mp4"}]})
+    assert any(o.label == "Best" and o.kind == "video" for o in options)
+    assert any(o.label == "1080p" and o.kind == "video" for o in options)
+
+
+@pytest.mark.parametrize("codec", [None, "images", "none"])
+def test_storyboards_never_become_downloadable_video_choices(codec):
+    options = curate_formats({"formats": [{"height": 1080, "ext": "mhtml", "vcodec": codec}]})
+    assert not any(o.kind == "video" for o in options)
