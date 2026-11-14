@@ -1,0 +1,19 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The stream is open; binary frames with this streamId follow.",
+  "state": "authed",
+  "message": {
+    "id": "r-31",
+    "type": "fetchStart",
+    "protocolVersion": 6,
+    "streamId": 7,
+    "jobId": 40,
+    "name": "Sample video (1080p).mp4",
+    "size": 73400320,
+    "offset": 0,
+    "length": 73400320,
+    "etag": "s73400320-m1794699400",
+    "chunkSize": 262144,
+    "windowBytes": 8388608
+  }
+}

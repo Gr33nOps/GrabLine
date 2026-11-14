@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Magnet links are accepted as on the extension.",
+  "state": "authed",
+  "message": {
+    "id": "r-6",
+    "type": "download",
+    "url": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=sample",
+    "requestId": "req-0003-0f6a2d7c5b1e4a99"
+  }
+}

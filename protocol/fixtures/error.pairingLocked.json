@@ -1,0 +1,12 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Error reply with code pairingLocked. 'message' is English text for logs only; the phone shows its own words.",
+  "state": "preauth",
+  "message": {
+    "id": "r-7",
+    "type": "error",
+    "protocolVersion": 6,
+    "code": "pairingLocked",
+    "message": "too many wrong codes"
+  }
+}

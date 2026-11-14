@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Next page, using nextCursor from the previous reply.",
+  "state": "authed",
+  "message": {
+    "id": "r-15",
+    "type": "jobs",
+    "limit": 50,
+    "cursor": "Mzk"
+  }
+}

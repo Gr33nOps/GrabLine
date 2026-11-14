@@ -1,0 +1,19 @@
+{
+  "direction": "phone-to-pc",
+  "description": "QA-09: a 2 MB text frame. The file does not hold the frame; the test builds it by padding 'title' until the encoded message is totalBytes long. The PC closes the connection with 1009 and the listener keeps running.",
+  "state": "authed",
+  "message": {
+    "id": "x-20",
+    "type": "download",
+    "url": "https://example.com/a.zip",
+    "requestId": "req-bad-0000000000000002",
+    "title": "<pad>"
+  },
+  "expectError": "tooLarge",
+  "expectClose": 1009,
+  "generate": {
+    "padField": "title",
+    "padChar": "A",
+    "totalBytes": 2097152
+  }
+}

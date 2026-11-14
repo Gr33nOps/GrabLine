@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "setSpeedLimit without bytesPerSecond.",
+  "state": "authed",
+  "message": {
+    "id": "x-9",
+    "type": "global",
+    "action": "setSpeedLimit"
+  },
+  "expectError": "badRequest"
+}

@@ -1,0 +1,32 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Authentication succeeded. features gates optional (Phase 4) messages; addresses refreshes the phone's address list.",
+  "state": "preauth",
+  "message": {
+    "id": "r-2",
+    "type": "authOk",
+    "protocolVersion": 6,
+    "pcId": "A3D7Za2aw26jbGofVV3ZAQ",
+    "pcName": "Study PC",
+    "appVersion": "1.4.0",
+    "appRunning": true,
+    "serverTime": 1794700000,
+    "addresses": [
+      "192.168.1.20",
+      "10.8.0.3",
+      "[fd7a:115c:a1e0::20]"
+    ],
+    "port": 47821,
+    "features": [
+      "jobs",
+      "control",
+      "global",
+      "queues",
+      "analyze",
+      "events",
+      "files",
+      "fetch",
+      "outbox"
+    ]
+  }
+}

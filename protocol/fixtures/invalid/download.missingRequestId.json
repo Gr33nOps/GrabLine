@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "requestId is required on download.",
+  "state": "authed",
+  "message": {
+    "id": "x-1",
+    "type": "download",
+    "url": "https://example.com/a.zip"
+  },
+  "expectError": "badRequest"
+}

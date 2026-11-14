@@ -1,0 +1,12 @@
+{
+  "direction": "phone-to-pc",
+  "description": "QA-40 style: a path where a job id belongs.",
+  "state": "authed",
+  "message": {
+    "id": "x-5",
+    "type": "control",
+    "jobId": "C:\\Users\\me\\file.bin",
+    "action": "remove"
+  },
+  "expectError": "badRequest"
+}

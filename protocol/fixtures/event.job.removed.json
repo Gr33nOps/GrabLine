@@ -1,0 +1,13 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The job was removed from the list.",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "job.removed",
+    "seq": 6,
+    "ts": 1794700006,
+    "jobId": 41
+  }
+}

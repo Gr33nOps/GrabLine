@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "The extension's gallery message is not offered to phones.",
+  "state": "authed",
+  "message": {
+    "id": "x-3",
+    "type": "gallery",
+    "urls": [
+      "https://example.com/a.jpg"
+    ]
+  },
+  "expectError": "unsupported"
+}

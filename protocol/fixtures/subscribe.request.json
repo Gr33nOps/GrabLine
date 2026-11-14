@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Turn on live events for this connection.",
+  "state": "authed",
+  "message": {
+    "id": "r-40",
+    "type": "subscribe",
+    "topics": [
+      "jobs",
+      "global"
+    ]
+  }
+}

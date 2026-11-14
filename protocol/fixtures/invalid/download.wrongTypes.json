@@ -1,0 +1,15 @@
+{
+  "direction": "phone-to-pc",
+  "description": "url is a number, quality is a list.",
+  "state": "authed",
+  "message": {
+    "id": "x-1",
+    "type": "download",
+    "url": 42,
+    "requestId": "req-bad-0000000000000001",
+    "quality": [
+      "best"
+    ]
+  },
+  "expectError": "badRequest"
+}

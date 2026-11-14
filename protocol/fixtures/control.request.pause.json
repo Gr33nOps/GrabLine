@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Pause one job by id.",
+  "state": "authed",
+  "message": {
+    "id": "r-16",
+    "type": "control",
+    "jobId": 41,
+    "action": "pause"
+  }
+}

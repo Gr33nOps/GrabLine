@@ -1,0 +1,17 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The same requestId (or the same link within 5 s) again: the first handoff is returned, nothing new is queued (QA-14, QA-15).",
+  "state": "authed",
+  "message": {
+    "id": "r-9",
+    "type": "queued",
+    "protocolVersion": 6,
+    "handoffId": 318,
+    "handoffUrl": "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+    "previousJobId": 0,
+    "appRunning": true,
+    "requestId": "req-0001-7b1e4c1a9f3d4e55",
+    "duplicate": true,
+    "jobId": 41
+  }
+}

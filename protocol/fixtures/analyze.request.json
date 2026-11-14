@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Ask the PC which qualities a video link offers.",
+  "state": "authed",
+  "message": {
+    "id": "r-27",
+    "type": "analyze",
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  }
+}

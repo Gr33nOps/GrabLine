@@ -1,0 +1,15 @@
+{
+  "direction": "pc-to-phone",
+  "description": "pong: the v5 fields plus id, pcId, pcName, appVersion, serverTime.",
+  "state": "authed",
+  "message": {
+    "id": "r-3",
+    "type": "pong",
+    "protocolVersion": 6,
+    "appRunning": true,
+    "pcId": "A3D7Za2aw26jbGofVV3ZAQ",
+    "pcName": "Study PC",
+    "appVersion": "1.4.0",
+    "serverTime": 1794700000
+  }
+}

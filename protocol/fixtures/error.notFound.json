@@ -1,0 +1,12 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Error reply with code notFound. 'message' is English text for logs only; the phone shows its own words.",
+  "state": "authed",
+  "message": {
+    "id": "r-7",
+    "type": "error",
+    "protocolVersion": 6,
+    "code": "notFound",
+    "message": "no such job"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The link is in the handoffs table. jobId is null until the app claims the handoff; the job arrives as a job.added event carrying the same requestId.",
+  "state": "authed",
+  "message": {
+    "id": "r-5",
+    "type": "queued",
+    "protocolVersion": 6,
+    "handoffId": 318,
+    "handoffUrl": "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+    "previousJobId": 0,
+    "appRunning": true,
+    "requestId": "req-0001-7b1e4c1a9f3d4e55",
+    "duplicate": false,
+    "jobId": null
+  }
+}

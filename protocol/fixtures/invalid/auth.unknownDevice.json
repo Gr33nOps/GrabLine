@@ -1,0 +1,14 @@
+{
+  "direction": "phone-to-pc",
+  "description": "auth for a device id the PC does not know. Same reply as a bad signature.",
+  "state": "preauth",
+  "message": {
+    "id": "x-14",
+    "type": "auth",
+    "protocolVersion": 6,
+    "deviceId": "uD_okqTpI9aCLgizY9Xbdg",
+    "signature": "MEUCIQDEkNVli0ImyofhN_Wu6-4n3CBTJwbf9PLA_GpHelIhsAIgGE-UGdJQPUyd2T_zsX1zDXFD6yn-mSsGqKBL67H4TCM"
+  },
+  "expectError": "unauthorized",
+  "expectClose": 4401
+}

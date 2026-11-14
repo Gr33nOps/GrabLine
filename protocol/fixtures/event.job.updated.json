@@ -1,0 +1,29 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Status, name, size or queue changed: the full job.",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "job.updated",
+    "seq": 2,
+    "ts": 1794700002,
+    "job": {
+      "id": 41,
+      "url": "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+      "name": "ubuntu-26.04-desktop-amd64.iso",
+      "status": "downloading",
+      "kind": "direct",
+      "downloaded": 0,
+      "total": 6144000000,
+      "speed": 0,
+      "eta": null,
+      "queueId": null,
+      "createdAt": 1794700000,
+      "finishedAt": null,
+      "error": null,
+      "requestId": "req-0001-7b1e4c1a9f3d4e55",
+      "fetchable": false
+    }
+  }
+}

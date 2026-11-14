@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "QA-05: an unpaired client asks for the job list.",
+  "state": "preauth",
+  "message": {
+    "id": "x-13",
+    "type": "jobs"
+  },
+  "expectError": "unauthorized",
+  "expectClose": 4401
+}

@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "The smallest valid download: quality defaults to best, default queue, default folder.",
+  "state": "authed",
+  "message": {
+    "id": "r-5",
+    "type": "download",
+    "url": "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+    "requestId": "req-0001-7b1e4c1a9f3d4e55"
+  }
+}

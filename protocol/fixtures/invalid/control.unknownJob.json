@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "A job id that does not exist.",
+  "state": "authed",
+  "message": {
+    "id": "x-7",
+    "type": "control",
+    "jobId": 999999,
+    "action": "pause"
+  },
+  "expectError": "notFound",
+  "precondition": "no job with id 999999"
+}

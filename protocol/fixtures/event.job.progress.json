@@ -1,0 +1,18 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Progress only; at most one per job per second.",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "job.progress",
+    "seq": 3,
+    "ts": 1794700003,
+    "jobId": 41,
+    "status": "downloading",
+    "downloaded": 1288490188,
+    "total": 6144000000,
+    "speed": 11534336,
+    "eta": 421
+  }
+}

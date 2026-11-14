@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "A type this PC does not know.",
+  "state": "authed",
+  "message": {
+    "id": "x-2",
+    "type": "shutdownPc"
+  },
+  "expectError": "unsupported"
+}

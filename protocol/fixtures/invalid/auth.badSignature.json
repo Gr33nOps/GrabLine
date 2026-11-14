@@ -1,0 +1,14 @@
+{
+  "direction": "phone-to-pc",
+  "description": "auth with a signature over the wrong transcript.",
+  "state": "preauth",
+  "message": {
+    "id": "x-15",
+    "type": "auth",
+    "protocolVersion": 6,
+    "deviceId": "KsucBZHeyJguN6H0BzJQiw",
+    "signature": "MEQCICPQJg2c30RaLUV_GbAncNHLjLZS9m_SX46eRi3W6staAiApqJ_wbKDk5himCzHTxFPSJdAmiRBtFwZT8Yd-OsYLgg"
+  },
+  "expectError": "unauthorized",
+  "expectClose": 4401
+}

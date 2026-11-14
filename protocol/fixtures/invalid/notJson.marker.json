@@ -1,0 +1,9 @@
+{
+  "direction": "phone-to-pc",
+  "description": "A text frame that is not JSON (send 'raw' as the frame). Also applies to a JSON array or string at the top level, and to any binary frame from the phone.",
+  "state": "authed",
+  "message": null,
+  "expectError": "badRequest",
+  "expectClose": 4400,
+  "raw": "{\"type\": \"ping\", "
+}

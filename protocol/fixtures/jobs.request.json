@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "First page of the job list.",
+  "state": "authed",
+  "message": {
+    "id": "r-14",
+    "type": "jobs",
+    "limit": 50,
+    "filter": "all"
+  }
+}

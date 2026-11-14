@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Remove one job by id.",
+  "state": "authed",
+  "message": {
+    "id": "r-20",
+    "type": "control",
+    "jobId": 41,
+    "action": "remove"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "QA-40: fetch for a job that is still downloading.",
+  "state": "authed",
+  "message": {
+    "id": "x-10",
+    "type": "fetch",
+    "jobId": 41,
+    "offset": 0
+  },
+  "expectError": "conflict",
+  "precondition": "job 41 is downloading"
+}

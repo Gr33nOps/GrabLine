@@ -1,0 +1,14 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The user pressed Allow. The phone verifies serverProof, then stores deviceId and the pin.",
+  "state": "preauth",
+  "message": {
+    "id": "r-1",
+    "type": "paired",
+    "protocolVersion": 6,
+    "deviceId": "KsucBZHeyJguN6H0BzJQiw",
+    "pcId": "A3D7Za2aw26jbGofVV3ZAQ",
+    "pcName": "Study PC",
+    "serverProof": "1-hrlolmMHIXUI0GE9NxjbofOOVJD19WZcpNiTRRzQw"
+  }
+}
