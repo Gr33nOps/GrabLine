@@ -1,5 +1,11 @@
 # Performance
 
+This page preserves **historical Linux measurements**, including the 1.22.0 and
+1.29.25 passes and the dated navigation profile below. It is not a fresh 1.32.15
+Windows benchmark or a guarantee for another machine. For current verification
+scope, see [Testing](testing.md); record the commit, OS, hardware and tools when
+repeating a measurement.
+
 Measured on one Linux laptop with a real X display during the 1.22.0 pass.
 Absolute numbers move between machines; the deltas are the point.
 
@@ -39,7 +45,7 @@ only what the graphs need for their rolling history. `MainWindow.refresh()`
 likewise returns early while the window is hidden, and catches up on show.
 
 **Everything was built before anything was shown.** Settings is the most
-expensive widget in the app (18 sections, ~100 fields, ~500ms) in a window
+expensive widget in that revision (18 sections, ~100 fields, ~500ms) in a window
 most sessions never open. It and the Queue page are now built on first visit.
 The Dashboard stays eager because its sampler is what gives the graphs their
 history.
@@ -61,16 +67,17 @@ Worth recording, so nobody optimizes these twice:
 - **Rows are updated in place**, never rebuilt, while downloads run.
 - **Read sizes do not shrink** when a speed limit is set; the limiter sleeps
   between full reads rather than taking smaller ones.
-- **No leaks.** Adding and removing 200 jobs returns every per-job structure
+- **No retained per-job structures in this exercise.** Adding and removing 200 jobs returns every per-job structure
   to empty, and repeated refreshes create no extra widgets. RSS does not fall
   back on its own, which is the allocator holding freed pages, not a leak.
 - **The heavy imports are lazy.** yt-dlp, libtorrent, boto3, paramiko, psutil
   and PIL all load on demand; the only third-party module imported eagerly is
   httpx.
-- **The extension does not poll.** No `MutationObserver`, no interval: the
+- **The hover path is event driven.** No `MutationObserver`, no interval: the
   hover button is driven by pointer events, its follow loop runs only while
   the button is visible, and the popup reads everything asynchronously so it
-  paints immediately.
+  paints immediately. The extension's separate progress-tracking path does poll
+  the native host while tracking downloads; this observation is about hover UI.
 
 ## The floor
 

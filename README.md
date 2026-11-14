@@ -4,178 +4,149 @@
 
 # GrabLine
 
-Free, open source download manager for Windows, macOS and Linux.
+**Downloads, media, torrents and cloud files in one desktop app.**
 
-Parallel connections, resume, torrents, cloud links, and a browser quality picker for video and audio.
+Free and open source for Windows, macOS and Linux. No ads, account or usage telemetry.
 
 [![Download][download-badge]][releases]
-[![Firefox Add on][amo-badge]][amo]
-[![Ko-fi][kofi-badge]][support]
-[![License: AGPL 3.0][license-badge]][license]
-![Platforms][platform-badge]
-[![Tests][ci-badge]][ci]
+[![CI][ci-badge]][ci]
+[![License: AGPL-3.0-or-later][license-badge]][license]
+[![Firefox add-on][amo-badge]][amo]
 
-**[Download][releases]** · **[Website][website]** · **[Firefox add on][amo]** · **[Buy me a coffee][support]** · [Install guide](docs/install.md)
+**[Download][releases] · [Website][website] · [Documentation](docs/README.md) · [Report a bug][issues]**
 
-<br />
-
-<img src="docs/screenshots/queue.png" width="920" alt="GrabLine main window with active downloads" />
+<img src="docs/screenshots/queue.png" width="920" alt="GrabLine downloads window showing download progress, speed and queue controls" />
 
 </div>
 
-<br />
+Paste a URL, drop a link onto the window, or send it from **GrabLine Connect**.
+Use one queue for ordinary files, video and audio, magnets, torrent files and
+authenticated cloud transfers. Media quality and conversion choices appear in
+the desktop app before the download starts.
 
-Paste a URL, drop one on the window, or click the GrabLine button in your browser.
-Files run over many connections (up to 32). Videos and audio open a quality panel (4K to 144p, MP3, M4A or FLAC, subtitles, trim) on 1000+ sites via yt dlp. Magnets, torrent files, SFTP, FTP, S3, WebDAV, and public Drive or Dropbox links open in the same app.
+## Download
 
-No ads. No paid tier. No usage telemetry to us. AGPL 3.0.
-GrabLine is built in spare time. If it saves you hassle, [buy me a coffee][support]. It keeps the project alive.
+Get the installers and extension packages from the **[latest release][releases]**.
+Packaged desktop builds do not require Python.
 
-### More of the UI
+| Platform | Recommended package | Alternative |
+| --- | --- | --- |
+| Windows x64 | `Grabline-Setup-<version>.exe` | `Grabline-<version>-windows-portable.zip` |
+| macOS, Apple Silicon | `Grabline-<version>-applesilicon.dmg` | Build from source for other configurations |
+| Linux x86-64 | `grabline_<version>_amd64.deb` | AppImage or tarball |
+
+Builds are currently unsigned. See the [installation guide](docs/install.md) for
+package verification, first launch, browser pairing and data locations. FFmpeg
+and Deno are downloaded separately when needed; RAR/7Z extraction needs 7-Zip.
+
+## Features
+
+| Area | What you can do |
+| --- | --- |
+| File downloads | Use up to 32 HTTP connections per file, resume partial transfers, retry and use mirrors. |
+| Video and audio | Choose formats through yt-dlp; download playlists, subtitles and chapters; trim or convert media with FFmpeg. Site availability and available qualities depend on the source. |
+| Browser integration | Send links, hover over media, collect images or links, inspect detected streams and optionally hand browser downloads to GrabLine. Native Messaging connects the extension to the app. |
+| Torrents | Add magnets, `.torrent` files, batches, RSS feeds and watch folders; configure seeding and connection limits. |
+| Cloud protocols | Use FTP/FTPS, SFTP/SCP URLs, WebDAV and S3-compatible services; save account secrets in the OS keyring. Public Drive/Dropbox share links have dedicated handling. |
+| Queues and schedules | Set named queues, priorities, dependencies, concurrency, time windows and bandwidth limits. |
+| File management | Use categories, search, tags/notes, naming rules, archive extraction and history import/export. |
+| Desktop controls | Configure tray behaviour, shortcuts, themes, notifications, completion commands and queue-finished actions. |
+| Security tools | Inspect checksums and optional scanner/reputation results. TLS verification and archive path checks protect the download pipeline. |
+
+### A closer look
 
 <table>
   <tr>
-    <td width="62%" valign="top" align="center">
-      <img src="docs/screenshots/dashboard.png" width="100%" alt="GrabLine live dashboard with speed and graphs" /><br />
-      <sub>Live dashboard</sub>
-    </td>
-    <td width="38%" valign="top" align="center">
-      <img src="docs/screenshots/quality.png" width="100%" alt="GrabLine video quality picker" /><br />
-      <sub>Quality picker</sub>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" valign="top" align="center">
-      <br />
-      <img src="docs/screenshots/queues.png" width="920" alt="GrabLine queue manager with named queues, schedule, and dependencies" /><br />
-      <sub>Queue manager</sub>
-    </td>
+    <td width="60%" valign="top"><img src="docs/screenshots/dashboard.png" width="100%" alt="Dashboard with transfer statistics and resource graphs" /><br /><sub>Transfer dashboard</sub></td>
+    <td width="40%" valign="top"><img src="docs/screenshots/quality.png" width="100%" alt="Media dialog with video and audio quality choices" /><br /><sub>Media quality picker</sub></td>
   </tr>
 </table>
 
-## What you get
+## Browser companion
 
-* **Accelerator:** up to 32 connections per file, dynamic segmentation, HTTP/2, resume that survives a hard kill, mirror failover.
-* **Browser button:** hover media or right click links; handoff over Native Messaging (no open ports).
-* **Video and audio:** yt dlp in process: quality picks, playlists, SponsorBlock, chapters, clip trim.
-* **Torrents:** libtorrent (same engine family as qBittorrent): magnets, DHT, sequential streaming, seed ratios, RSS.
-* **Bulk torrents:** drop in a folder, a hundred files or a page of magnet links, pick one
-  destination, press Download All; or point a watch folder at your browser's download dir
-  and new .torrent files queue themselves.
-* **Cloud:** SFTP, FTP, S3, WebDAV with OS keychain secrets; Drive and Dropbox share links as direct downloads.
-* **Queue control:** named queues picked when you add a download, schedules, priorities,
-  dependencies, category auto sort; set a queue to one download at a time for a strictly
-  sequential run.
-* **Network:** HTTP, HTTPS and SOCKS proxies for downloads and torrents; global, per job and per host caps.
-* **Self-signed HTTPS:** off by default; allow it globally in Settings → Security, or for a
-  single download from the Add Download dialog, for a NAS or an internal server.
-* **Dashboard:** live speed, totals, graphs for download, upload, CPU, disk and network.
-* **Advisory security:** checksums and optional scans warn; they never quarantine your file.
+- **Firefox:** install [GrabLine Connect from Mozilla Add-ons][amo].
+- **Chrome, Edge and other Chromium browsers:** follow the app's **Browser Setup**
+  instructions to load the unpacked extension. For development, use this repo's
+  `extension/` folder so the pinned extension identity matches the native host.
+- Launch GrabLine, pair the browser and open the extension popup to check the
+  connection. [Extension setup and behaviour](extension/README.md) explains the
+  difference between an unpaired host and an app that is closed.
 
-<details>
-<summary><b>Engine and network detail</b></summary>
+The extension communicates over local stdio pipes, with no listening web server.
+Download takeover can be disabled in its popup. Generated browser files and POST
+exports stay in the browser; Firefox and Chromium use different takeover paths.
 
-* Dynamic segmentation: a free connection steals work from the slowest one.
-* Checkpointed progress: a crash, a kill, or a VPN reconnect resumes from where it stopped; retry forever option.
-* Per host speed buckets so one greedy site cannot starve the rest.
-* Polite mode eases off when you need the link for something else.
-* Battery pause and “shut down when done” for overnight batches.
+## Documentation
 
-</details>
-
-<details>
-<summary><b>Browser extension (GrabLine Connect)</b></summary>
-
-* Firefox: signed on [AMO][amo].
-* Chrome, Edge, Brave and others: pair from **Browser Setup** inside the app.
-* Hover button, right click download, per tab sniffed streams, download takeover (on by default; toggle in the extension popup).
-
-</details>
-
-## Download and install
-
-Get the latest files from the **[releases page][releases]**. No Python required for the packaged builds.
-
-| System | File | Notes |
-| --- | --- | --- |
-| **Windows** | `Grabline Setup *.exe` | Or a Windows portable zip without admin rights. |
-| **macOS** | `Grabline * applesilicon.dmg` | Apple Silicon (M1 and later). |
-| **Linux** | DEB, AppImage or tar.gz | Use tar.gz when FUSE is missing. |
-
-Builds are **unsigned**, so the OS warns once. [docs/install.md](docs/install.md) has the exact clicks. Then install the extension (Firefox from AMO; other browsers from the app’s Browser Setup).
-
-## Everyday use
-
-| You do | GrabLine does |
+| Start here | Details |
 | --- | --- |
-| Hover a video, GrabLine button | Opens Download Info: name, folder, quality (Best, 1080p, MP3, …). |
-| Right click, *Download with GrabLine* | Routes to the right engine. |
-| Paste or drop a URL | Queues (or opens the quality panel for smart sites). |
-| Select a row | Details drawer: speed graph, ETA, destination. |
-| Menu, Grab Site / Import Links | Crawl a page or expand numbered file patterns. |
+| [Install and update](docs/install.md) | Packages, checksums, pairing, backups and uninstall |
+| [Using GrabLine](docs/usage.md) | Downloads, media, queues and all 19 settings sections |
+| [Troubleshooting](docs/troubleshooting.md) | Pairing, failed transfers, tools, logs and bug reports |
+| [Contributing](CONTRIBUTING.md) | Development setup, checks and pull requests |
+| [Windows development](docs/windows-development.md) | PowerShell setup and isolated Windows testing |
+| [Testing and coverage](docs/testing.md) | Reproduction commands, evidence and known coverage limits |
+| [Architecture and learning](docs/learn-grabline.md) | Trace a URL through the app and browser bridge |
+| [Release notes](docs/releases/README.md) | Current changes and historical notes |
 
-## Honest limits
+The [documentation index](docs/README.md) also links packaging, performance,
+security, privacy and store-publishing references.
 
-* **No DRM circumvention.** Netflix, Prime, Disney+, Spotify tracks, etc. are refused clearly.
-* **No login bypass.** Optional “use my browser session” reads *your* cookies for *your* downloads; they are not uploaded to us.
-* You are responsible for site terms and local law.
+## Run from source
 
-## Docs
+Use **Python 3.12** to match CI. See [Contributing](CONTRIBUTING.md) for Linux
+system libraries and additional development tools.
 
-| Doc | What |
-| --- | --- |
-| [Install](docs/install.md) | Per OS steps, unsigned warnings, data locations, uninstall |
-| [Performance](docs/performance.md) | Idle CPU and startup numbers |
-| [Security model](docs/security-model.md) | Trust boundaries and enforced checks |
-| [SECURITY.md](SECURITY.md) | How to report a vulnerability |
-| [PRIVACY.md](PRIVACY.md) | What stays local and what touches the network |
-| [Extension](extension/README.md) | GrabLine Connect |
-| [Packaging](packaging/README.md) | How installers are built |
+**Windows PowerShell**
 
-## For developers
+```powershell
+git clone https://github.com/Gr33nOps/GrabLine.git
+Set-Location GrabLine
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m app
+```
 
-```bash
-git clone https://github.com/Gr33nOps/GrabLine.git && cd GrabLine
-python3 -m venv .venv && source .venv/bin/activate   # Windows: py -m venv .venv
-pip install -e ".[dev]"
+**Linux / macOS**
+
+```sh
+git clone https://github.com/Gr33nOps/GrabLine.git
+cd GrabLine
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e ".[dev]"
 python -m app
 ```
 
-```bash
-ruff check . && ruff format --check . && mypy app && pytest
-```
+## Privacy and limits
 
-```
-app/
-├── core/        resolver, segmented downloader, queue, settings, FFmpeg manager
-├── engines/     smart (yt dlp) · hls · torrent · cloud · manifest
-├── db/          SQLite jobs, segments, handoffs
-├── ui/          PySide6 shell, panels, design tokens
-├── native_host/ Native Messaging host
-└── tests/       media server, engines, hard kill resume milestone
-extension/       MV3 companion
-packaging/       PyInstaller + OS installers
-```
+GrabLine has no usage analytics or author-operated download service. Downloads,
+update checks, tool provisioning and enabled integrations contact their respective
+services. Browser sessions and handed-off request headers may contain sensitive
+data; see the [privacy policy](PRIVACY.md) before sharing logs or backups.
 
-Ground rules enforced in CI: no `shell=True`, Native Messaging only (no listen port), FFmpeg and Deno downloads pinned by SHA 256.
+GrabLine does not bypass DRM or account access restrictions. Only download
+content you are entitled to access. Local test coverage does not certify every
+yt-dlp site, private cloud provider or hardware-dependent action; the
+[testing guide](docs/testing.md) records those limits.
 
-## Support the project
+## Support and license
 
-GrabLine is free and open source, with no ads and no telemetry. If it helps you, [buy me a coffee on Ko-fi][support]. Stars on GitHub help too.
+[Report a reproducible issue][issues], contribute a fix, or
+[support development on Ko-fi][support]. Report exploitable vulnerabilities
+privately through [the security policy](SECURITY.md).
 
-## License
-
-[AGPL 3.0](LICENSE). yt dlp (Unlicense) and PySide6 (LGPL) are compatible dependencies; FFmpeg is fetched on the user’s machine when needed and is not shipped inside the installers. See [PRIVACY.md](PRIVACY.md).
+Licensed under [AGPL-3.0-or-later][license]. Dependency licenses remain their
+own; FFmpeg and Deno are provisioned separately rather than bundled in installers.
 
 [releases]: https://github.com/Gr33nOps/GrabLine/releases/latest
 [website]: https://gr33nops.github.io/GrabLine/
+[issues]: https://github.com/Gr33nOps/GrabLine/issues
 [amo]: https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/
 [support]: https://ko-fi.com/zain021xd
 [license]: LICENSE
 [ci]: https://github.com/Gr33nOps/GrabLine/actions/workflows/ci.yml
-[download-badge]: https://img.shields.io/github/v/release/Gr33nOps/GrabLine?label=Download&color=0170fd&sort=semver
-[amo-badge]: https://img.shields.io/amo/v/grabline-connect?label=Firefox%20Add-on&color=ff7139
-[kofi-badge]: https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-ff5e5b?logo=ko-fi&logoColor=white
-[license-badge]: https://img.shields.io/badge/License-AGPL%203.0-blue
-[platform-badge]: https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey
-[ci-badge]: https://img.shields.io/github/actions/workflow/status/Gr33nOps/GrabLine/ci.yml?branch=main&label=tests
+[download-badge]: https://img.shields.io/github/v/release/Gr33nOps/GrabLine?label=download&color=0170fd
+[ci-badge]: https://img.shields.io/github/actions/workflow/status/Gr33nOps/GrabLine/ci.yml?branch=main&label=CI
+[license-badge]: https://img.shields.io/badge/license-AGPL--3.0--or--later-blue
+[amo-badge]: https://img.shields.io/amo/v/grabline-connect?label=Firefox&color=ff7139

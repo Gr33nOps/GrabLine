@@ -1,5 +1,9 @@
 # GrabLine security model
 
+Reference reviewed against 1.32.15 on 14 November 2026. The historical findings
+at the end describe earlier audit results; they are not a new independent
+security certification. See [Testing](testing.md) for verification scope.
+
 GrabLine takes hostile input by design: arbitrary URLs, whatever a server
 sends back, stranger-chosen filenames, stranger-built archives, and messages
 from web pages through the browser extension.
@@ -204,6 +208,8 @@ desktop app, not a server.
   SHA-256 pins. (B3)
 - **No dangerous eval**: no `eval`/`exec`/`pickle`/`yaml.load`/`marshal`/
   remote import of untrusted data. (whole tree)
-- **Dependencies**: `pip-audit` reports no known vulnerabilities.
+- **Dependencies**: the 1.23.0 pass reported no known vulnerabilities from its
+  then-current `pip-audit` run. Repeat a dependency audit for the actual installed
+  versions; this historical result does not certify today's dependency graph.
 - **Log hygiene**: no credentials, cookies, keys or tokens in log calls. (B6)
 - **Cloud logins**: kept in the system keychain, never in the DB. (B6)

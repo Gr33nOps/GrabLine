@@ -1,90 +1,87 @@
-# GrabLine Connect - store listing kit (F2.5)
+# GrabLine Connect store listing kit
 
-Everything needed to submit the extension to the Chrome Web Store and
-addons.mozilla.org. Build the upload zips first:
+Reviewed against source version **1.32.15**, 14 November 2026. This is a submission
+reference, not a claim that every store currently publishes that version. Verify
+the live listing and current store requirements before each submission.
 
-```bash
-python scripts/package_extension.py     # → dist/grabline-connect-{chrome,firefox}-<version>.zip
+## Build and identity
+
+```sh
+python scripts/package_extension.py --out dist
 ```
 
-## Identity
+The script emits Chrome/Firefox ZIPs with their respective manifests. They are
+unminified and omit development tests/docs. Firefox signing and store publication
+are separate operations. The source manifest's pinned unpacked Chromium key is
+removed from store packages; verify the actual store-assigned identity against
+`CHROME_EXTENSION_IDS` in `app/native_host/__init__.py` before shipping a desktop
+host. Never relax the allow-list to accept arbitrary extensions.
 
-| | |
-|---|---|
-| Name | **GrabLine Connect** |
-| Category | Productivity → Tools (CWS) / Download Management (AMO) |
-| Homepage | https://github.com/Gr33nOps/GrabLine |
-| Support | https://github.com/Gr33nOps/GrabLine/issues |
-| Contributions URL (AMO) | https://ko-fi.com/zain021xd |
-| Privacy policy URL | https://github.com/Gr33nOps/GrabLine/blob/main/PRIVACY.md |
-| Firefox add-on ID | `grabline@grabline.dev` (pinned in the manifest) |
+| Field | Value |
+| --- | --- |
+| Name | GrabLine Connect |
+| Homepage | https://gr33nops.github.io/GrabLine/ |
+| Source / support | https://github.com/Gr33nOps/GrabLine |
+| Privacy policy | https://github.com/Gr33nOps/GrabLine/blob/main/PRIVACY.md |
+| Firefox identity | `grabline@grabline.dev` |
+| Existing Firefox listing | https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/ |
 
-> The Chrome Web Store assigns the published extension a **new ID** (the
-> store rejects manifests with a `key`). After first publication, add the
-> store-assigned ID to `CHROME_EXTENSION_IDS` in `app/native_host/__init__.py`
-> and re-run `python -m app.native_host.install`, so paired hosts accept it.
+## Suggested listing text
 
-## Summary (short description)
+**Short description:** Send links and detected media to the GrabLine desktop
+download manager with hover buttons, context menus and a browser popup.
 
-> The connector for the GrabLine download manager: right-click download,
-> hover buttons on media, quality picking for 1000+ sites - every download
-> runs in the open-source desktop app, not the browser.
+**Long description:** GrabLine Connect pairs your browser with the free,
+AGPL-licensed GrabLine desktop app for Windows, macOS and Linux. Send a link,
+media page or selected URLs; collect page images/links; inspect detected media;
+and track app downloads from the browser. Quality selection, downloading and
+conversion happen in the desktop app. Image hover is opt-in, and hover/takeover
+preferences can be changed in the popup.
 
-## Description (long)
+Download takeover is enabled by default. Chromium retains a paused browser
+fallback while the app downloads; Firefox can intercept eligible responses
+before a browser item exists. Generated blobs, POST exports and applicable
+verification-session downloads stay in the browser. A running app is required
+for automatic takeover. See the extension guide for recovery behaviour.
 
-> GrabLine Connect pairs your browser with **GrabLine**, the free and
-> open-source download manager (AGPL-3.0). The extension is deliberately
-> thin - it detects and delivers, the desktop app downloads:
->
-> - **Right-click → "Download with GrabLine"** on any link, image, video, or page
-> - **Hover button** on videos, audio, and large images (the button is the GrabLine logo)
-> - **Per-tab media list**: every stream (.m3u8/.mpd) and media file the page loaded
-> - **Download all images** on a page into a selection grid
-> - **Download takeover** (on by default): browser downloads are cancelled and handed to GrabLine
->
-> On sites the Smart Engine knows (YouTube and 1000+ more), the app opens a
-> Download Info dialog to confirm the file and pick quality (4K to 144p, MP3/M4A),
-> with subtitles and clip trimming available in the app. Everywhere else you get
-> segmented, resumable multi-connection downloading.
->
-> **Requires the free GrabLine desktop app** (Windows/macOS/Linux):
-> https://github.com/Gr33nOps/GrabLine - the extension talks to it over
-> Native Messaging only. No account, no cloud, no telemetry, no ads.
->
-> GrabLine does not bypass DRM or logins.
+The desktop app is required. Communication with it uses Native Messaging;
+GrabLine Connect does not require a GrabLine account, run ads or send usage
+analytics. Media availability depends on the site and your access. GrabLine does
+not bypass DRM or account restrictions.
 
 ## Permission justifications
 
-| Permission | Why |
-|---|---|
-| `nativeMessaging` | The single purpose of the extension: hand URLs to the local GrabLine app. Nothing else can do this. |
-| `contextMenus` | The "Download with GrabLine" / "Download all images" right-click entries. |
-| `storage` | User toggles (per-site overlay off-switch, interception) and the per-tab sniffed-media list (`storage.session`, gone when the tab closes). |
-| `webRequest` + `<all_urls>` | Read response headers to list a tab's media and streams in the popup, and to recognize a starting download for takeover. Nothing leaves the browser. |
-| `webRequestBlocking` (Firefox) | Takeover cancels a forced download at the network layer so the desktop app can fetch it instead, with no flash of a browser download. Chrome ignores blocking `webRequest` in MV3, so there the `downloads` API does the takeover. On by default. |
-| `downloads` | The takeover path on Chromium: cancel a starting browser download and re-dispatch it to the app. On by default. |
-| `tabs` | Page URL/title accompany a handed-off URL so the app can name files sensibly. |
-| Content scripts on `<all_urls>` | The hover button and the image collector must run where the media is. They render one button in a closed shadow root and send nothing anywhere except the local app. |
+Use the **generated target manifest**, not the cross-browser source manifest,
+when completing store forms:
 
-**Single purpose statement (CWS):** connect the browser to the locally
-installed GrabLine download manager.
+| Permission | Purpose |
+| --- | --- |
+| `nativeMessaging` | Send handoffs to the local app and read its status |
+| `contextMenus` | Download and collection actions from genuine context menus |
+| `storage` | Preferences, per-tab media and recovery state |
+| `alarms` | Scheduled background/recovery work |
+| `webRequest` and `<all_urls>` | Detect media responses and eligible handoff context |
+| `webRequestBlocking`, Firefox only | Intercept eligible downloads before a browser item is created |
+| `downloads` | Observe/manage browser downloads and takeover fallback |
+| `downloads.shelf` / `downloads.ui`, Chromium only | Control download UI where the browser exposes it |
+| `cookies` | Include matching session context when handing selected downloads to the app |
+| `tabs` | Current page URL/title and per-tab media/actions |
+| Content scripts on permitted sites | Hover buttons and page image/link collection |
 
-**Data use disclosures:** the extension collects nothing, transmits nothing
-off-device, and has no remote code. All traffic is stdio to the local native
-host. See PRIVACY.md.
+Data sent through the host remains local at handoff; the desktop app then makes
+the requested transfer/service connections. Disclose cookie/URL handling using
+[PRIVACY.md](../PRIVACY.md), not an absolute “no data access” statement.
 
-## Reviewer notes (AMO "notes to reviewer" / CWS review field)
+## Reviewer notes and final checks
 
-> This extension requires its native-host counterpart, the open-source
-> GrabLine desktop app: https://github.com/Gr33nOps/GrabLine
-> Install: `pip install -e .` then `python -m app.native_host.install`
-> (registers the Native Messaging manifest), then load the extension.
-> Without the app, the extension idles with a "not paired" popup status.
-> The whole source is in the repo above; the zip is built unminified by
-> `scripts/package_extension.py`.
+Reviewers need the desktop app or a Python 3.12 source environment. Follow
+[Contributing](../CONTRIBUTING.md), run `python -m app.native_host.install`, launch
+the app and load the matching extension. An unpaired popup without that native
+counterpart is expected. Packaging performs no source minification.
 
-## Assets still needed before submission
-
-- [ ] 1-5 screenshots, 1280×800 (queue window + Download Info dialog + popup)
-- [ ] CWS promo tile 440×280 (optional but recommended)
-- [ ] Developer accounts: CWS one-time $5, AMO free
+Before submission, verify actual permissions/IDs, pairing, takeover and browser
+recovery, popup/media actions, and the published privacy URL. Capture current
+screenshots at the store's requested dimensions and supply any required developer
+account/listing fields. See [extension testing](../extension/README.md#verify-a-change)
+and [release instructions](../RELEASING.md). Do not claim store approval or live-site
+certification from package generation alone.

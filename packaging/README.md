@@ -1,64 +1,96 @@
 # Packaging GrabLine
 
-Turns the Python/PySide6 app into native desktop installers for Windows,
-macOS, and Linux. Releases are built by
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) on native
-GitHub runners, one per operating system, so each installer is built on the
-platform it targets.
+Native packages are built on their target OS by the
+[Release workflow](../.github/workflows/release.yml). Use
+[RELEASING.md](../RELEASING.md) for versioning/publication; do not create a tag
+just to try a local build.
 
-## What gets built
+## Bundle and outputs
 
-PyInstaller freezes **two** executables into one shared bundle
-([`grabline.spec`](grabline.spec)):
+The [PyInstaller spec](grabline.spec) builds two executables in a shared bundle:
 
-- `grabline`: the windowed desktop GUI.
-- `grabline-host`: the **console** Native Messaging host. It's separate
-  because a windowed GUI exe has no working stdio on Windows, which the
-  browser needs to talk to the host. The installed browser manifests point
-  straight at this binary (`native_host.install.frozen_host_path()`).
+- `grabline`: the desktop GUI, windowed on Windows.
+- `grabline-host`: the console Native Messaging host, preserving stdin/stdout
+  framing even where the GUI executable has no console streams.
 
-Then, per OS:
+The app registers the native host against its actual runtime path. Keep both
+executables and the shared support files together.
 
-| OS | Tool | Output |
-|---|---|---|
-| Windows | Inno Setup ([`windows/grabline.iss`](windows/grabline.iss)) | `Grabline-Setup-<ver>.exe` |
-| macOS | `hdiutil` (from the `.app` the spec builds) | `Grabline-<ver>-applesilicon.dmg` |
-| Linux | `appimagetool` ([`linux/build_appimage.sh`](linux/build_appimage.sh)) | `Grabline-<ver>-x86_64.AppImage` |
+| Target | Release outputs | Packaging tool |
+| --- | --- | --- |
+| Windows x64 | Setup EXE and portable ZIP | Inno Setup plus PyInstaller bundle |
+| macOS Apple Silicon | DMG containing the app | `iconutil`, `hdiutil` |
+| Linux x86-64 | AppImage, tarball and DEB | AppImage and Debian scripts under `linux/` |
+| Browser extension | Chrome and Firefox ZIPs | `scripts/package_extension.py` |
 
-The app registers the Native Messaging host itself on first run of an
-installed build (`_register_native_host_once` in `app/__main__.py`), so the
-installers don't need to know install paths at build time.
+Each OS also publishes a `dist-requirements-<runner>.txt` dependency inventory.
+The publish job adds `SHA256SUMS.txt`. The current release has 12 assets.
 
-## Cut a release
+## Build locally
 
-```bash
-git tag v1.3.5
-git push origin v1.3.5      # -> Actions builds all three and publishes a Release
+Use Python 3.12 on the target OS. The current release workflow pins
+PyInstaller **6.22.3** and Pillow **12.3.0**; check the workflow when updating
+build tools. Dependencies are recorded but not all transitively locked, so
+record `pip freeze --all` for each build rather than assuming bit-identical output.
+
+With the environment active, from the source root:
+
+```sh
+python -m pip install -e . "pyinstaller==6.22.3" "pillow==12.3.0"
+python packaging/make_icons.py
+python -m PyInstaller packaging/grabline.spec --noconfirm --distpath dist --workpath build
 ```
 
-Or trigger the workflow manually (Actions tab) to get installers as artifacts
-without publishing.
+For headless icon generation, set `QT_QPA_PLATFORM=offscreen` for that process.
+On Windows, the environment's `python.exe` can be called directly instead of
+activation. The frozen Windows bundle is under `dist/grabline`.
 
-## GitHub Packages
+### Windows installer
 
-Each release also publishes a small linked image to
-[GitHub Packages](https://github.com/Gr33nOps/GrabLine/pkgs/container/grabline-app)
-(`ghcr.io/gr33nops/grabline-app`) via [`.github/workflows/packages.yml`](../.github/workflows/packages.yml).
-That fills the Packages block on the repository page. Installers for end users
-still come from the [Releases](https://github.com/Gr33nOps/GrabLine/releases) page.
+Install Inno Setup, then call its actual installed `ISCC.exe` path from PowerShell:
 
-## Build one locally
-
-```bash
-pip install -e . pyinstaller pillow
-python packaging/make_icons.py                 # QT_QPA_PLATFORM=offscreen if headless
-pyinstaller packaging/grabline.spec --noconfirm
-# Linux only, to wrap it as an AppImage:
-bash packaging/linux/build_appimage.sh 1.3.5
+```powershell
+$buildVersion = .\.venv\Scripts\python.exe -c 'import app; print(app.__version__)'
+# Adjust this example path to the installed Inno Setup compiler.
+& 'C:\Program Files\Inno Setup 7\ISCC.exe' "/DAppVersion=$buildVersion" packaging/windows/grabline.iss
 ```
 
-## Not signed (yet)
+The workflow searches both Program Files layouts rather than assuming a compiler
+version. Copy `windows/PORTABLE-README.txt` into the bundle before creating a
+portable ZIP. Test installation, upgrade and uninstall only in a disposable guest.
 
-Installers are unsigned, so Windows SmartScreen and macOS Gatekeeper warn on
-first launch. Signing needs paid certificates (Windows ~US$100-400/yr, Apple
-Developer US$99/yr); add the signing steps to the workflow once those exist.
+### Linux wrappers
+
+```sh
+build_version=$(python -c 'import app; print(app.__version__)')
+bash packaging/linux/build_appimage.sh "$build_version"
+tar -C dist -czf "dist/Grabline-$build_version-linux-x86_64.tar.gz" grabline
+bash packaging/linux/build_deb.sh "$build_version"
+```
+
+Run the AppImage step before the tarball; it also stages required Qt/xcb support.
+See the workflow for native Linux prerequisites and macOS ICNS/DMG staging.
+
+### Extension packages
+
+```sh
+python scripts/package_extension.py --out dist
+```
+
+The ZIPs are store-targeted and unminified. They are not an AMO-signed XPI or a
+replacement for the pinned source manifest used in unpacked development.
+See [GrabLine Connect](../extension/README.md) and the
+[store listing kit](../docs/store-listing.md).
+
+## Verify the shipped package
+
+Run the GUI and native host from the actual frozen bundle, check version and
+browser pairing, and complete a deterministic download with its expected hash.
+Inspect the final published files as well as local build output. Use the
+[audit harness](../scripts/windows_qa/README.md) for evidence; its packaged
+smoke tests and guest integration are distinct scopes.
+
+Builds are unsigned. FFmpeg/Deno are fetched separately with checksum checks.
+GitHub Packages contains an informational image at `ghcr.io/gr33nops/grabline-app`;
+it is not a runnable desktop container. End users install from
+[the latest release](https://github.com/Gr33nOps/GrabLine/releases/latest).
