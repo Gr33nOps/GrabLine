@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 PHONE_SOURCE = "phone"
+PHONE_LINKS_SOURCE = "phone-links"
 DEFAULT_QUALITY = "best"
 
 _BLOCKING_STATUSES = (
@@ -66,6 +67,7 @@ class AddOutcome:
     result: str  # "queued" | "duplicate" | "failed"
     job_ids: tuple[int, ...] = ()
     message: str | None = None
+    device_id: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -98,6 +100,8 @@ class UnattendedAdder(QObject):
         self._on_outcome = on_outcome
         self._auto_queue = auto_queue
         self._threads: list[work_threads.ResolveThread] = []
+        #: requestId -> the phone that sent it, for the outcome report.
+        self._devices: dict[str, str] = {}
 
     # ------------------------------------------------------------ public
 
@@ -105,6 +109,9 @@ class UnattendedAdder(QObject):
         """Start adding one phone handoff. Never raises, never blocks on UI."""
         options = handoff.options if isinstance(handoff.options, dict) else {}
         request_id = _str_or_none(options.get("requestId"))
+        device_id = _str_or_none(options.get("deviceId"))
+        if request_id is not None and device_id is not None:
+            self._devices[request_id] = device_id
         url = handoff.url.strip()
         try:
             self._add(handoff, url, options, request_id)
@@ -319,7 +326,8 @@ class UnattendedAdder(QObject):
         job_ids: tuple[int, ...] = (),
         message: str | None = None,
     ) -> None:
-        outcome = AddOutcome(request_id, url, result, job_ids, message)
+        device_id = self._devices.get(request_id) if request_id is not None else None
+        outcome = AddOutcome(request_id, url, result, job_ids, message, device_id)
         try:
             self._on_outcome(outcome)
         except Exception:

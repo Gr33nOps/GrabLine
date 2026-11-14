@@ -1021,6 +1021,13 @@ class MainWindow(QMainWindow):
                 # A paired phone: no one is at the PC, so never a dialog.
                 self._phone_adder().add(handoff)
                 continue
+            if handoff.source == remote_add.PHONE_LINKS_SOURCE:
+                # Many links from a phone: each its own unattended add, no picker.
+                for link in handoff.payload:
+                    self._phone_adder().add(
+                        replace(handoff, url=link, source=remote_add.PHONE_SOURCE, payload=())
+                    )
+                continue
             # One browser click can deposit the same URL many times (extension
             # retry / dual webRequest+onCreated). Claiming once still left a
             # batch of identical rows - collapse them here so we only open one
