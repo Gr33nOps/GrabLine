@@ -357,6 +357,55 @@ class Database:
             ).fetchone()
         return _job_from_row(row) if row else None
 
+    def unique_job_filename(
+        self,
+        dest_dir: str,
+        filename: str,
+        *,
+        kind: JobKind = JobKind.DIRECT,
+        exclude_job_id: int | None = None,
+    ) -> str:
+        """``filename``, or ``name (1).ext`` ..., such that no *other unfinished*
+        job saving into ``dest_dir`` already holds it.
+
+        A job's scratch files are named after its filename (``name.gl-part``,
+        the HLS segment folder, yt-dlp's ``stem.f137.mp4.part``), so two
+        unfinished jobs sharing a name in one folder write into each other's
+        partial data. Files already on disk are a separate question, answered
+        at completion by ``naming.unique_path``.
+
+        Smart jobs are compared by stem: yt-dlp derives its per-format scratch
+        names from the stem alone, so ``Clip.mp4`` and ``Clip.mp3`` still meet.
+        Names compare case-insensitively - the common filesystems do.
+        """
+        placeholders = ", ".join("?" for _ in RESUMABLE_STATUSES)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT id, dest_dir, filename, kind FROM jobs WHERE status IN ({placeholders})",
+                [status.value for status in RESUMABLE_STATUSES],
+            ).fetchall()
+
+        def folder(value: str) -> str:
+            return os.path.normcase(os.path.normpath(value))
+
+        here = folder(dest_dir)
+        names: set[str] = set()
+        smart_stems: set[str] = set()
+        for row in rows:
+            if row["id"] == exclude_job_id or folder(row["dest_dir"]) != here:
+                continue
+            names.add(row["filename"].casefold())
+            if row["kind"] == JobKind.SMART.value:
+                smart_stems.add(Path(row["filename"]).stem.casefold())
+        base = Path(filename)
+        candidate, counter = filename, 0
+        while candidate.casefold() in names or (
+            kind is JobKind.SMART and Path(candidate).stem.casefold() in smart_stems
+        ):
+            counter += 1
+            candidate = f"{base.stem} ({counter}){base.suffix}"
+        return candidate
+
     def set_job_status(self, job_id: int, status: JobStatus, error: str | None = None) -> None:
         with self._lock, self._conn:
             self._conn.execute(

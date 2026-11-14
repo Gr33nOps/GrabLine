@@ -30,8 +30,9 @@ from app.core.stats import SystemSampler
 from app.db.database import Database
 from app.engines.cloud import CloudDownload
 from app.engines.hls import HlsDownload
+from app.engines.hls import work_dir as hls_work_dir
 from app.engines.manifest import HlsVariant
-from app.engines.smart import MediaInfo, QualityOption, SmartDownload
+from app.engines.smart import MediaInfo, QualityOption, SmartDownload, remove_leftover_partials
 from app.engines.torrent import SESSION as TORRENT_SESSION
 from app.engines.torrent import TorrentDownload, TorrentStats
 
@@ -107,6 +108,8 @@ _PERMANENT_ERROR_MARKERS = (
     "no downloadable",
     "web page",
     "not enough free disk",
+    # The same condition met mid-write, in the operating system's own words.
+    "no space left",
     "did not contain",
     "http 4",
     "http error 4",
@@ -1050,21 +1053,27 @@ class DownloadManager:
             options["mirrors"] = [m for m in mirrors if m and m != url]
         if insecure:
             options[INSECURE_OPTION] = True
+        queue = self._resolve_queue(name, queue_id)
+        dest = self._dest_for(name, dest_dir)
         job = self.db.create_job(
             url,
-            self._dest_for(name, dest_dir),
-            name,
+            dest,
+            self.db.unique_job_filename(dest, name),
             options=options,
-            queue_id=self._resolve_queue(name, queue_id),
+            queue_id=queue,
         )
         job = self._apply_add_defaults(job)
         if probe is not None:
-            job.filename = naming.resolve_download_name(
-                job.filename,
-                url=job.url,
-                final_url=probe.final_url,
-                server_filename=probe.filename,
-                content_type=probe.content_type,
+            job.filename = self.db.unique_job_filename(
+                job.dest_dir,
+                naming.resolve_download_name(
+                    job.filename,
+                    url=job.url,
+                    final_url=probe.final_url,
+                    server_filename=probe.filename,
+                    content_type=probe.content_type,
+                ),
+                exclude_job_id=job.id,
             )
             job.final_url = probe.final_url
             job.total_size = probe.total_size
@@ -1164,14 +1173,16 @@ class DownloadManager:
             options.update(extras)
         if insecure:
             options[INSECURE_OPTION] = True
+        queue = self._resolve_queue(filename, queue_id)
+        dest = self._dest_for(filename, dest_dir)
         job = self.db.create_job(
             url,
-            self._dest_for(filename, dest_dir),
-            filename,
+            dest,
+            self.db.unique_job_filename(dest, filename, kind=JobKind.SMART),
             kind=JobKind.SMART,
             title=title,
             options=options,
-            queue_id=self._resolve_queue(filename, queue_id),
+            queue_id=queue,
         )
         job = self._apply_add_defaults(job)
         # Show an estimated size in the list immediately when analysis already
@@ -1213,14 +1224,16 @@ class DownloadManager:
             options["http_headers"] = dict(headers)
         if insecure:
             options[INSECURE_OPTION] = True
+        queue = self._resolve_queue(filename, queue_id)
+        dest = self._dest_for(filename, dest_dir)
         job = self.db.create_job(
             url,
-            self._dest_for(filename, dest_dir),
-            filename,
+            dest,
+            self.db.unique_job_filename(dest, filename),
             kind=JobKind.HLS,
             title=title,
             options=options,
-            queue_id=self._resolve_queue(filename, queue_id),
+            queue_id=queue,
         )
         job = self._apply_add_defaults(job)
         self._kick()
@@ -1274,13 +1287,15 @@ class DownloadManager:
 
         name = naming.sanitize_filename(filename or suggested_filename(url))
         name = naming.apply_rename_rules(name, self.settings.rename_rules)
+        queue = self._resolve_queue(name, queue_id)
+        dest = self._dest_for(name, dest_dir)
         job = self.db.create_job(
             url,
-            self._dest_for(name, dest_dir),
-            name,
+            dest,
+            self.db.unique_job_filename(dest, name),
             kind=JobKind.CLOUD,
             options={},
-            queue_id=self._resolve_queue(name, queue_id),
+            queue_id=queue,
         )
         job = self._apply_add_defaults(job)
         self._kick()
@@ -1336,8 +1351,21 @@ class DownloadManager:
             JobStatus.FAILED,
         ):
             job.part_path.unlink(missing_ok=True)
+            self._discard_scratch(job)
             self.db.clear_segments(job_id)
             self.db.set_job_status(job_id, JobStatus.CANCELLED)
+
+    @staticmethod
+    def _discard_scratch(job: Job) -> None:
+        """Delete what an unfinished job that is *not running* left beside its
+        part file. A running task cleans up after itself when cancelled; a
+        paused or failed one has nothing running to do it, and its scratch -
+        an HLS stream's hidden segment cache, yt-dlp's .part files - can be
+        gigabytes that nothing would ever remove."""
+        if job.kind is JobKind.HLS:
+            shutil.rmtree(hls_work_dir(job.part_path), ignore_errors=True)
+        elif job.kind is JobKind.SMART and not job.options.get("name_from_metadata"):
+            remove_leftover_partials(Path(job.dest_dir), job.filename)
 
     def remove(self, job_id: int, *, force: bool = False) -> None:
         """Drop a job from the list/history, whatever state it is in.
@@ -1367,6 +1395,7 @@ class DownloadManager:
             return
         if job.status is not JobStatus.COMPLETED:
             job.part_path.unlink(missing_ok=True)
+            self._discard_scratch(job)
         self.db.delete_job(job_id)
 
     def snapshot(self) -> list[JobView]:

@@ -41,6 +41,41 @@ log = logging.getLogger(__name__)
 
 #: yt-dlp's per-format filename tag, e.g. the `.f137` in `Clip.f137.mp4`.
 _FORMAT_SUFFIX = re.compile(r"\.f[0-9a-zA-Z_-]+$")
+_PARTIAL_SUFFIX = re.compile(
+    r"(?:(?:f[0-9a-z_-]+\.)?[0-9a-z_-]+\.(?:part(?:-frag[0-9]+(?:\.part)?)?|ytdl)|"
+    r"temp\.[0-9a-z_-]+)"
+)
+
+
+def remove_leftover_partials(dest_dir: Path, filename: str) -> None:
+    """Delete the scratch files an unfinished, *not running* smart job left in
+    ``dest_dir``: ``<stem>.<...>.part``, ``.part-FragN``, ``.ytdl`` and the
+    ``<stem>.temp.<ext>`` a killed merge leaves.
+
+    A running job cleans up after itself from the file list yt-dlp reported
+    (``SmartDownload._remove_partials``). A job that was paused, or failed, and
+    is then cancelled or removed has no such list - only its name. Matching is
+    therefore strict: the name must start with this job's stem followed by a
+    dot and match a complete yt-dlp scratch suffix. A different dotted title
+    (``Clip.notes.f137.mp4.part``), finished file or backup is left alone.
+    """
+    stem = Path(filename).stem
+    if not stem:
+        return
+    prefix = f"{stem}.".casefold()
+    try:
+        entries = list(dest_dir.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        name = entry.name.casefold()
+        if not name.startswith(prefix):
+            continue
+        rest = name[len(prefix) :]
+        if _PARTIAL_SUFFIX.fullmatch(rest) and entry.is_file():
+            with contextlib.suppress(OSError):
+                entry.unlink()
+
 
 #: The standard quality ladder shown in the panel, top first.
 QUALITY_TIERS = (2160, 1440, 1080, 720, 480, 360)

@@ -29,9 +29,13 @@ optional or maintenance contacts described below.
 - **Update check** (on launch, quiet): GrabLine asks GitHub's releases API
   whether a newer version exists. Only the version check runs; no usage data
   is attached. You can ignore or dismiss any update prompt.
-- **FFmpeg / Deno**, when you install them from Settings, are fetched over
-  HTTPS from their official build hosts and verified against pinned SHA-256
-  checksums.
+- **FFmpeg / Deno** are fetched over HTTPS from their official build hosts and
+  verified against pinned SHA-256 checksums - when you install them from
+  Settings, or automatically the first time a video download needs one and
+  none is installed.
+- **Wait for network** (off by default): while it is on, GrabLine checks it is
+  online by opening a connection to the public DNS servers 1.1.1.1 and 8.8.8.8.
+  No data is sent.
 - **Optional VirusTotal / Google Safe Browsing** (off by default): if you
   paste your own API keys, GrabLine may send a file hash (VirusTotal) or a
   URL (Safe Browsing) to those services. They never run unless you enable

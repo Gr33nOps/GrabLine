@@ -37,6 +37,20 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history, so the sitemap step can find when website/ last changed.
+          fetch-depth: 0
+      # The sitemap's <lastmod> is the date website/ last changed in git, not a
+      # hand-edited value: that one was left months stale, and search engines
+      # stop trusting a lastmod that does not track real changes.
+      - name: Stamp the sitemap date
+        run: |
+          set -euo pipefail
+          changed=$(git log -1 --format=%cs -- website)
+          test -n "$changed"
+          sed -i "s|<lastmod>[^<]*</lastmod>|<lastmod>$changed</lastmod>|" website/sitemap.xml
+          grep -q "<lastmod>$changed</lastmod>" website/sitemap.xml
+          echo "sitemap lastmod: $changed"
       # Pre-fetch the release into a static file the page reads at runtime,
       # instead of every visitor's browser calling the GitHub REST API
       # directly. That endpoint's 60/hour anonymous limit is shared per IP -

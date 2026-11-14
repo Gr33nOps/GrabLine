@@ -23,7 +23,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 
-from app.core import net, paths
+from app.core import naming, net, paths
 from app.core.credentials import CredentialStore
 from app.core.errors import DownloadError
 from app.core.models import Job, JobStatus
@@ -196,7 +196,13 @@ class CloudDownload:
         self._check()
 
     def _finish(self, part: Path) -> JobStatus:
-        part.replace(self.job.dest_path)
+        # Never overwrite a file that is already there (S4): save beside it,
+        # exactly as the direct and HLS engines do.
+        dest = naming.unique_path(self.job.dest_path)
+        part.replace(dest)
+        if dest.name != self.job.filename:
+            self.job.filename = dest.name
+            self.db.update_job_filename(self.job.id, dest.name)
         self.db.update_job_downloaded(self.job.id, self._downloaded)
         if self._downloaded:
             self.db.update_job_total(self.job.id, self._downloaded)

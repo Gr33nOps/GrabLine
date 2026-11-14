@@ -86,6 +86,10 @@ _MAX_RETRY_AFTER = 60.0
 
 _CONTENT_RANGE = re.compile(r"\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$")
 
+#: Serializes "pick a filename no other unfinished job holds, then record it"
+#: across downloads starting at the same moment (see _prepare).
+_NAME_LOCK = threading.Lock()
+
 
 class StopReason(Enum):
     NONE = "none"
@@ -448,14 +452,22 @@ class SegmentedDownload:
             part.unlink(missing_ok=True)
             segments = []
         if not segments:
-            job.filename = resolved_name
-            part = job.part_path
             job.final_url = result.final_url
             job.total_size = result.total_size
             job.resumable = result.resumable
             job.etag = result.etag
             job.last_modified = result.last_modified
-            self.db.update_job_probe(job)
+            # The server may have just renamed this job (Content-Disposition)
+            # onto a name another unfinished download in the same folder holds;
+            # they would then share one .gl-part. Choosing and recording the
+            # name under a lock keeps two jobs that start together from both
+            # settling on it.
+            with _NAME_LOCK:
+                job.filename = self.db.unique_job_filename(
+                    job.dest_dir, resolved_name, exclude_job_id=job.id
+                )
+                self.db.update_job_probe(job)
+            part = job.part_path
             if result.resumable and result.total_size:
                 spans = plan_segments(result.total_size, self.connections)
             else:
@@ -902,6 +914,16 @@ class SegmentedDownload:
         if status in _RETRYABLE_STATUS:
             self._distrust_final_url()
             raise _Retry(f"segment {segment.index}: HTTP {status}")
+        if status == 416:
+            # "Range not satisfiable" for a range inside the size we recorded
+            # means the file is no longer that size - it was replaced since the
+            # probe this run is working from. Worded without the status code on
+            # purpose: any "HTTP 4xx" reads as permanent to the manager, but the
+            # next attempt re-probes, sees the new size and starts over cleanly.
+            raise DownloadError(
+                f"the file on the server changed while this download was waiting "
+                f"(segment {segment.index} is past its end now); it will start over"
+            )
         raise DownloadError(f"server responded with HTTP {status} for segment {segment.index}")
 
     @staticmethod

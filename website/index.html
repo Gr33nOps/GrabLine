@@ -40,7 +40,7 @@
         "description": "Free open source download manager with parallel connections, browser companion and video quality picker.",
         "url": "https://gr33nops.github.io/GrabLine/",
         "downloadUrl": "https://github.com/Gr33nOps/GrabLine/releases/latest",
-        "softwareVersion": "1.32.14",
+        "softwareVersion": "1.32.15",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "screenshot": [
@@ -70,13 +70,6 @@
         font-weight: 400;
         font-display: swap;
         src: url("assets/fonts/ibm-plex-mono-400.woff2") format("woff2");
-      }
-      @font-face {
-        font-family: "IBM Plex Mono";
-        font-style: normal;
-        font-weight: 500;
-        font-display: swap;
-        src: url("assets/fonts/ibm-plex-mono-500.woff2") format("woff2");
       }
       :root {
         --bg: #07090e;
@@ -522,7 +515,8 @@
         max-width: 72ch;
         line-height: 1.6;
       }
-      .note a {
+      .note a,
+      .limit a {
         color: var(--accent-2);
         text-decoration: underline;
         text-underline-offset: 2px;
@@ -660,9 +654,11 @@
           top: 60px;
           margin: 0;
           padding: 12px 20px 16px;
-          background: color-mix(in srgb, var(--bg) 96%, transparent);
+          /* Opaque on purpose. A translucent panel with its own backdrop blur,
+             nested inside the nav's blur, let the hero heading and buttons
+             show through the open menu in Chromium. */
+          background: var(--bg);
           border-bottom: 1px solid var(--line);
-          backdrop-filter: blur(14px);
           gap: 2px;
         }
         .nav.open .nav-links a:not(.nav-cta) {
@@ -944,7 +940,8 @@
             </div>
             <p class="note">
               Builds are unsigned, so the OS may ask for confirmation once. On Windows choose <b>More info</b> then <b>Run anyway</b>.
-              On macOS <b>right click</b> then <b>Open</b>. On Linux without FUSE, use the
+              On macOS <b>right click</b> then <b>Open</b>; on macOS 15 and later use System Settings, <b>Privacy &amp; Security</b>, <b>Open Anyway</b>.
+              On Linux without FUSE, use the
               <a id="tarballLink" href="https://github.com/Gr33nOps/GrabLine/releases/latest" target="_blank" rel="noopener"><b>tar.gz</b></a>.
               See the
               <a href="https://github.com/Gr33nOps/GrabLine/blob/main/docs/install.md" target="_blank" rel="noopener">install guide</a>
@@ -991,7 +988,7 @@
               </div>
               <div class="limit">
                 <h3>No tracking</h3>
-                <p>No ads. No accounts. Downloads go to the sites you choose. The only outbound maintenance call is an optional GitHub update check.</p>
+                <p>No ads. No accounts. Downloads go to the sites you choose. Beyond that, the app makes an optional GitHub update check and fetches FFmpeg or Deno from their official hosts the first time a video needs them. <a href="https://github.com/Gr33nOps/GrabLine/blob/main/PRIVACY.md" target="_blank" rel="noopener">Details</a>.</p>
               </div>
             </div>
           </div>
@@ -1079,20 +1076,28 @@
         });
       }
 
+      // null on a phone or tablet: GrabLine is a desktop app, so none of the
+      // builds is "yours" there. Without this an iPhone (whose user agent
+      // says "like Mac OS X") was offered the macOS DMG, and Android (whose
+      // user agent says "Linux") the AppImage.
       function detectOS() {
         const s = (navigator.userAgent + " " + (navigator.platform || "")).toLowerCase();
+        if (/iphone|ipad|ipod|android/.test(s)) return null;
+        // iPadOS Safari reports itself as a Mac; only the touch screen tells.
+        if (s.includes("mac") && navigator.maxTouchPoints > 1) return null;
         if (s.includes("win")) return "windows";
         if (s.includes("mac")) return "mac";
-        if (s.includes("linux") || s.includes("x11") || s.includes("android")) return "linux";
+        if (s.includes("linux") || s.includes("x11")) return "linux";
         return "windows";
       }
       const osKey = detectOS();
       const osName = { windows: "Windows", mac: "macOS", linux: "Linux" }[osKey];
       const heroBtn = document.getElementById("heroDownload");
-      heroBtn.textContent = "Download for " + osName;
+      // On a phone the button keeps its own label and its link to #download.
+      if (osName) heroBtn.textContent = "Download for " + osName;
 
       const dlGrid = document.getElementById("dlGrid");
-      if (dlGrid) {
+      if (dlGrid && osKey) {
         const yours = dlGrid.querySelector('.plat[data-os="' + osKey + '"]');
         if (yours) dlGrid.prepend(yours);
       }
@@ -1137,7 +1142,7 @@
             if (altBtn && alt) altBtn.href = alt.browser_download_url;
             if (os === osKey) card.classList.add("is-you");
           });
-          const mine = matchAsset(assets, osKey);
+          const mine = osKey && matchAsset(assets, osKey);
           if (mine) heroBtn.href = mine.browser_download_url;
         })
         .catch(() => {

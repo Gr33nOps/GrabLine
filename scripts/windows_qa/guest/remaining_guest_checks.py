@@ -30,6 +30,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog, QPushButton
 
+from app import __version__
 from app.core import launcher
 from app.core.manager import DownloadManager
 from app.core.models import JobStatus
@@ -164,7 +165,7 @@ try:
                 result = subprocess.run(
                     [
                         str(compiler),
-                        "/DAppVersion=1.32.14",
+                        f"/DAppVersion={__version__}",
                         "/O" + str(ROOT),
                         r"C:\Build\packaging\windows\grabline.iss",
                     ],
@@ -173,11 +174,11 @@ try:
                     timeout=180,
                 )
             assert result.returncode == 0, (ROOT / "inno-build.log").read_text()[-2000:]
-            setup = ROOT / "Grabline-Setup-1.32.14.exe"
+            setup = ROOT / f"Grabline-Setup-{__version__}.exe"
             assert setup.exists()
             e["sha256"] = digest(setup)
         with case("GUEST-INSTALL-SHORTCUTS-ASSOCIATIONS", "real per-user Inno install in guest"):
-            setup = ROOT / "Grabline-Setup-1.32.14.exe"
+            setup = ROOT / f"Grabline-Setup-{__version__}.exe"
             result = subprocess.run(
                 [
                     str(setup),

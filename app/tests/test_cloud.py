@@ -292,6 +292,27 @@ def test_ftp_loopback_download_and_resume(db: Database, tmp_path: Path, ftp_serv
     assert not part.exists()
 
 
+def test_cloud_download_never_overwrites_an_existing_file(db: Database, tmp_path: Path, ftp_server):
+    """The direct and HLS engines keep an existing ``file.bin`` and save beside
+    it; the cloud engine replaced it outright, destroying the user's copy."""
+    root, port = ftp_server
+    payload = bytes(range(256)) * 40
+    (root / "file.bin").write_bytes(payload)
+    dest = tmp_path / "dl"
+    dest.mkdir()
+    (dest / "file.bin").write_bytes(b"the user's own file")
+
+    job = db.create_job(
+        f"ftp://bob:secret@127.0.0.1:{port}/file.bin", str(dest), "file.bin", kind=JobKind.CLOUD
+    )
+    assert cloud.CloudDownload(db, job, credentials=None).run() is JobStatus.COMPLETED
+
+    assert (dest / "file.bin").read_bytes() == b"the user's own file"
+    assert (dest / "file (1).bin").read_bytes() == payload
+    finished = db.get_job(job.id)
+    assert finished is not None and finished.filename == "file (1).bin"
+
+
 def test_ftp_folder_listing(db: Database, tmp_path: Path, ftp_server):
     root, port = ftp_server
     (root / "a.bin").write_bytes(b"a" * 10)

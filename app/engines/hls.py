@@ -28,7 +28,8 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import IO
 from urllib.parse import urljoin
@@ -65,9 +66,32 @@ _ESTIMATE_MIN_SECONDS = 5.0  # muxed seconds before the size estimate is trusted
 #: pipe: or exotic protocols. See _command (CWE-668 / CWE-918).
 _INPUT_PROTOCOLS = "http,https,tcp,tls,crypto,data"
 
+#: Ceiling on one local remux run (the limit subprocess.run used to enforce).
+_REMUX_TIMEOUT = 1800.0
+
 #: Records which playlist a work directory's cached segments belong to, so a
 #: resume can tell "carry on" from "that playlist is gone".
 _MANIFEST_STAMP = "playlist.id"
+
+
+def work_dir(part: Path) -> Path:
+    """Where a job's natively fetched segments are cached, beside its part
+    file. Kept across a pause so the stream resumes; see _attempt_native."""
+    return part.parent / f".{part.name}.hls"
+
+
+def _drain(stream: IO[str], tail: deque[str]) -> None:
+    """Read a child's pipe to EOF, keeping only its last few lines.
+
+    A pipe nobody reads fills up, and the child then blocks inside its own
+    write - which looks, from here, exactly like a stream that stopped."""
+    with contextlib.suppress(OSError, ValueError):
+        for raw in stream:
+            line = raw.strip()
+            if line:
+                tail.append(line)
+    with contextlib.suppress(OSError):
+        stream.close()
 
 
 class HlsDownload:
@@ -287,9 +311,13 @@ class HlsDownload:
         except OSError as exc:
             self._failure = f"could not start FFmpeg: {exc}"
             return self._finish_failed(self._failure)
-        assert process.stdout is not None
+        assert process.stdout is not None and process.stderr is not None
         reader = threading.Thread(target=self._read_progress, args=(process.stdout,), daemon=True)
         reader.start()
+        # Drained as it is produced, not after exit: see _drain.
+        errors: deque[str] = deque(maxlen=20)
+        drainer = threading.Thread(target=_drain, args=(process.stderr, errors), daemon=True)
+        drainer.start()
 
         last_persist = 0.0
         last_estimate = 0
@@ -318,12 +346,8 @@ class HlsDownload:
             time.sleep(0.2)
 
         reader.join(timeout=5)
-        stderr_tail = ""
-        if process.stderr is not None:
-            lines = process.stderr.read().strip().splitlines()
-            process.stderr.close()
-            if lines:
-                stderr_tail = lines[-1]
+        drainer.join(timeout=5)
+        stderr_tail = errors[-1] if errors else ""
 
         if self._stop_event.is_set():
             return self._settle_stopped(part)
@@ -476,7 +500,7 @@ class HlsDownload:
         the local copies. Returns a terminal JobStatus on success or a stop;
         None means native could not finish, so the caller lets FFmpeg fetch."""
         self._downloaded = 0
-        work = part.parent / f".{part.name}.hls"
+        work = work_dir(part)
         # Keep whatever a previous run left in this work dir so a paused stream
         # resumes instead of refetching gigabytes. The dir is keyed by the part
         # name, so it belongs to this job alone. Only a pause preserves it (set
@@ -535,6 +559,11 @@ class HlsDownload:
                     "the server refused part of this stream (the page's login or "
                     "referer may have expired - try grabbing it again from the browser)"
                 )
+            # A dropped connection says nothing against the parts already on
+            # disk. Keep them: if the FFmpeg fallback cannot get through
+            # either, the retry resumes from here instead of from zero. (A
+            # refusal - an HTTP status - still clears them, as before.)
+            keep_work = isinstance(exc, httpx.TransportError)
             return None
         finally:
             # A successful remux, a cancel, or a fall-through to the FFmpeg
@@ -668,12 +697,16 @@ class HlsDownload:
         if not pending:
             return not self._stop_event.is_set()
 
+        # Set when one part has failed for good: the fetch is over, so the
+        # workers still running stop and the queued parts never start.
+        abort = threading.Event()
+
         def fetch_one(client: httpx.Client, url: str, name: str) -> None:
             nonlocal confirmed, inflight, done, last_write
             dest = work / name
             tmp = work / f"{name}.part"
             for attempt in range(_SEGMENT_RETRIES + 1):
-                if self._stop_event.is_set():
+                if self._stop_event.is_set() or abort.is_set():
                     return
                 wrote = 0
                 try:
@@ -683,7 +716,7 @@ class HlsDownload:
                         response.raise_for_status()
                         with open(tmp, "wb") as fh:
                             for chunk in response.iter_bytes(65536):
-                                if self._stop_event.is_set():
+                                if self._stop_event.is_set() or abort.is_set():
                                     with lock:
                                         inflight -= wrote  # abandon this part's bytes
                                     return  # leave the .part; it is refetched next run
@@ -714,6 +747,8 @@ class HlsDownload:
                     with lock:
                         inflight -= wrote  # drop this attempt's partial bytes
                     tmp.unlink(missing_ok=True)
+                    if abort.is_set():
+                        return  # another part already failed the fetch
                     if attempt >= _SEGMENT_RETRIES or self._stop_event.is_set():
                         raise  # every retry exhausted - fail the fetch (caught above)
                     # Back off briefly, then retry on a fresh connection; the
@@ -744,8 +779,17 @@ class HlsDownload:
             ThreadPoolExecutor(max_workers=_SEGMENT_WORKERS) as pool,
         ):
             futures = [pool.submit(fetch_one, client, url, name) for url, name in pending]
-            for future in futures:
-                future.result()  # re-raises a part that failed every retry
+            try:
+                # In completion order, so a failure is seen when it happens and
+                # not after every part submitted before it has finished.
+                for future in as_completed(futures):
+                    future.result()  # re-raises a part that failed every retry
+            except BaseException:
+                # Leaving the pool otherwise waits for the whole playlist to
+                # download first - only for the caller to discard it.
+                abort.set()
+                pool.shutdown(wait=True, cancel_futures=True)
+                raise
         # Final flush so the persisted progress matches what is on disk.
         with lock:
             self.db.update_job_downloaded(self.job.id, confirmed)
@@ -802,18 +846,47 @@ class HlsDownload:
         ]
         last_error = ""
         for command in attempts:
+            # Popen and a poll loop rather than subprocess.run: combining a
+            # long stream takes a while, and Pause/Cancel has to land during
+            # it. run() could only wait, so a download cancelled here finished
+            # anyway and left its file behind.
             try:
-                result = subprocess.run(
-                    command, capture_output=True, text=True, timeout=1800, **proc.hidden()
+                process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    **proc.hidden(),
                 )
-            except (OSError, subprocess.TimeoutExpired) as exc:
+            except OSError as exc:
                 log.info("hls job %s: local remux could not run (%s)", self.job.id, exc)
                 self._failure = f"could not run FFmpeg to combine the stream ({exc})"
                 return None
-            if result.returncode == 0 and part.exists() and part.stat().st_size > 0:
+            assert process.stderr is not None
+            errors: deque[str] = deque(maxlen=20)
+            drainer = threading.Thread(target=_drain, args=(process.stderr, errors), daemon=True)
+            drainer.start()
+            deadline = time.monotonic() + _REMUX_TIMEOUT
+            timed_out = False
+            while process.poll() is None:
+                if self._stop_event.wait(0.1):
+                    self._terminate(process)
+                    break
+                if time.monotonic() > deadline:
+                    self._terminate(process)
+                    timed_out = True
+                    break
+            drainer.join(timeout=5)
+            if self._stop_event.is_set():
+                _discard(part)
+                return None  # the caller settles the pause/cancel
+            if timed_out:
+                _discard(part)
+                self._failure = "FFmpeg took too long to combine the stream and was stopped"
+                return None
+            if process.returncode == 0 and part.exists() and part.stat().st_size > 0:
                 return self._finalize(part)
-            tail = (result.stderr or "").strip().splitlines()
-            last_error = tail[-1] if tail else ""
+            last_error = errors[-1] if errors else ""
             log.info(
                 "hls job %s: local remux attempt failed%s",
                 self.job.id,
@@ -838,6 +911,9 @@ class HlsDownload:
             return self._finish_failed("the stream produced an empty file")
         dest = naming.unique_path(self.job.dest_path)
         os.replace(part, dest)
+        # Whichever path produced the file, a segment cache kept for a resume
+        # has nothing left to resume.
+        shutil.rmtree(work_dir(part), ignore_errors=True)
         if dest.name != self.job.filename:
             self.job.filename = dest.name
             self.db.update_job_filename(self.job.id, dest.name)
@@ -856,6 +932,7 @@ class HlsDownload:
         if not keep_progress:
             self.db.update_job_downloaded(self.job.id, 0)
         if self._cancelled:
+            shutil.rmtree(work_dir(part), ignore_errors=True)
             self.db.set_job_status(self.job.id, JobStatus.CANCELLED)
             return JobStatus.CANCELLED
         self.db.set_job_status(self.job.id, JobStatus.PAUSED)
