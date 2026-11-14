@@ -623,6 +623,19 @@ def test_fair_speed_splits_budget_evenly_and_stays_stable(db: Database):
         manager.shutdown()
 
 
+def test_fair_speed_zero_sample_is_not_a_server_capacity_measurement(db: Database):
+    manager = DownloadManager(db, max_concurrent=0)
+    try:
+        manager._running = False
+        manager._kick()
+        manager._scheduler.join(timeout=5)
+        manager._fair_applied = {1: 128 * 1024}
+        manager._job_rates = {1: 0.0}
+        assert manager._fair_demand(1) is None
+    finally:
+        manager.shutdown()
+
+
 def test_fair_speed_reclaims_share_a_slow_download_cannot_use(db: Database):
     """The line the slow one leaves on the table goes to the one that can use
     it - an equal split alone would cap the fast download at half a line that

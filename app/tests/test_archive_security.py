@@ -149,3 +149,43 @@ def test_external_encrypted_archive_requires_correct_password(tmp_path: Path):
         archive.extract(bundle, tmp_path / "denied", passwords=("wrong-password",))
     out = archive.extract(bundle, tmp_path / "accepted", passwords=("qa-test-password",))
     assert (out / "secret.txt").read_text() == "test-only payload"
+
+
+@pytest.mark.skipif(_seven_zip() is None, reason="needs 7z to create AES ZIP")
+def test_aes_zip_uses_external_decryptor_and_preserves_source(tmp_path: Path):
+    import hashlib
+    import subprocess
+
+    source = tmp_path / "notes.txt"
+    source.write_bytes(b"AES ZIP test-only content")
+    bundle = tmp_path / "encrypted.zip"
+    tool = _seven_zip()
+    assert tool is not None
+    subprocess.run(
+        [tool, "a", "-tzip", "-mem=AES256", "-pqa-aes-password", str(bundle), str(source)],
+        check=True,
+        capture_output=True,
+    )
+    original = hashlib.sha256(bundle.read_bytes()).digest()
+    with pytest.raises(archive.PasswordRequired):
+        archive.extract(bundle, tmp_path / "wrong", passwords=("wrong",))
+    out = archive.extract(bundle, tmp_path / "correct", passwords=("wrong", "qa-aes-password"))
+    assert (out / "notes.txt").read_bytes() == b"AES ZIP test-only content"
+    assert hashlib.sha256(bundle.read_bytes()).digest() == original
+
+
+@pytest.mark.skipif(_seven_zip() is None, reason="needs 7z")
+def test_external_unicode_member_listing_and_selected_extraction(tmp_path: Path):
+    import subprocess
+
+    name = "\u6f22\u5b57-\u00e9-\U0001f600.txt"
+    source = tmp_path / name
+    source.write_bytes(b"unicode member content")
+    bundle = tmp_path / "unicode.7z"
+    tool = _seven_zip()
+    assert tool is not None
+    subprocess.run([tool, "a", str(bundle), str(source)], capture_output=True, check=True)
+    entries = archive.list_entries(bundle)
+    assert [entry.name for entry in entries] == [name]
+    out = archive.extract(bundle, tmp_path / "out", members=(name,))
+    assert (out / name).read_bytes() == b"unicode member content"

@@ -896,7 +896,9 @@ class MainWindow(QMainWindow):
             v.status in (JobStatus.DOWNLOADING, JobStatus.QUEUED) for v in views
         )
         self._toggle_btn.set_icon_name("resume" if resume else "pause")
-        self._toggle_btn.setToolTip(t("Resume") if resume else t("Pause"))
+        label = t("Resume") if resume else t("Pause")
+        self._toggle_btn.setToolTip(label)
+        self._toggle_btn.setAccessibleName(label)
 
     def _pause_all(self) -> None:
         for view in list(self._last_views.values()):
@@ -1020,10 +1022,13 @@ class MainWindow(QMainWindow):
             if handoff.source == "focus":
                 # "Open GrabLine" from the extension: raise the window, and jump
                 # to a named page (e.g. settings) when one was requested.
-                self.show()
+                if self.isMinimized():
+                    self.showNormal()
+                else:
+                    self.show()
                 self.raise_()
                 self.activateWindow()
-                if handoff.page_title in self._page_index:
+                if handoff.page_title:
                     self._switch_view(handoff.page_title)
             elif handoff.source == "gallery" and handoff.payload:
                 self._open_gallery(list(handoff.payload), handoff.page_title)
@@ -3265,12 +3270,12 @@ class MainWindow(QMainWindow):
     def refresh(self) -> None:
         if self._shutting_down:
             return
-        if not self.isVisible():
-            # Hidden to the tray. Nothing here is stored - every line below
-            # writes into widgets nobody is looking at - and the manager keeps
-            # downloading regardless. showEvent refreshes on the way back.
-            return
         views = self.manager.snapshot()
+        if not self.isVisible():
+            # Completion actions and notifications must keep running in the
+            # tray. Skip only widget rendering; showEvent catches that up.
+            self._detect_transitions(views)
+            return
         # Optimistic removal: a force-removed running job stays in the DB until
         # its worker actually stops - hide it from the list right away.
         present = {view.id for view in views}

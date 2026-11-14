@@ -890,5 +890,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nGoogle Safe Browsing에서 이를 {threat}(으)로 표시했습니다. 그래도 다운로드하시겠습니까?",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\n이 다운로드는 암호화되지 않은 HTTP를 통해 이루어집니다. 전송 중 변조될 수 있습니다. 그래도 다운로드하시겠습니까?",
   "{url}\nClick to choose quality and download.": "{url}\n클릭하여 품질을 선택하고 다운로드하세요.",
-  "── Checksums ──": "── 체크섬 ──"
+  "── Checksums ──": "── 체크섬 ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "선택한 화질을 사용할 수 없습니다. 다른 화질을 선택하거나 나중에 다시 시도하세요."
 }

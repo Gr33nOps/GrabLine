@@ -25,6 +25,7 @@ from app.engines.torrent import (
     magnet_from_torrent,
     parse_torrent,
 )
+from app.tests.network_ports import torrent_port
 from app.tests.test_resolver import FakeSmart
 
 # ------------------------------------------------------------ create + parse
@@ -207,7 +208,7 @@ def test_torrent_loopback_transfer(db: Database, tmp_path: Path, use_magnet):
 
     seeder = lt.session(
         {
-            "listen_interfaces": "127.0.0.1:6971",
+            "listen_interfaces": f"127.0.0.1:{torrent_port()}",
             "enable_dht": False,
             "enable_upnp": False,
             "enable_natpmp": False,
@@ -222,9 +223,10 @@ def test_torrent_loopback_transfer(db: Database, tmp_path: Path, use_magnet):
     while time.time() < deadline and not seed_handle.status().is_seeding:
         time.sleep(0.2)
     assert seed_handle.status().is_seeding
+    assert seeder.listen_port() > 0
 
     settings = Settings(db)
-    settings.torrent_port = 6972
+    settings.torrent_port = torrent_port()
     settings.torrent_dht = False
     settings.torrent_upnp = False
     settings.torrent_natpmp = False
@@ -236,7 +238,7 @@ def test_torrent_loopback_transfer(db: Database, tmp_path: Path, use_magnet):
         job = manager.add_torrent(
             magnet_from_torrent(torrent_bytes) if use_magnet else str(torrent_path),
             dest_dir=dest,
-            options={"peers": ["127.0.0.1:6971"]},
+            options={"peers": [f"127.0.0.1:{seeder.listen_port()}"]},
         )
         assert job.kind is JobKind.TORRENT
         deadline = time.time() + 60
@@ -259,6 +261,7 @@ def test_torrent_loopback_transfer(db: Database, tmp_path: Path, use_magnet):
         assert stats.downloaded >= len(payload) and stats.uploaded >= 0
     finally:
         manager.shutdown()
+        seeder.remove_torrent(seed_handle)
 
 
 def test_torrent_stats_guards(db: Database, tmp_path: Path):

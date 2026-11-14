@@ -1340,6 +1340,73 @@ def test_heavy_pages_are_built_on_first_visit(db: Database, tmp_path: Path):
         manager.shutdown()
 
 
+@pytest.mark.parametrize("target", ["settings", "queue"])
+def test_browser_focus_builds_unvisited_page(db: Database, tmp_path: Path, target: str):
+    _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    window = MainWindow(manager, settings)
+    try:
+        assert target not in window._page_index
+        db.add_handoff("about:focus", source="focus", page_title=target)
+        window._drain_handoffs()
+        assert window._current_page == target
+        assert window._pages.currentIndex() == window._page_index[target]
+    finally:
+        window.shutdown()
+        manager.shutdown()
+
+
+def test_pause_resume_toolbar_accessible_name_follows_action(db: Database, tmp_path: Path):
+    from app.core.models import JobStatus
+
+    _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    window = MainWindow(manager, settings)
+    try:
+        job = db.create_job("http://example.invalid/paused.bin", str(tmp_path), "paused.bin")
+        db.set_job_status(job.id, JobStatus.PAUSED)
+        window.show()
+        window.refresh()
+        window.table.selectRow(0)
+        window._update_toggle_button()
+        assert window._toggle_btn.toolTip() == "Resume"
+        assert window._toggle_btn.accessibleName() == "Resume"
+    finally:
+        window.shutdown()
+        manager.shutdown()
+
+
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_hidden_window_emits_terminal_job_signals(db: Database, tmp_path: Path, status: str):
+    from app.core.models import JobStatus
+
+    _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    window = MainWindow(manager, settings)
+    observed = []
+    window.job_completed.connect(lambda *_args: observed.append("completed"))
+    window.job_failed.connect(lambda *_args: observed.append("failed"))
+    try:
+        job = db.create_job("http://example.invalid/hidden.bin", str(tmp_path), "hidden.bin")
+        window.show()
+        window.refresh()
+        window.hide()
+        db.set_job_status(job.id, JobStatus(status))
+        window.refresh()
+        assert observed == [status]
+        window.refresh()
+        assert observed == [status]
+    finally:
+        window.shutdown()
+        manager.shutdown()
+
+
 def test_pause_shows_instantly_before_the_worker_settles(db: Database, tmp_path, monkeypatch):
     """Pausing an active download flips the row to Paused at once, even though
     the manager keeps the DB status on Downloading until the worker winds
@@ -1802,4 +1869,23 @@ def test_minimum_window_keeps_primary_columns_visible(db, tmp_path):
         window.hide()
         window.deleteLater()
     finally:
+        manager.shutdown()
+
+
+def test_browser_focus_restores_minimized_window(db: Database, tmp_path: Path):
+    app = _qapp()
+    settings = Settings(db)
+    settings.download_dir = tmp_path
+    manager = DownloadManager(db, settings=settings, max_concurrent=0)
+    window = MainWindow(manager, settings)
+    try:
+        window.showMinimized()
+        app.processEvents()
+        assert window.isMinimized()
+        db.add_handoff("about:focus", source="focus")
+        window._drain_handoffs()
+        app.processEvents()
+        assert window.isVisible() and not window.isMinimized()
+    finally:
+        window.shutdown()
         manager.shutdown()

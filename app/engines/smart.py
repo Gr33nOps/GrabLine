@@ -346,6 +346,8 @@ def _runtime_might_help(message: str) -> bool:
 def friendly_error(message: str) -> str:
     """Map a raw yt-dlp error onto a sentence a person can act on."""
     normalized = _normalize_error_text(message)
+    if "requested format is not available" in normalized and "[youtube" not in normalized:
+        return t("The selected quality is unavailable. Choose another quality or try again later.")
     for marker, friendly in _FRIENDLY_ERRORS:
         if marker.lower() in normalized:
             return t(friendly)

@@ -43,9 +43,15 @@ class RateLimiter:
             # equal share.
             if rate == self._rate:
                 return
+            now = time.monotonic()
+            self._tokens = (
+                min(float(self._rate), self._tokens + (now - self._updated) * self._rate)
+                if self._rate
+                else 0.0
+            )
             self._rate = rate
             self._tokens = min(self._tokens, float(self._rate))
-            self._updated = time.monotonic()
+            self._updated = now
 
     def throttle(self, amount: int, stop: threading.Event | None = None) -> None:
         """Sleep off this chunk's debt, waking early if *stop* is set."""
@@ -65,17 +71,24 @@ class RateLimiter:
             self._tokens = min(float(self._rate), self._tokens + (now - self._updated) * self._rate)
             self._updated = now
             self._tokens -= amount  # may go negative: that's the debt to sleep off
-            wait = -self._tokens / self._rate if self._tokens < 0 else 0.0
-        if wait <= 0:
+            debt = max(0.0, -self._tokens)
+            rate = self._rate
+        if debt <= 0:
             return
         # Sleep in slices: the total is unchanged (so the average still lands
         # on the cap), but a pause is honoured within a slice, and lifting the
         # limit takes effect now instead of after the old debt is paid off.
-        deadline = time.monotonic() + wait
+        previous = time.monotonic()
         while self._rate != UNLIMITED:
-            left = deadline - time.monotonic()
-            if left <= 0:
+            now = time.monotonic()
+            debt -= (now - previous) * rate
+            previous = now
+            if debt <= 0:
                 return
+            rate = self._rate
+            if rate == UNLIMITED:
+                return
+            left = debt / rate
             if stop is None:
                 time.sleep(min(left, self.SLICE))
             elif stop.wait(min(left, self.SLICE)):

@@ -890,5 +890,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nGoogle Safe Browsing 将其标记为 {threat}。仍要下载吗？",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\n此下载通过未加密的 HTTP 进行，传输过程中可能被篡改。仍要下载吗？",
   "{url}\nClick to choose quality and download.": "{url}\n点击以选择质量并下载。",
-  "── Checksums ──": "── 校验和 ──"
+  "── Checksums ──": "── 校验和 ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "所选画质不可用。请选择其他画质或稍后重试。"
 }

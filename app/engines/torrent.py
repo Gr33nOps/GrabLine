@@ -348,6 +348,7 @@ class TorrentSession:
     def __init__(self) -> None:
         self._session: Any = None
         self._lock = threading.Lock()
+        self._flush_lock = threading.Lock()
         self._settings: Settings | None = None
         self._ticker: threading.Thread | None = None
 
@@ -418,6 +419,43 @@ class TorrentSession:
                 self._session.remove_torrent(handle, lt.session.delete_files)
             else:
                 self._session.remove_torrent(handle)
+
+    def flush_disk(self, handle: Any, *, timeout: float = 60.0) -> None:
+        """Wait for the disk acknowledgement before exposing completed files.
+
+        is_finished includes verified pieces still queued for disk writes.
+        Serializing flush requests also prevents concurrent jobs from consuming
+        one another's cache_flushed_alert from the session's shared alert queue.
+        """
+        lt = _lt()
+        with self._flush_lock:
+            session = self.session()
+            categories = getattr(lt, "alert_category", None)
+            storage = (
+                categories.storage
+                if categories is not None
+                else lt.alert.category_t.storage_notification
+            )
+            session.apply_settings(
+                {"alert_mask": int(session.get_settings()["alert_mask"]) | int(storage)}
+            )
+            session.pop_alerts()  # discard acknowledgements from earlier requests
+            handle.flush_cache()
+            deadline = time.monotonic() + timeout
+            while True:
+                for alert in session.pop_alerts():
+                    if getattr(alert, "handle", None) != handle:
+                        continue
+                    if isinstance(alert, lt.file_error_alert):
+                        raise DownloadError(str(alert.message()))
+                    if isinstance(alert, lt.cache_flushed_alert):
+                        error = handle.status().errc
+                        if error.value():
+                            raise DownloadError(str(error.message()))
+                        return
+                if time.monotonic() >= deadline:
+                    raise DownloadError("timed out waiting for torrent data to reach disk")
+                session.wait_for_alert(100)
 
     def upload_rate(self) -> float:
         """Total bytes/sec this process is currently uploading to peers (the
@@ -701,6 +739,11 @@ class TorrentDownload:
             self._first_last_pieces(handle)
 
     def _finish(self, handle: Any) -> JobStatus:
+        try:
+            SESSION.flush_disk(handle)
+        except DownloadError as exc:
+            self.db.set_job_status(self.job.id, JobStatus.FAILED, error=str(exc))
+            return JobStatus.FAILED
         self.db.update_job_downloaded(self.job.id, self._state.downloaded)
         if self._state.total:
             self.db.update_job_total(self.job.id, self._state.total)

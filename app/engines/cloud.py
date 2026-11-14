@@ -677,7 +677,11 @@ def _list_sftp(url: str, store: CredentialStore | None) -> list[RemoteFile]:
     path = unquote(urlsplit(url).path).rstrip("/") or "/"
     try:
         files = [
-            RemoteFile(f"{base}{path}/{entry.filename}", entry.filename, int(entry.st_size or 0))
+            RemoteFile(
+                f"{base}{path.rstrip('/')}/{entry.filename}",
+                entry.filename,
+                int(entry.st_size or 0),
+            )
             for entry in sftp.listdir_attr(path)
             if not stat_module.S_ISDIR(entry.st_mode or 0)
         ]

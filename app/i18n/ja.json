@@ -890,5 +890,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nGoogle セーフ ブラウジングはこれを {threat} としてフラグしています。それでもダウンロードしますか?",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\nこのダウンロードは暗号化されていない HTTP 経由です。転送中に改ざんされる可能性があります。それでもダウンロードしますか?",
   "{url}\nClick to choose quality and download.": "{url}\nクリックして画質を選び、ダウンロードします。",
-  "── Checksums ──": "── チェックサム ──"
+  "── Checksums ──": "── チェックサム ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "選択した画質は利用できません。別の画質を選択するか、後でもう一度お試しください。"
 }

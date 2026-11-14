@@ -890,5 +890,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nGoogle Safe Browsing stuft dies als {threat} ein. Trotzdem herunterladen?",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\nDieser Download erfolgt über unverschlüsseltes HTTP. Er könnte während der Übertragung manipuliert werden. Trotzdem herunterladen?",
   "{url}\nClick to choose quality and download.": "{url}\nKlicken Sie, um Qualität zu wählen und herunterzuladen.",
-  "── Checksums ──": "── Prüfsummen ──"
+  "── Checksums ──": "── Prüfsummen ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "Die ausgewählte Qualität ist nicht verfügbar. Wähle eine andere Qualität oder versuche es später erneut."
 }

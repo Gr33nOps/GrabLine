@@ -21,7 +21,7 @@ Deno.test("assistant source pages are matched by host, not a lookalike URL", () 
 Deno.test("browser-generated blob downloads stay in the browser even with an HTTP final URL", () => {
   const start = code.indexOf("function shouldIntercept(item)");
   const end = code.indexOf("// While we're taking downloads over", start);
-  const shouldIntercept = new Function(code.slice(start, end) + "\nreturn shouldIntercept;")();
+  const shouldIntercept = new Function("const browserOnlyResponses = new Map(); const BROWSER_ONLY_TTL_MS = 120000;\n" + code.slice(start, end) + "\nreturn shouldIntercept;")();
   assertEquals(shouldIntercept({ url: "blob:https://chatgpt.com/123", finalUrl: "https://cdn.example.com/a.pdf" }), false);
   assertEquals(shouldIntercept({ url: "data:application/pdf;base64,abc" }), false);
   assertEquals(shouldIntercept({ url: "https://cdn.example.com/a.pdf" }), true);

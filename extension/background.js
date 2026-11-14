@@ -346,11 +346,11 @@ registerMenus();
 
 // -------------------------------------------- collect images / links grab
 
-async function sendCollection(tab, collectCmd, hostType) {
+async function sendCollection(tab, collectCmd, hostType, frameId = 0) {
   if (!tab?.id) return;
   let reply = null;
   try {
-    reply = await api.tabs.sendMessage(tab.id, { cmd: collectCmd });
+    reply = await api.tabs.sendMessage(tab.id, { cmd: collectCmd }, { frameId });
   } catch {
     return; // no content script on this page (browser UI, store pages …)
   }
@@ -371,15 +371,15 @@ async function sendCollection(tab, collectCmd, hostType) {
 
 api.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === GALLERY_MENU_ID) {
-    await sendCollection(tab, "collectImages", "gallery");
+    await sendCollection(tab, "collectImages", "gallery", info.frameId ?? 0);
     return;
   }
   if (info.menuItemId === LINKS_MENU_ID) {
-    await sendCollection(tab, "collectLinks", "links");
+    await sendCollection(tab, "collectLinks", "links", info.frameId ?? 0);
     return;
   }
   if (info.menuItemId === SELECTION_MENU_ID) {
-    await sendCollection(tab, "collectSelection", "links");
+    await sendCollection(tab, "collectSelection", "links", info.frameId ?? 0);
     return;
   }
   if (info.menuItemId !== MENU_ID) return;
@@ -473,8 +473,23 @@ function updateBadge(tabId, count) {
   api.action.setBadgeBackgroundColor({ tabId, color: "#0170fd" });
 }
 
+// downloads.onCreated does not expose the request method in Chromium.
+// Retain successful navigation methods so POST exports are never replayed as GET.
+const browserOnlyResponses = new Map();
+const BROWSER_ONLY_TTL_MS = 120_000;
+
 api.webRequest.onHeadersReceived.addListener(
   (details) => {
+    if (details.statusCode >= 200 && details.statusCode < 300 &&
+        ["main_frame", "sub_frame", "other"].includes(details.type)) {
+      if (details.method === "GET") browserOnlyResponses.delete(details.url);
+      else if (details.method) {
+        browserOnlyResponses.set(details.url, Date.now());
+        if (browserOnlyResponses.size > 200) {
+          browserOnlyResponses.delete(browserOnlyResponses.keys().next().value);
+        }
+      }
+    }
     if (details.tabId < 0) return;
     const media = classify(details);
     if (!media) return;
@@ -515,6 +530,12 @@ function shouldIntercept(item) {
   // some browsers also report an HTTP finalUrl for those download items.
   if (item.url && !/^https?:/i.test(item.url)) return false;
   const url = item.finalUrl || item.url || "";
+  for (const candidate of [item.url, url]) {
+    const seen = browserOnlyResponses.get(candidate);
+    if (seen == null) continue;
+    if (Date.now() - seen < BROWSER_ONLY_TTL_MS) return false;
+    browserOnlyResponses.delete(candidate);
+  }
   return /^https?:/i.test(url);
 }
 
@@ -625,10 +646,24 @@ api.storage.onChanged.addListener((changes, area) => {
 async function handoffDownloadItem(item, sourcePage) {
   const url = item.finalUrl || item.url;
   const [active] = await api.tabs.query({ active: true, lastFocusedWindow: true });
+  let sourceTab = sourcePage && active?.url !== sourcePage
+    ? (await api.tabs.query({})).find((tab) => tab.url === sourcePage)
+    : active;
+  // Cross-origin referrer policy often reduces /nested/page to just origin/.
+  // Keep the active source tab in that case so its progress pill still works.
+  if (!sourceTab && sourcePage && active?.url) {
+    try {
+      if (new URL(active.url).origin === new URL(sourcePage).origin) sourceTab = active;
+    } catch { /* invalid or unavailable tab URL: leave it untracked */ }
+  }
   const chosenName = (item.filename || "").split(/[\\/]/).pop() || null;
   return sendToGrabLine(
     url,
-    { url: sourcePage || active?.url || null, title: active?.title || chosenName },
+    {
+      id: sourceTab?.id,
+      url: sourcePage || active?.url || null,
+      title: sourceTab?.title || chosenName,
+    },
     { credentials: true, onlyIfRunning: true },
   );
 }

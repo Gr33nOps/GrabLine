@@ -204,6 +204,13 @@ def test_friendly_errors():
     assert friendly_error("ERROR: something odd\nTraceback...") == "something odd"
 
 
+def test_non_youtube_format_error_does_not_recommend_youtube_login():
+    for site in ("vimeo", "BiliBili"):
+        message = friendly_error(f"ERROR: [{site}] 123: Requested format is not available")
+        assert "youtube" not in message.lower()
+        assert "quality" in message.lower()
+
+
 def test_inspect_youtube_is_jsless_first(monkeypatch: pytest.MonkeyPatch) -> None:
     """YouTube analysis must stay JS-less first so the quality panel appears in
     seconds; cookies+runtime are for download (and auth-wall retries)."""

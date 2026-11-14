@@ -890,5 +890,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nGoogle Safe Browsing इसे {threat} के रूप में चिह्नित करता है। फिर भी डाउनलोड करें?",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\nयह डाउनलोड असुरक्षित HTTP पर है। इसे स्थानांतरण के दौरान बदला जा सकता है। फिर भी डाउनलोड करें?",
   "{url}\nClick to choose quality and download.": "{url}\nगुणवत्ता चुनने और डाउनलोड करने के लिए क्लिक करें।",
-  "── Checksums ──": "── चेकसम ──"
+  "── Checksums ──": "── चेकसम ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "चुनी गई गुणवत्ता उपलब्ध नहीं है। दूसरी गुणवत्ता चुनें या बाद में फिर कोशिश करें।"
 }

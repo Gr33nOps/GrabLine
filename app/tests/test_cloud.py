@@ -301,3 +301,24 @@ def test_ftp_folder_listing(db: Database, tmp_path: Path, ftp_server):
     names = sorted(f.name for f in files)
     assert names == ["a.bin", "b.bin"]  # directories are skipped
     assert all(f.url.startswith(f"ftp://bob:secret@127.0.0.1:{port}/") for f in files)
+
+
+@pytest.mark.parametrize("folder", ["sftp://example.test/", "scp://example.test/"])
+def test_ssh_root_listing_returns_downloadable_single_slash_url(monkeypatch, folder):
+    from types import SimpleNamespace
+
+    class Sftp:
+        def listdir_attr(self, path):
+            assert path == "/"
+            return [SimpleNamespace(filename="file.bin", st_size=12, st_mode=0)]
+
+        def close(self):
+            pass
+
+    class Client:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cloud, "_sftp_client", lambda url, store: (Client(), Sftp()))
+    entries = cloud.list_folder(folder)
+    assert entries[0].url == folder + "file.bin"

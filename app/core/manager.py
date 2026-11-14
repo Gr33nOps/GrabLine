@@ -626,7 +626,7 @@ class DownloadManager:
         """
         rate = self._job_rates.get(job_id)
         applied = self._fair_applied.get(job_id, 0)
-        if rate is None or applied <= 0 or rate >= applied * _FAIR_SATURATED:
+        if rate is None or rate <= 0 or applied <= 0 or rate >= applied * _FAIR_SATURATED:
             return None
         return int(rate * _FAIR_DEMAND_HEADROOM)
 
