@@ -80,3 +80,18 @@ def test_the_full_debt_is_still_paid_when_nothing_interrupts():
     started = time.monotonic()
     limiter.throttle(3000)  # 1 KB of burst is free, 2 KB is owed
     assert 1.8 <= time.monotonic() - started < 3.5
+
+
+def test_increasing_a_live_cap_recalculates_outstanding_wait():
+    limiter = RateLimiter(1024)
+    stop = threading.Event()
+    worker = threading.Thread(target=limiter.throttle, args=(64 * 1024, stop))
+    worker.start()
+    try:
+        time.sleep(0.1)
+        limiter.set_rate(1024 * 1024)
+        worker.join(timeout=1)
+        assert not worker.is_alive(), "Worker kept the old 63-second throttle deadline"
+    finally:
+        stop.set()
+        worker.join(timeout=1)

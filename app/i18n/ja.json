@@ -331,7 +331,6 @@
   "Import settings…": "設定をインポート…",
   "Import {count}": "{count} 件をインポート",
   "Imported {count} download(s)": "{count} 件のダウンロードをインポートしました",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "{count} 件の設定をインポートしました。すべて表示するには設定を再度開いて（または再起動して）ください。",
   "Importing {done}/{total} …": "インポート中 {done}/{total}…",
   "Inspect URL": "URL を検査",
   "Inspecting {url} …": "{url} を検査中…",
@@ -569,6 +568,7 @@
   "Right-click a download for one-off scheduling: Start at… a chosen time, or Start after… another download finishes.": "ダウンロードを右クリックすると単発スケジュール: 指定時刻に開始…、または別のダウンロード完了後に開始…。",
   "Right-click a download to override its speed limit, connections, and mirrors.": "ダウンロードを右クリックすると、その速度制限・接続数・ミラーを個別に変更できます。",
   "Run command:": "コマンドを実行:",
+  "S3 endpoint:": "S3 エンドポイント:",
   "SFTP/SCP private-key file (optional)": "SFTP/SCP 秘密鍵ファイル（任意）",
   "SHA-256 copied for {name}": "{name} の SHA-256 をコピーしました",
   "SHA-256:      {checksum}": "SHA-256:      {checksum}",
@@ -823,7 +823,7 @@
   "end  e.g. 2:45": "終了  例 2:45",
   "feed URL, or:  feed URL | filter text\none per line": "フィード URL、または:  フィード URL | フィルタ文字列\n1 行に 1 つ",
   "find -> replace   (one rule per line)": "検索 -> 置換   （1 行に 1 ルール）",
-  "host, or the S3 endpoint (e.g. s3.us-west.amazonaws.com)": "ホスト、または S3 エンドポイント（例: s3.us-west.amazonaws.com）",
+  "host, or the S3 bucket name": "ホスト、または S3 バケット名",
   "hosts that skip the proxy, comma separated": "プロキシを経由しないホスト、カンマ区切り",
   "http(s):// · socks5:// · socks4:// host:port  (blank = direct)": "http(s):// · socks5:// · socks4:// ホスト:ポート  （空欄 = 直接）",
   "https://example.com/search?q=%s": "https://example.com/search?q=%s",
@@ -832,6 +832,7 @@
   "one folder per line, e.g. /home/me/Movies": "1 行に 1 フォルダ、例 /home/me/Movies",
   "one password per line": "1 行に 1 つのパスワード",
   "only scan these types, e.g. exe, msi, zip (blank = all)": "これらの種類のみスキャン、例 exe, msi, zip（空欄 = すべて）",
+  "optional, e.g. https://minio.example:9000": "任意、例: https://minio.example:9000",
   "password, key passphrase, or S3 secret key": "パスワード、鍵パスフレーズ、または S3 シークレットキー",
   "reading details …": "詳細を読み込み中 …",
   "start  e.g. 1:20": "開始  例 1:20",
@@ -888,5 +889,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nGoogle セーフ ブラウジングはこれを {threat} としてフラグしています。それでもダウンロードしますか?",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\nこのダウンロードは暗号化されていない HTTP 経由です。転送中に改ざんされる可能性があります。それでもダウンロードしますか?",
   "{url}\nClick to choose quality and download.": "{url}\nクリックして画質を選び、ダウンロードします。",
-  "── Checksums ──": "── チェックサム ──"
+  "── Checksums ──": "── チェックサム ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "選択した画質は利用できません。別の画質を選択するか、後でもう一度お試しください。"
 }

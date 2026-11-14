@@ -331,7 +331,6 @@
   "Import settings…": "Importer les paramètres…",
   "Import {count}": "Importer {count}",
   "Imported {count} download(s)": "{count} téléchargement(s) importé(s)",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "{count} paramètre(s) importé(s). Rouvrez Paramètres (ou redémarrez) pour tous les voir.",
   "Importing {done}/{total} …": "Importation {done}/{total}…",
   "Inspect URL": "Inspecter l'URL",
   "Inspecting {url} …": "Inspection de {url} …",
@@ -569,6 +568,7 @@
   "Right-click a download for one-off scheduling: Start at… a chosen time, or Start after… another download finishes.": "Faites un clic droit sur un téléchargement pour une planification ponctuelle : Démarrer à… une heure choisie, ou Démarrer après… la fin d'un autre téléchargement.",
   "Right-click a download to override its speed limit, connections, and mirrors.": "Faites un clic droit sur un téléchargement pour remplacer sa limite de vitesse, ses connexions et ses miroirs.",
   "Run command:": "Exécuter la commande :",
+  "S3 endpoint:": "Point de terminaison S3 :",
   "SFTP/SCP private-key file (optional)": "Fichier de clé privée SFTP/SCP (optionnel)",
   "SHA-256 copied for {name}": "SHA-256 copié pour {name}",
   "SHA-256:      {checksum}": "SHA-256 :     {checksum}",
@@ -823,7 +823,7 @@
   "end  e.g. 2:45": "fin  ex. 2:45",
   "feed URL, or:  feed URL | filter text\none per line": "URL du flux, ou :  URL du flux | texte de filtre\nun par ligne",
   "find -> replace   (one rule per line)": "chercher -> remplacer   (une règle par ligne)",
-  "host, or the S3 endpoint (e.g. s3.us-west.amazonaws.com)": "hôte, ou le point de terminaison S3 (p. ex. s3.us-west.amazonaws.com)",
+  "host, or the S3 bucket name": "hôte ou nom du compartiment S3",
   "hosts that skip the proxy, comma separated": "hôtes qui contournent le proxy, séparés par des virgules",
   "http(s):// · socks5:// · socks4:// host:port  (blank = direct)": "http(s):// · socks5:// · socks4:// hôte:port  (vide = direct)",
   "https://example.com/search?q=%s": "https://example.com/search?q=%s",
@@ -832,6 +832,7 @@
   "one folder per line, e.g. /home/me/Movies": "un dossier par ligne, ex. /home/me/Movies",
   "one password per line": "un mot de passe par ligne",
   "only scan these types, e.g. exe, msi, zip (blank = all)": "n'analyser que ces types, ex. exe, msi, zip (vide = tous)",
+  "optional, e.g. https://minio.example:9000": "facultatif, p. ex. https://minio.example:9000",
   "password, key passphrase, or S3 secret key": "mot de passe, phrase de passe de clé ou clé secrète S3",
   "reading details …": "lecture des détails …",
   "start  e.g. 1:20": "début  ex. 1:20",
@@ -888,5 +889,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nGoogle Safe Browsing signale ceci comme {threat}. Télécharger malgré tout ?",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\nCe téléchargement utilise du HTTP non chiffré. Il pourrait être altéré en transit. Télécharger malgré tout ?",
   "{url}\nClick to choose quality and download.": "{url}\nCliquez pour choisir la qualité et télécharger.",
-  "── Checksums ──": "── Sommes de contrôle ──"
+  "── Checksums ──": "── Sommes de contrôle ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "La qualité sélectionnée est indisponible. Choisissez une autre qualité ou réessayez plus tard."
 }

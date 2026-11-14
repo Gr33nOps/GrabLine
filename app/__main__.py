@@ -176,15 +176,23 @@ def _set_windows_app_id() -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("GrabLine")
 
 
+def _enable_native_crash_log(stream: TextIO) -> None:
+    import faulthandler
+
+    # Windows can deliver handled first-chance COM exceptions without the GIL.
+    # Walking another thread's changing Python frames from that handler can
+    # itself fault in _Py_DumpTracebackThreads. Keep the faulting-thread trace;
+    # normal Python crash hooks below still report uncaught exceptions.
+    faulthandler.enable(stream, all_threads=sys.platform != "win32")
+
+
 def main() -> int:
     # A native-crash trace (faulthandler) to the data folder: if anything
     # segfaults, crash.log says where instead of a silent vanish.
-    import faulthandler
-
     _crash_log = None
     try:
         _crash_log = open(paths.data_dir() / "crash.log", "a")  # noqa: SIM115 - lives for the process
-        faulthandler.enable(_crash_log)
+        _enable_native_crash_log(_crash_log)
     except OSError:
         pass
     _install_crash_hooks(_crash_log)

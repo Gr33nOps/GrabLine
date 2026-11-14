@@ -40,7 +40,7 @@ class SettingsView(QWidget):
         self._on_applied = on_applied
         # Build the dialog (never shown) to own the fields + apply() logic.
         self._dialog = SettingsDialog(settings)
-        # A reset writes straight to the store, so the window has to re-read it
+        # Import and reset write straight to the store, so the window re-reads it
         # the same way it does after Save.
         self._dialog.settings_reset.connect(on_applied)
         p = theme.current()

@@ -235,9 +235,10 @@ async function wireToggles(tab) {
   const ver = document.getElementById("ext-version");
   if (ver) ver.textContent = `v${api.runtime.getManifest().version}`;
   const tab = await activeTab();
-  await renderStatus();
+  // Connected means the controls are ready; recent-job loading can be slow.
+  await wireToggles(tab);
   await renderQuickActions(tab);
+  await renderStatus();
   if (tab) await renderMediaList(tab);
   if (paired) await renderRecent();
-  await wireToggles(tab);
 })();

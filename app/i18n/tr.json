@@ -331,7 +331,6 @@
   "Import settings…": "Ayarları içe aktar…",
   "Import {count}": "{count} öğe içe aktar",
   "Imported {count} download(s)": "{count} indirme içe aktarıldı",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "{count} ayar içe aktarıldı. Tümünü görmek için Ayarlar'ı yeniden açın (veya yeniden başlatın).",
   "Importing {done}/{total} …": "İçe aktarılıyor {done}/{total}…",
   "Inspect URL": "URL'yi incele",
   "Inspecting {url} …": "{url} denetleniyor…",
@@ -569,6 +568,7 @@
   "Right-click a download for one-off scheduling: Start at… a chosen time, or Start after… another download finishes.": "Tek seferlik zamanlama için bir indirmeye sağ tıklayın: Şu saatte başlat… veya başka bir indirme bittikten sonra başlat….",
   "Right-click a download to override its speed limit, connections, and mirrors.": "Bir indirmenin hız sınırını, bağlantılarını ve yansılarını geçersiz kılmak için sağ tıklayın.",
   "Run command:": "Komut çalıştır:",
+  "S3 endpoint:": "S3 uç noktası:",
   "SFTP/SCP private-key file (optional)": "SFTP/SCP özel anahtar dosyası (isteğe bağlı)",
   "SHA-256 copied for {name}": "{name} için SHA-256 kopyalandı",
   "SHA-256:      {checksum}": "SHA-256:      {checksum}",
@@ -823,7 +823,7 @@
   "end  e.g. 2:45": "bitiş  örn. 2:45",
   "feed URL, or:  feed URL | filter text\none per line": "besleme URL'si veya:  besleme URL'si | filtre metni\nher satıra bir tane",
   "find -> replace   (one rule per line)": "bul -> değiştir   (her satıra bir kural)",
-  "host, or the S3 endpoint (e.g. s3.us-west.amazonaws.com)": "ana bilgisayar veya S3 uç noktası (örn. s3.us-west.amazonaws.com)",
+  "host, or the S3 bucket name": "sunucu veya S3 kova adı",
   "hosts that skip the proxy, comma separated": "vekili atlayan ana bilgisayarlar, virgülle ayrılmış",
   "http(s):// · socks5:// · socks4:// host:port  (blank = direct)": "http(s):// · socks5:// · socks4:// ana bilgisayar:port  (boş = doğrudan)",
   "https://example.com/search?q=%s": "https://example.com/search?q=%s",
@@ -832,6 +832,7 @@
   "one folder per line, e.g. /home/me/Movies": "her satıra bir klasör, örn. /home/me/Movies",
   "one password per line": "her satıra bir parola",
   "only scan these types, e.g. exe, msi, zip (blank = all)": "yalnızca bu türleri tara, örn. exe, msi, zip (boş = tümü)",
+  "optional, e.g. https://minio.example:9000": "isteğe bağlı, ör. https://minio.example:9000",
   "password, key passphrase, or S3 secret key": "parola, anahtar parolası veya S3 gizli anahtarı",
   "reading details …": "ayrıntılar okunuyor …",
   "start  e.g. 1:20": "başlangıç  örn. 1:20",
@@ -888,5 +889,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nGoogle Safe Browsing bunu {threat} olarak işaretliyor. Yine de indirilsin mi?",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\nBu indirme şifrelenmemiş HTTP üzerinden yapılıyor. Aktarım sırasında değiştirilebilir. Yine de indirilsin mi?",
   "{url}\nClick to choose quality and download.": "{url}\nKalite seçmek ve indirmek için tıklayın.",
-  "── Checksums ──": "── Sağlama toplamları ──"
+  "── Checksums ──": "── Sağlama toplamları ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "Seçilen kalite kullanılamıyor. Başka bir kalite seçin veya daha sonra tekrar deneyin."
 }

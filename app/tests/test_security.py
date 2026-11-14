@@ -186,3 +186,30 @@ def test_security_settings_roundtrip(db):
     fresh = Settings(db)
     assert fresh.scan_downloads and fresh.enforce_https
     assert fresh.virustotal_key == "vt-key" and fresh.safebrowsing_key == "sb-key"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        {"data": []},
+        {"data": {"attributes": {"last_analysis_stats": None}}},
+        {"data": {"attributes": {"last_analysis_stats": []}}},
+        {"data": {"attributes": {"last_analysis_stats": {"malicious": "not-a-count"}}}},
+    ],
+)
+def test_virustotal_malformed_success_is_advisory_error(monkeypatch, payload):
+    _mock_get(monkeypatch, 200, payload)
+    assert reputation.virustotal_lookup("a" * 64, "synthetic-key") is None
+
+
+@pytest.mark.parametrize(
+    "payload", [None, [], {"matches": [None]}, {"matches": ["bad"]}, {"matches": {"bad": 1}}]
+)
+def test_safebrowsing_malformed_success_is_advisory_error(monkeypatch, payload):
+    def response(url, **kwargs):
+        return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("app.core.reputation.httpx.post", response)
+    assert reputation.safebrowsing_check("https://example.com/qa", "synthetic-key") is None

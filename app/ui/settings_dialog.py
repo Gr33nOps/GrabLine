@@ -295,6 +295,14 @@ class _ShortcutsPage(QWidget):
             edit.setKeySequence(QKeySequence(self._defaults[shortcut_id]))
         self._check_conflicts()
 
+    def reload(self) -> None:
+        overrides = self._settings.shortcuts
+        for shortcut_id, edit in self._edits.items():
+            edit.setKeySequence(
+                QKeySequence(overrides.get(shortcut_id, self._defaults[shortcut_id]))
+            )
+        self._check_conflicts()
+
     def _check_conflicts(self) -> None:
         from app.ui.shortcuts import BY_ID, conflicts
 
@@ -1349,18 +1357,13 @@ class SettingsDialog(chrome.Dialog):
                 payload = _json.load(handle)
             if not isinstance(payload, dict):
                 raise ValueError("not a settings export")
-            count = self.settings.db.import_settings({str(k): str(v) for k, v in payload.items()})
+            self.settings.db.import_settings({str(k): str(v) for k, v in payload.items()})
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "GrabLine", t("Could not import: {exc}", exc=exc))
             return
-        QMessageBox.information(
-            self,
-            "GrabLine",
-            t(
-                "Imported {count} setting(s). Reopen Settings (or restart) to see them all.",
-                count=count,
-            ),
-        )
+        self._load_values()
+        self.settings_reset.emit()
+        QMessageBox.information(self, "GrabLine", t("Settings saved"))
 
     def _reset_settings(self) -> None:
         answer = QMessageBox.question(
@@ -1751,6 +1754,7 @@ class SettingsDialog(chrome.Dialog):
         self.ffmpeg_override_edit.setText(s.ffmpeg_path or "")
         self.log_combo.setCurrentIndex(max(0, self.log_combo.findData(s.log_level)))
         self.logfile_check.setChecked(s.log_to_file)
+        self._shortcuts_page.reload()
 
     def _save(self) -> None:
         if self.apply():

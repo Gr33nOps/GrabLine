@@ -4,6 +4,7 @@ Every URL is immutable (dated release tag / versioned file) and every archive
 is verified against its SHA-256 before a single byte of it is executed.
 
 Generated: 2026-07-07 12:05 UTC
+Windows pin refreshed: 2026-11-14 from the upstream GitHub asset digest
 BtbN release tag: autobuild-2026-07-06-14-19
 evermeet version: 8.1.2
 """
@@ -36,8 +37,8 @@ PINS: dict[str, tuple[PinnedArchive, ...]] = {
     ),
     "windows-x86_64": (
         PinnedArchive(
-            url="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-06-14-19/ffmpeg-N-125478-gc6498178bb-win64-gpl.zip",
-            sha256="7043c01cf831ea96d983baaa729b4a6c24fde657a66005ed1f9f21bae564f491",
+            url="https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-13-12-43/ffmpeg-N-128889-g88c46fce27-win64-gpl.zip",
+            sha256="35fa1c17eeead1f572072b134458788caf71c4a7fbce9e0bb2f3c41032959531",
             format="zip",
         ),
     ),

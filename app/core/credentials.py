@@ -24,11 +24,12 @@ _KEYRING_SERVICE = "grabline-cloud"
 @dataclass(frozen=True)
 class CloudAccount:
     service: str  # "sftp" | "ftp" | "ftps" | "webdav" | "s3" | "scp"
-    host: str  # host, or the S3 region/endpoint
+    host: str  # host, or the S3 bucket name
     username: str = ""
     port: int = 0  # 0 = the protocol default
     key_file: str = ""  # SFTP/SCP private-key path (secret is its passphrase)
     label: str = ""  # a friendly name for the account picker
+    endpoint_url: str = ""  # optional S3-compatible service endpoint; empty uses AWS
 
     def token(self) -> str:
         """The keyring key that holds this account's secret."""
@@ -70,6 +71,7 @@ class CredentialStore:
                         port=int(row.get("port", 0) or 0),
                         key_file=str(row.get("key_file", "")),
                         label=str(row.get("label", "")),
+                        endpoint_url=str(row.get("endpoint_url", "")),
                     )
                 )
         return accounts

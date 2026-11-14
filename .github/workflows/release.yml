@@ -112,9 +112,26 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
+          set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           choco install innosetup --no-progress -y
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+          # Inno Setup 7 uses Program Files; version 6 used Program Files (x86).
+          # Discover the installed compiler instead of assuming the old layout.
+          compiler=""
+          for candidate in \
+            "/c/Program Files"/"Inno Setup "*/ISCC.exe \
+            "/c/Program Files (x86)"/"Inno Setup "*/ISCC.exe
+          do
+            if [ -f "$candidate" ]; then
+              compiler="$candidate"
+              break
+            fi
+          done
+          if [ -z "$compiler" ]; then
+            echo "::error::Inno Setup installed without a discoverable ISCC.exe"
+            exit 1
+          fi
+          "$compiler" \
             "//DAppVersion=$V" \
             packaging/windows/grabline.iss
           # Portable: the same bundle, zipped, for USB sticks and machines

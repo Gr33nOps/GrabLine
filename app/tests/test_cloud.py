@@ -292,6 +292,27 @@ def test_ftp_loopback_download_and_resume(db: Database, tmp_path: Path, ftp_serv
     assert not part.exists()
 
 
+def test_cloud_download_never_overwrites_an_existing_file(db: Database, tmp_path: Path, ftp_server):
+    """The direct and HLS engines keep an existing ``file.bin`` and save beside
+    it; the cloud engine replaced it outright, destroying the user's copy."""
+    root, port = ftp_server
+    payload = bytes(range(256)) * 40
+    (root / "file.bin").write_bytes(payload)
+    dest = tmp_path / "dl"
+    dest.mkdir()
+    (dest / "file.bin").write_bytes(b"the user's own file")
+
+    job = db.create_job(
+        f"ftp://bob:secret@127.0.0.1:{port}/file.bin", str(dest), "file.bin", kind=JobKind.CLOUD
+    )
+    assert cloud.CloudDownload(db, job, credentials=None).run() is JobStatus.COMPLETED
+
+    assert (dest / "file.bin").read_bytes() == b"the user's own file"
+    assert (dest / "file (1).bin").read_bytes() == payload
+    finished = db.get_job(job.id)
+    assert finished is not None and finished.filename == "file (1).bin"
+
+
 def test_ftp_folder_listing(db: Database, tmp_path: Path, ftp_server):
     root, port = ftp_server
     (root / "a.bin").write_bytes(b"a" * 10)
@@ -301,3 +322,24 @@ def test_ftp_folder_listing(db: Database, tmp_path: Path, ftp_server):
     names = sorted(f.name for f in files)
     assert names == ["a.bin", "b.bin"]  # directories are skipped
     assert all(f.url.startswith(f"ftp://bob:secret@127.0.0.1:{port}/") for f in files)
+
+
+@pytest.mark.parametrize("folder", ["sftp://example.test/", "scp://example.test/"])
+def test_ssh_root_listing_returns_downloadable_single_slash_url(monkeypatch, folder):
+    from types import SimpleNamespace
+
+    class Sftp:
+        def listdir_attr(self, path):
+            assert path == "/"
+            return [SimpleNamespace(filename="file.bin", st_size=12, st_mode=0)]
+
+        def close(self):
+            pass
+
+    class Client:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cloud, "_sftp_client", lambda url, store: (Client(), Sftp()))
+    entries = cloud.list_folder(folder)
+    assert entries[0].url == folder + "file.bin"

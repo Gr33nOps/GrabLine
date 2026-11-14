@@ -23,7 +23,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 
-from app.core import net, paths
+from app.core import naming, net, paths
 from app.core.credentials import CredentialStore
 from app.core.errors import DownloadError
 from app.core.models import Job, JobStatus
@@ -63,6 +63,8 @@ def _creds(url: str, store: CredentialStore | None) -> tuple[str, str]:
         return user, password
     if store is not None:
         account = store.account_for(scheme, parts.hostname or "", user)
+        if account is None and scheme == "webdavs":
+            account = store.account_for("webdav", parts.hostname or "", user)
         if account is not None:
             secret = store.secret_for(account) or ""
             return account.username or user, secret
@@ -134,8 +136,6 @@ class CloudDownload:
             return self._paused()
         except _Cancelled:
             return self._cancelled()
-        except (DownloadError, OSError, ssl.SSLError, ftplib.all_errors) as exc:  # type: ignore[misc]
-            return self._failed(str(exc))
         except Exception as exc:  # paramiko/boto3 raise their own error trees
             return self._failed(str(exc))
         return self._failed(f"unsupported cloud scheme: {scheme}")
@@ -196,7 +196,13 @@ class CloudDownload:
         self._check()
 
     def _finish(self, part: Path) -> JobStatus:
-        part.replace(self.job.dest_path)
+        # Never overwrite a file that is already there (S4): save beside it,
+        # exactly as the direct and HLS engines do.
+        dest = naming.unique_path(self.job.dest_path)
+        part.replace(dest)
+        if dest.name != self.job.filename:
+            self.job.filename = dest.name
+            self.db.update_job_filename(self.job.id, dest.name)
         self.db.update_job_downloaded(self.job.id, self._downloaded)
         if self._downloaded:
             self.db.update_job_total(self.job.id, self._downloaded)
@@ -329,8 +335,16 @@ class CloudDownload:
     # --------------------------------------------------------------- WebDAV
 
     def _run_webdav(self) -> JobStatus:
-        http_url = _webdav_http_url(self.job.url)
         user, secret = _creds(self.job.url, self.store)
+        parts = urlsplit(self.job.url)
+        account = (
+            self.store.account_for(parts.scheme.lower(), parts.hostname or "", user)
+            if self.store
+            else None
+        )
+        if account is None and self.store and parts.scheme.lower() == "webdavs":
+            account = self.store.account_for("webdav", parts.hostname or "", user)
+        http_url = _webdav_http_url(self.job.url, default_port=account.port if account else 0)
         auth = httpx.BasicAuth(user, secret) if user else None
         part, offset = self._sink()
         headers = {"Range": f"bytes={offset}-"} if offset else {}
@@ -435,7 +449,7 @@ def _range_starts_at(header: str | None, offset: int) -> bool:
     return total == "*" or int(total) > end >= start
 
 
-def _webdav_http_url(url: str) -> str:
+def _webdav_http_url(url: str, *, default_port: int = 0) -> str:
     """The http(s) URL behind a ``webdav://`` / ``webdavs://`` address.
 
     The query survives: plenty of WebDAV endpoints (Nextcloud public shares,
@@ -447,9 +461,12 @@ def _webdav_http_url(url: str) -> str:
     parts = urlsplit(url)
     scheme = "https" if parts.scheme == "webdavs" else "http"
     netloc = parts.hostname or ""
+    if ":" in netloc:
+        netloc = f"[{netloc}]"
     with contextlib.suppress(ValueError):  # malformed port: fall back to the host
-        if parts.port:
-            netloc += f":{parts.port}"
+        port = parts.port or default_port
+        if port:
+            netloc += f":{port}"
     return urlunsplit((scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
@@ -475,7 +492,8 @@ def _connect_ftp(
 ) -> ftplib.FTP:
     parts = urlsplit(url)
     user, password = _creds(url, store)
-    port = parts.port or _DEFAULT_PORTS["ftp"]
+    account = store.account_for(parts.scheme.lower(), parts.hostname or "", user) if store else None
+    port = parts.port or (account.port if account else 0) or _DEFAULT_PORTS["ftp"]
     # ftplib.FTP (plain, unencrypted) is deliberate: ftp:// is a scheme
     # GrabLine supports because users have servers that only speak it. It is
     # opt-in per URL - nothing upgrades or downgrades a scheme behind the user,
@@ -543,8 +561,8 @@ def _sftp_client(url: str, store: CredentialStore | None) -> tuple[Any, Any]:
 
     parts = urlsplit(url)
     user, secret = _creds(url, store)
-    port = parts.port or _DEFAULT_PORTS["sftp"]
-    account = store.account_for("sftp", parts.hostname or "", user) if store else None
+    account = store.account_for(parts.scheme.lower(), parts.hostname or "", user) if store else None
+    port = parts.port or (account.port if account else 0) or _DEFAULT_PORTS["sftp"]
     client = paramiko.SSHClient()
     # The user's own ~/.ssh/known_hosts first (a server they already trust in a
     # terminal is a server they trust here), then GrabLine's own store.
@@ -587,8 +605,8 @@ def _s3_client(url: str, store: CredentialStore | None, *, insecure: bool = Fals
     user, secret = _creds(url, store)
     account = store.account_for("s3", parts.hostname or "", user) if store else None
     kwargs: dict[str, Any] = {}
-    if account is not None and account.host and "." in account.host:
-        kwargs["endpoint_url"] = f"https://{account.host}"  # S3-compatible host
+    if account is not None and account.endpoint_url:
+        kwargs["endpoint_url"] = account.endpoint_url
     if user and secret:
         kwargs["aws_access_key_id"] = user
         kwargs["aws_secret_access_key"] = secret
@@ -665,7 +683,11 @@ def _list_sftp(url: str, store: CredentialStore | None) -> list[RemoteFile]:
     path = unquote(urlsplit(url).path).rstrip("/") or "/"
     try:
         files = [
-            RemoteFile(f"{base}{path}/{entry.filename}", entry.filename, int(entry.st_size or 0))
+            RemoteFile(
+                f"{base}{path.rstrip('/')}/{entry.filename}",
+                entry.filename,
+                int(entry.st_size or 0),
+            )
             for entry in sftp.listdir_attr(path)
             if not stat_module.S_ISDIR(entry.st_mode or 0)
         ]
@@ -682,13 +704,21 @@ def _list_s3(
     bucket = parts.netloc
     prefix = unquote(parts.path).lstrip("/")
     client = _s3_client(url, store, insecure=insecure)
-    result = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
     files: list[RemoteFile] = []
-    for obj in result.get("Contents", []):
-        key = obj["Key"]
-        if key.endswith("/"):
-            continue
-        files.append(RemoteFile(f"s3://{bucket}/{key}", key.rsplit("/", 1)[-1], int(obj["Size"])))
+    continuation: dict[str, str] = {}
+    while True:
+        result = client.list_objects_v2(Bucket=bucket, Prefix=prefix, **continuation)
+        for obj in result.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            files.append(
+                RemoteFile(f"s3://{bucket}/{key}", key.rsplit("/", 1)[-1], int(obj["Size"]))
+            )
+        token = result.get("NextContinuationToken")
+        if not result.get("IsTruncated") or not token:
+            break
+        continuation["ContinuationToken"] = token
     return files
 
 

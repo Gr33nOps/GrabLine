@@ -204,6 +204,13 @@ def test_friendly_errors():
     assert friendly_error("ERROR: something odd\nTraceback...") == "something odd"
 
 
+def test_non_youtube_format_error_does_not_recommend_youtube_login():
+    for site in ("vimeo", "BiliBili"):
+        message = friendly_error(f"ERROR: [{site}] 123: Requested format is not available")
+        assert "youtube" not in message.lower()
+        assert "quality" in message.lower()
+
+
 def test_inspect_youtube_is_jsless_first(monkeypatch: pytest.MonkeyPatch) -> None:
     """YouTube analysis must stay JS-less first so the quality panel appears in
     seconds; cookies+runtime are for download (and auth-wall retries)."""
@@ -514,3 +521,16 @@ def test_extract_does_not_implicitly_search_windows_path(monkeypatch, with_runti
         force_generic=False,
     )
     assert result["id"] == "test"
+
+
+def test_height_bearing_mp4_without_codec_metadata_has_video_choices():
+    # A real Twitch clip format carries height/ext but omits both codec keys.
+    options = curate_formats({"formats": [{"format_id": "1080", "height": 1080, "ext": "mp4"}]})
+    assert any(o.label == "Best" and o.kind == "video" for o in options)
+    assert any(o.label == "1080p" and o.kind == "video" for o in options)
+
+
+@pytest.mark.parametrize("codec", [None, "images", "none"])
+def test_storyboards_never_become_downloadable_video_choices(codec):
+    options = curate_formats({"formats": [{"height": 1080, "ext": "mhtml", "vcodec": codec}]})
+    assert not any(o.kind == "video" for o in options)

@@ -318,6 +318,7 @@
     const name = job.name ?? "download";
     if (job.status === "completed") return `Done · ${name}`;
     if (job.status === "failed") return `Failed · ${name}`;
+    if (job.status === "paused") return `Paused · ${name}`;
     if (job.total && job.downloaded != null) {
       return `${Math.min(100, Math.round((job.downloaded / job.total) * 100))}% · ${name}`;
     }
@@ -387,6 +388,14 @@
     for (const media of document.querySelectorAll("video, audio")) {
       if (!selection.containsNode(media, true)) continue;
       push(media.currentSrc || media.src || media.querySelector("source")?.src);
+    }
+    // Highlighted URLs need not be hyperlinks (logs, manifests and plain text).
+    for (const match of selection.toString().matchAll(/https?:\/\/[^\s<>"']+/gi)) {
+      try {
+        push(new URL(match[0].replace(/[.,;]+$/, "")).href);
+      } catch {
+        // Ignore malformed text while retaining the other selected URLs.
+      }
     }
     return urls;
   }

@@ -107,8 +107,11 @@ class _AccountEditor(chrome.Dialog):
         self.service.addItems(_SERVICES)
         form.addRow(t("Service:"), self.service)
         self.host = QLineEdit()
-        self.host.setPlaceholderText(t("host, or the S3 endpoint (e.g. s3.us-west.amazonaws.com)"))
+        self.host.setPlaceholderText(t("host, or the S3 bucket name"))
         form.addRow(t("Host:"), self.host)
+        self.endpoint = QLineEdit()
+        self.endpoint.setPlaceholderText(t("optional, e.g. https://minio.example:9000"))
+        form.addRow(t("S3 endpoint:"), self.endpoint)
         self.username = QLineEdit()
         self.username.setPlaceholderText(t("username, or the S3 access key"))
         form.addRow(t("Username:"), self.username)
@@ -141,6 +144,7 @@ class _AccountEditor(chrome.Dialog):
             port=int(port_text) if port_text.isdigit() else 0,
             key_file=self.key_file.text().strip(),
             label=self.label.text().strip(),
+            endpoint_url=self.endpoint.text().strip() if self.service.currentText() == "s3" else "",
         )
         secret = self.secret.text()
         return account, secret or None

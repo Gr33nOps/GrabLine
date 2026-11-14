@@ -180,7 +180,7 @@ def _gzip_size(path: Path) -> int | None:
 
 def _list_external(path: Path) -> tuple[ArchiveEntry, ...]:
     tool = _external_tool(path, listing=True)
-    name = Path(tool).name
+    name = Path(tool).stem.lower()
     if name in ("7z", "7za"):
         result = _run_tool([tool, "l", "-slt", "-p", str(path)])
         return _parse_7z_listing(result.stdout)
@@ -303,12 +303,13 @@ def _extract_zip(
             try:
                 bundle.extractall(target, members=selected, pwd=password.encode())
                 return
-            except RuntimeError:
-                continue  # wrong password - try the next saved one
             except NotImplementedError:
                 # AES zip: beyond the standard library; 7z handles it.
+                # This exception subclasses RuntimeError, so catch it first.
                 _extract_external(path, target, passwords, members)
                 return
+            except RuntimeError:
+                continue  # wrong password - try the next saved one
     raise PasswordRequired("this archive is password-protected")
 
 
@@ -343,10 +344,17 @@ def _external_tool(path: Path, *, listing: bool = False) -> str:
 def _run_tool(command: list[str]) -> subprocess.CompletedProcess[str]:
     # stdin closed so a tool that wants to prompt for a password fails fast
     # instead of hanging. Arg list only, never a shell string (S1).
+    encoding = None
+    if Path(command[0]).stem.lower() in ("7z", "7za"):
+        # Redirected Windows output otherwise uses a legacy code page, losing
+        # filenames (or crashing the pipe reader) before the path guard sees them.
+        command = [*command[:2], "-sccUTF-8", *command[2:]]
+        encoding = "utf-8"
     return subprocess.run(
         command,
         capture_output=True,
         text=True,
+        encoding=encoding,
         stdin=subprocess.DEVNULL,
         timeout=600,
         **proc.hidden(),
@@ -375,7 +383,7 @@ def _extract_external(
 ) -> None:
     _guard_external_entries(path, target, members)
     tool = _external_tool(path)
-    name = Path(tool).name
+    name = Path(tool).stem.lower()
     selected = list(members or ())
     last_output = ""
     for password in ["", *passwords]:

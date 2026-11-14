@@ -65,11 +65,13 @@ def virustotal_lookup(
         return None
     try:
         stats = response.json()["data"]["attributes"]["last_analysis_stats"]
-    except (KeyError, ValueError):
+        if not isinstance(stats, dict):
+            return None
+        malicious = int(stats.get("malicious", 0))
+        suspicious = int(stats.get("suspicious", 0))
+        total = sum(int(v) for v in stats.values())
+    except (KeyError, ValueError, TypeError, OverflowError):
         return None
-    malicious = int(stats.get("malicious", 0))
-    suspicious = int(stats.get("suspicious", 0))
-    total = sum(int(v) for v in stats.values())
     return VirusTotalResult(
         malicious=malicious,
         suspicious=suspicious,
@@ -108,9 +110,16 @@ def safebrowsing_check(url: str, api_key: str, *, proxy: str | None = None) -> s
     if response.status_code != 200:
         return None
     try:
-        matches = response.json().get("matches") or []
+        payload = response.json()
     except ValueError:
         return None
+    if not isinstance(payload, dict):
+        return None
+    matches = payload.get("matches") or []
+    if not isinstance(matches, list):
+        return None
     if matches:
+        if not isinstance(matches[0], dict):
+            return None
         return str(matches[0].get("threatType", "THREAT"))
     return None

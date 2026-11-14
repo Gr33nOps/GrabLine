@@ -1,0 +1,1916 @@
+[
+  {
+    "area": "Browser popup",
+    "feature": "Open app / restore minimized",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Visible restored app; native child remains alive",
+    "cases": [
+      "DESKTOP-NATIVE-MINIMIZE-CLOSE-REOPEN"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser popup",
+    "feature": "Open Settings",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Actual toolbar popup opens lazily built General settings",
+    "cases": [
+      "BROWSER-OPEN-SETTINGS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser popup",
+    "feature": "Grab This Tab / duplicate send",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Page saved byte-identically; second send creates no duplicate job",
+    "cases": [
+      "BROWSER-POPUP-GRAB-TAB-DEDUP"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser popup",
+    "feature": "Paste/send URL",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Completed file checksum matches",
+    "cases": [
+      "BROWSER-POPUP-PASTE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser popup",
+    "feature": "empty URL",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "No job created",
+    "cases": [
+      "BROWSER-POPUP-EMPTY"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser popup",
+    "feature": "invalid URL",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "No job created",
+    "cases": [
+      "BROWSER-POPUP-INVALID"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser popup",
+    "feature": "MP4 and HLS detection/recent display",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Actual toolbar lists MP4/HLS and expected recent job names/status",
+    "cases": [
+      "BROWSER-ACTUAL-TOOLBAR-MEDIA-RECENT"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser popup",
+    "feature": "MP4 media action",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Real resulting media file verified",
+    "cases": [
+      "BROWSER-POPUP-DOWNLOAD-MP4"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser popup",
+    "feature": "M3U8 media action",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Real resulting media file verified",
+    "cases": [
+      "BROWSER-POPUP-DOWNLOAD-M3U8"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser preferences",
+    "feature": "Master hover",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Visible behaviour and stored preferences match",
+    "cases": [
+      "BROWSER-HOVER-MASTER"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser preferences",
+    "feature": "Per-site hover",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Visible behaviour and stored preferences match",
+    "cases": [
+      "BROWSER-HOVER-SITE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser preferences",
+    "feature": "Image opt-in",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Visible behaviour and stored preferences match",
+    "cases": [
+      "BROWSER-HOVER-IMAGES"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser preferences",
+    "feature": "All four corners",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Visible behaviour and stored preferences match",
+    "cases": [
+      "BROWSER-PREF-CORNERS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser preferences",
+    "feature": "Restart persistence",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Visible behaviour and stored preferences match",
+    "cases": [
+      "BROWSER-PREF-RESTART"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser collections",
+    "feature": "Gallery cancel",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Genuine context menu and native picker; cancellation adds no job or selected files match hashes/media",
+    "cases": [
+      "BROWSER-CONTEXT-GALLERY-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser collections",
+    "feature": "Gallery filter/dedupe/select/download",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Genuine context menu and native picker; cancellation adds no job or selected files match hashes/media",
+    "cases": [
+      "BROWSER-CONTEXT-GALLERY"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser collections",
+    "feature": "Links filter/selection/cancel",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Genuine context menu and native picker; cancellation adds no job or selected files match hashes/media",
+    "cases": [
+      "BROWSER-CONTEXT-LINKS-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser collections",
+    "feature": "Links Download All/dedupe",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Genuine context menu and native picker; cancellation adds no job or selected files match hashes/media",
+    "cases": [
+      "BROWSER-CONTEXT-LINKS-DOWNLOAD-ALL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser collections",
+    "feature": "Selected plain-text URLs",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Genuine context menu and native picker; cancellation adds no job or selected files match hashes/media",
+    "cases": [
+      "BROWSER-CONTEXT-SELECTED-TEXT"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "video",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Expected real hover button/geometry or completed intended media",
+    "cases": [
+      "BROWSER-OVERLAY-VIDEO"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "audio",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Expected real hover button/geometry or completed intended media",
+    "cases": [
+      "BROWSER-OVERLAY-AUDIO"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "frame",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Expected real hover button/geometry or completed intended media",
+    "cases": [
+      "BROWSER-OVERLAY-FRAME"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "shadow",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Expected real hover button/geometry or completed intended media",
+    "cases": [
+      "BROWSER-OVERLAY-SHADOW"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "dynamic",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Expected real hover button/geometry or completed intended media",
+    "cases": [
+      "BROWSER-OVERLAY-DYNAMIC"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "resize",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Expected real hover button/geometry or completed intended media",
+    "cases": [
+      "BROWSER-OVERLAY-RESIZE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "click",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Expected real hover button/geometry or completed intended media",
+    "cases": [
+      "BROWSER-OVERLAY-CLICK"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser progress",
+    "feature": "Progress / pause / resume / completion",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Page status eventually agrees with actual app state and file hash",
+    "cases": [
+      "BROWSER-PROGRESS-REAL",
+      "BROWSER-PAUSE-RESUME-PROGRESS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser recovery",
+    "feature": "takeover-off",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Original browser download remains recoverable; no lost file/duplicate job according to case assertions",
+    "cases": [
+      "BROWSER-TAKEOVER-OFF"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser recovery",
+    "feature": "exclude-blob",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Original browser download remains recoverable; no lost file/duplicate job according to case assertions",
+    "cases": [
+      "BROWSER-EXCLUDE-BLOB"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser recovery",
+    "feature": "exclude-post",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Original browser download remains recoverable; no lost file/duplicate job according to case assertions",
+    "cases": [
+      "BROWSER-EXCLUDE-POST"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser recovery",
+    "feature": "closed-app-fallback",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Original browser download remains recoverable; no lost file/duplicate job according to case assertions",
+    "cases": [
+      "BROWSER-CLOSED-APP-FALLBACK"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser recovery",
+    "feature": "host-unavailable",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Original browser download remains recoverable; no lost file/duplicate job according to case assertions",
+    "cases": [
+      "BROWSER-HOST-UNAVAILABLE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser recovery",
+    "feature": "recovery-cancel",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Original browser download remains recoverable; no lost file/duplicate job according to case assertions",
+    "cases": [
+      "BROWSER-RECOVERY-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser recovery",
+    "feature": "recovery-failure",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Original browser download remains recoverable; no lost file/duplicate job according to case assertions",
+    "cases": [
+      "BROWSER-RECOVERY-FAILURE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser recovery",
+    "feature": "worker-restart",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; healthy fixture/browser/native-host session",
+    "expected": "Original browser download remains recoverable; no lost file/duplicate job according to case assertions",
+    "cases": [
+      "BROWSER-WORKER-RESTART"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "YOUTUBE-WATCH",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-YOUTUBE-WATCH"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "YOUTUBE-SHORTS",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-YOUTUBE-SHORTS"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "YOUTUBE-MUSIC",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-YOUTUBE-MUSIC"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "VIMEO",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-VIMEO"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "X",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-X"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "SOUNDCLOUD",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-SOUNDCLOUD"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "SOUNDCLOUD-REJECT-DISCOVER",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-SOUNDCLOUD-REJECT-DISCOVER"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "REDDIT",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-REDDIT"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "INSTAGRAM",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-INSTAGRAM"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "DAILYMOTION-WATCH",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-DAILYMOTION-WATCH"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Site selector contracts",
+    "feature": "DAILYMOTION-GEO",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Controlled DOM resolves expected canonical URL or refuses browse URL",
+    "cases": [
+      "SITE-DOM-DAILYMOTION-GEO"
+    ],
+    "unit_modules": [],
+    "limits": "Controlled DOM is not live-site certification."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "YOUTUBE",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-YOUTUBE"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "YOUTUBE-SHORTS",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-YOUTUBE-SHORTS"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "YOUTUBE-MUSIC",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-YOUTUBE-MUSIC"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "VIMEO",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-VIMEO"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "X",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-X"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "SOUNDCLOUD",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-SOUNDCLOUD"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "REDDIT",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-REDDIT"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "INSTAGRAM",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-INSTAGRAM"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Live site adapters",
+    "feature": "DAILYMOTION",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Genuine public-page hover/click reaches correct native quality dialog",
+    "cases": [
+      "SITE-LIVE-DAILYMOTION"
+    ],
+    "unit_modules": [],
+    "limits": "Dialog handoff only; full download tracked separately. Login, unavailable item or unexposed player remains BLOCKED."
+  },
+  {
+    "area": "Public media output",
+    "feature": "YOUTUBE",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-YOUTUBE"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "VIMEO",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-VIMEO"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "X",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-X"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "REDDIT",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-REDDIT"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "INSTAGRAM",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-INSTAGRAM"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "DAILYMOTION",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-DAILYMOTION"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "TWITCH",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-TWITCH"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "TIKTOK",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-TIKTOK"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "BILIBILI",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Bounded public media download has nonempty decoded streams/duration/hash",
+    "cases": [
+      "PUBLIC-BILIBILI"
+    ],
+    "unit_modules": [],
+    "limits": "No private session or every-site guarantee."
+  },
+  {
+    "area": "Public media output",
+    "feature": "SOUNDCLOUD alternate",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Alternate public track produces verified media; original 404 retained",
+    "cases": [
+      "PUBLIC-SOUNDCLOUD-ALTERNATE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "video",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-VIDEO"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "mp3",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-MP3"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "m4a",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-M4A"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "flac",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-FLAC"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "subtitles",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-SUBTITLES"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "chapters",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-CHAPTERS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "sidecars",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-SIDECARS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "trim",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-TRIM"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "gif",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual output streams/duration/metadata/subtitle text or decoded GIF frames match choice",
+    "cases": [
+      "MEDIA-REAL-GIF"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "MP4",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-MP4"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "MKV",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-MKV"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "WEBM",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-WEBM"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "MOV",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-MOV"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "AVI",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-AVI"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "MP3",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-MP3"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "M4A",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-M4A"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "FLAC",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-FLAC"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "WAV",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-WAV"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media conversion",
+    "feature": "OPUS",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual conversion output has appropriate readable streams/duration",
+    "cases": [
+      "MEDIA-CONVERT-OPUS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Image conversion",
+    "feature": "JPG",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Decoded image has expected dimensions and pixel content",
+    "cases": [
+      "MEDIA-IMAGE-JPG"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Image conversion",
+    "feature": "PNG",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Decoded image has expected dimensions and pixel content",
+    "cases": [
+      "MEDIA-IMAGE-PNG"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Image conversion",
+    "feature": "WEBP",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Decoded image has expected dimensions and pixel content",
+    "cases": [
+      "MEDIA-IMAGE-WEBP"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Image conversion",
+    "feature": "AVIF",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Decoded image has expected dimensions and pixel content",
+    "cases": [
+      "MEDIA-IMAGE-AVIF"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "Finite DASH",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Finite manifest assembles into verified media",
+    "cases": [
+      "MEDIA-FINITE-DASH"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media options",
+    "feature": "Playlist cap/selection/cancellation/output",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Cancel adds zero jobs; two of five selected entries download as four-second media",
+    "cases": [
+      "MEDIA-PLAYLIST-UI-CAP-CANCEL-DOWNLOAD"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Media error paths",
+    "feature": "Cancellation / missing tool",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Partial cleanup and friendly FFmpeg failure assertions pass",
+    "cases": [],
+    "unit_modules": [
+      "test_smart_download"
+    ],
+    "limits": "Unit/local transport tests; tool acquisition failures controlled at provisioning boundary, not uninstalling host tools."
+  },
+  {
+    "area": "Local cloud",
+    "feature": "FTP",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Qt account/vault, denied credentials, listing/picker, resume, cancellation and hash",
+    "cases": [
+      "CLOUD-UI-FTP-WEBDAV",
+      "CLOUD-TRANSFER-FTP-PAUSE-RESUME-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": "Actual local protocol; SCP URL uses SFTP transport by design. Pause/cancel at received-chunk boundary."
+  },
+  {
+    "area": "Local cloud",
+    "feature": "FTPS",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Qt account/vault, denied credentials, listing/picker, resume, cancellation and hash",
+    "cases": [
+      "CLOUD-UI-FTP-WEBDAV",
+      "CLOUD-TRANSFER-FTPS-PAUSE-RESUME-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": "Actual local protocol; SCP URL uses SFTP transport by design. Pause/cancel at received-chunk boundary."
+  },
+  {
+    "area": "Local cloud",
+    "feature": "SFTP",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Qt account/vault, denied credentials, listing/picker, resume, cancellation and hash",
+    "cases": [
+      "CLOUD-UI-SSH-AUTHENTICATED",
+      "CLOUD-TRANSFER-SFTP-PAUSE-RESUME-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": "Actual local protocol; SCP URL uses SFTP transport by design. Pause/cancel at received-chunk boundary."
+  },
+  {
+    "area": "Local cloud",
+    "feature": "SCP",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Qt account/vault, denied credentials, listing/picker, resume, cancellation and hash",
+    "cases": [
+      "CLOUD-UI-SSH-AUTHENTICATED",
+      "CLOUD-TRANSFER-SCP-PAUSE-RESUME-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": "Actual local protocol; SCP URL uses SFTP transport by design. Pause/cancel at received-chunk boundary."
+  },
+  {
+    "area": "Local cloud",
+    "feature": "S3",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Qt account/vault, denied credentials, listing/picker, resume, cancellation and hash",
+    "cases": [
+      "CLOUD-UI-S3-AUTHENTICATED",
+      "CLOUD-TRANSFER-S3-PAUSE-RESUME-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": "Actual local protocol; SCP URL uses SFTP transport by design. Pause/cancel at received-chunk boundary."
+  },
+  {
+    "area": "Local cloud",
+    "feature": "WebDAV/WebDAVS",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Authenticated transfers/resume and real pause/cancel preserve integrity",
+    "cases": [
+      "CLOUD-UI-FTP-WEBDAV",
+      "CLOUD-WEBDAV-PAUSE-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Local cloud",
+    "feature": "WebDAV folder listing",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Capability inventory explicitly records unsupported listing",
+    "cases": [
+      "CLOUD-WEBDAV-FOLDER-LISTING"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "External cloud",
+    "feature": "AWS",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real dedicated provider account and file verified",
+    "cases": [
+      "EXTERNAL-CLOUD-AWS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "External cloud",
+    "feature": "GOOGLE-DRIVE",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real dedicated provider account and file verified",
+    "cases": [
+      "EXTERNAL-CLOUD-GOOGLE-DRIVE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "External cloud",
+    "feature": "DROPBOX",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real dedicated provider account and file verified",
+    "cases": [
+      "EXTERNAL-CLOUD-DROPBOX"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "External cloud",
+    "feature": "ONEDRIVE",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real dedicated provider account and file verified",
+    "cases": [
+      "EXTERNAL-CLOUD-ONEDRIVE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "External cloud",
+    "feature": "NEXTCLOUD",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real dedicated provider account and file verified",
+    "cases": [
+      "EXTERNAL-CLOUD-NEXTCLOUD"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "External cloud",
+    "feature": "BOX",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real dedicated provider account and file verified",
+    "cases": [
+      "EXTERNAL-CLOUD-BOX"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Archives",
+    "feature": "rar3-real",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real archive content/listing/extraction/CRC or source retention matches expectations",
+    "cases": [
+      "ARCHIVE-RAR3-REAL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Archives",
+    "feature": "rar3-subdirs",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real archive content/listing/extraction/CRC or source retention matches expectations",
+    "cases": [
+      "ARCHIVE-RAR3-SUBDIRS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Archives",
+    "feature": "rar5-real",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real archive content/listing/extraction/CRC or source retention matches expectations",
+    "cases": [
+      "ARCHIVE-RAR5-REAL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Archives",
+    "feature": "rar5-crc",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real archive content/listing/extraction/CRC or source retention matches expectations",
+    "cases": [
+      "ARCHIVE-RAR5-CRC"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Archives",
+    "feature": "auto-delete-after-success",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real archive content/listing/extraction/CRC or source retention matches expectations",
+    "cases": [
+      "ARCHIVE-AUTO-DELETE-AFTER-SUCCESS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Archives",
+    "feature": "auto-failure-preserves",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real archive content/listing/extraction/CRC or source retention matches expectations",
+    "cases": [
+      "ARCHIVE-AUTO-FAILURE-PRESERVES"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Archives",
+    "feature": "AES ZIP / wrong passwords / conflicts / traversal",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "7-Zip fallback, selected extraction, password failures and destination isolation assertions pass",
+    "cases": [],
+    "unit_modules": [
+      "test_archive_security"
+    ],
+    "limits": "See individual pytest cases for unit versus real archive fixture level."
+  },
+  {
+    "area": "Queues and scheduling",
+    "feature": "Sequential/concurrent/dependent queues",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real Qt control changes cause observed clock/filesystem/HTTP job transitions and hashes",
+    "cases": [
+      "QUEUE-UI-SEQUENTIAL-DEPENDENCY-PARALLEL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Queues and scheduling",
+    "feature": "Queue priority",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real Qt control changes cause observed clock/filesystem/HTTP job transitions and hashes",
+    "cases": [
+      "QUEUE-UI-PRIORITY-ORDER"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Queues and scheduling",
+    "feature": "Queue start window",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real Qt control changes cause observed clock/filesystem/HTTP job transitions and hashes",
+    "cases": [
+      "QT-QUEUE-UI-WALL-CLOCK"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Queues and scheduling",
+    "feature": "Speed window / delayed job / job dependency",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real Qt control changes cause observed clock/filesystem/HTTP job transitions and hashes",
+    "cases": [
+      "SCHEDULE-UI-SPEED-WINDOW-DELAY-DEPENDENCY"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Queues and scheduling",
+    "feature": "Watch folder / RSS / filter / dedupe",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real Qt control changes cause observed clock/filesystem/HTTP job transitions and hashes",
+    "cases": [
+      "DESKTOP-WATCH-RSS-UI"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Scheduling boundaries",
+    "feature": "Schedule weekdays/window exit/network wait/battery decisions",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Boundary decisions and persistence match settings",
+    "cases": [],
+    "unit_modules": [
+      "test_scheduler_features",
+      "test_scheduler_extras"
+    ],
+    "limits": "Physical battery/real ISP and guest power actions remain separate."
+  },
+  {
+    "area": "Network proxies",
+    "feature": "HTTP",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real authenticated proxy/bypass/failure recovery produces matching file",
+    "cases": [
+      "NETWORK-PROXY-HTTP"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Network proxies",
+    "feature": "SOCKS5",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real authenticated proxy/bypass/failure recovery produces matching file",
+    "cases": [
+      "NETWORK-PROXY-SOCKS5"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Network retry/resume",
+    "feature": "Service interruption / throttling / integrity",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Interrupted local services recover with checksum and state assertions",
+    "cases": [
+      "SOAK-ONE-HOUR"
+    ],
+    "unit_modules": [
+      "test_downloader",
+      "test_ratelimit",
+      "test_network"
+    ],
+    "limits": "Soak source scope stated in manifest; no host network disconnect."
+  },
+  {
+    "area": "Network infrastructure",
+    "feature": "Real VPN / alternate ISP",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Dedicated infrastructure exercises actual tunnel/network behaviour",
+    "cases": [
+      "NETWORK-REAL-VPN-ISP"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "File management",
+    "feature": "Rename/tags/notes/search",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual Qt/file/SQLite state and final content verified without personal history",
+    "cases": [
+      "QT-DATA-RENAME-TAGS-SEARCH"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "File management",
+    "feature": "History import/export",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual Qt/file/SQLite state and final content verified without personal history",
+    "cases": [
+      "QT-DATA-LIST-EXPORT-IMPORT"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "File management",
+    "feature": "Settings backup/reset/restore",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual Qt/file/SQLite state and final content verified without personal history",
+    "cases": [
+      "QT-DATA-SETTINGS-BACKUP-RESET-RESTORE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "File management",
+    "feature": "Synthetic DB migration/recovery",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual Qt/file/SQLite state and final content verified without personal history",
+    "cases": [
+      "QT-DATA-SYNTHETIC-MIGRATION"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "File management",
+    "feature": "Explorer reveal",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual Qt/file/SQLite state and final content verified without personal history",
+    "cases": [
+      "DESKTOP-NATIVE-EXPLORER-REVEAL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "File management",
+    "feature": "Collisions / duplicates / categories / filters",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Filesystem/classification and UI assertions match expected behaviour",
+    "cases": [],
+    "unit_modules": [
+      "test_dupes",
+      "test_naming",
+      "test_categories",
+      "test_ui_smoke"
+    ],
+    "limits": "Read individual tests; not every case is a native desktop click."
+  },
+  {
+    "area": "Settings inventory",
+    "feature": "All 150 editable controls",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Default/alternate/persistence and boundary assertions; autostart OS effect requires VM",
+    "cases": [
+      "VM-LOGIN"
+    ],
+    "unit_modules": [],
+    "limits": "149 field/control cases pass; full physical/provider effects are separate. See settings-controls.csv for every field."
+  },
+  {
+    "area": "Visuals",
+    "feature": "Themes / density / translations / RTL / scale",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "All 19 sections inspected under themes/languages and process-local scaling",
+    "cases": [],
+    "unit_modules": [
+      "test_ui_smoke"
+    ],
+    "limits": "Detailed VISUAL-* integration cases and screenshots are separate; physical DPI changes blocked."
+  },
+  {
+    "area": "Visuals",
+    "feature": "Physical display scaling",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Actual monitor scaling/transition inspected",
+    "cases": [
+      "DISPLAY-PHYSICAL-DPI-CHANGE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Keyboard navigation",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-KEYBOARD-NAVIGATION"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Clipboard / drop",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-CLIPBOARD-PASTE-DRAG-DROP"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Qt tray state/action paths",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-TRAY-CLOSE-RESTORE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Real minimize / close / reopen",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-NATIVE-MINIMIZE-CLOSE-REOPEN"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Active exit confirmation",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-ACTIVE-EXIT-CONFIRM"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Hidden completion/extraction",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-HIDDEN-COMPLETION-EXTRACTION"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Hidden failure signal",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-HIDDEN-FAILURE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Sound generation/playback API",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-SOUND-GENERATION-API"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Physical tray clicks",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-PHYSICAL-TRAY"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Visible OS notifications",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-NATIVE-TOAST-VISIBILITY"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Human audibility",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-HUMAN-AUDIBILITY"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Desktop integration",
+    "feature": "Taskbar progress capability",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Observed behaviour matches the case assertions at its stated level",
+    "cases": [
+      "DESKTOP-TASKBAR-PROGRESS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Security",
+    "feature": "Installed scanner",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Real installed scanner accepts benign disposable file without AV setting changes",
+    "cases": [
+      "SECURITY-INSTALLED-SCANNER"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Security",
+    "feature": "VT / Safe Browsing request and error paths",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Synthetic request/response/error parsing assertions pass",
+    "cases": [],
+    "unit_modules": [
+      "test_security"
+    ],
+    "limits": "Mocked API boundary tests are not live certification."
+  },
+  {
+    "area": "Security",
+    "feature": "Live VIRUSTOTAL",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Dedicated test key and synthetic lookup exercised",
+    "cases": [
+      "EXTERNAL-API-VIRUSTOTAL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Security",
+    "feature": "Live SAFE-BROWSING",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Dedicated test key and synthetic lookup exercised",
+    "cases": [
+      "EXTERNAL-API-SAFE-BROWSING"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Native stability",
+    "feature": "Accessibility-inspection crash",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Fatal native crash explained/fixed and reproducible regression passes",
+    "cases": [
+      "WINDOWS-NATIVE-CRASH-OBSERVED"
+    ],
+    "unit_modules": [],
+    "limits": "Unresolved confirmed crash; Win32 success is not a fix."
+  },
+  {
+    "area": "Torrent investigation",
+    "feature": "File/magnet/seeding/resume/disk completion",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Immediate hashes, dynamic TCP/UDP ports, alert/readiness/teardown and repetition verified",
+    "cases": [
+      "TOR-TRANSFER-0001",
+      "TOR-TRANSFER-0002",
+      "TOR-TRANSFER-0003",
+      "TOR-TRANSFER-0004"
+    ],
+    "unit_modules": [
+      "test_torrent",
+      "test_torrent_disk"
+    ],
+    "limits": "Remaining repetition traces and one-hour stage 2 recorded separately."
+  },
+  {
+    "area": "Load",
+    "feature": "One hour / four stages / integrity / metrics",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "3600 measured seconds; bounded retained output; no corruption",
+    "cases": [
+      "SOAK-ONE-HOUR"
+    ],
+    "unit_modules": [],
+    "limits": "Earlier engine-fixed source before later GUI/browser/cloud-root fixes."
+  },
+  {
+    "area": "Packaging",
+    "feature": "Build + real packaged native host",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Current binary hashes and fresh-profile file checksum verified",
+    "cases": [
+      "PACKAGE-BUILD",
+      "PACKAGE-NATIVE-TRANSFER"
+    ],
+    "unit_modules": [],
+    "limits": "Offscreen GUI smoke; guest installation is separate."
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-INSTALL",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Fresh install; first-run wizard; default paths; app and host launch",
+    "cases": [
+      "VM-INSTALL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-PORTABLE",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Launch portable build from a path with spaces; write only test profile",
+    "cases": [
+      "VM-PORTABLE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-UPGRADE-CLOSED",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Previous packaged version with synthetic settings/history; upgrade; preserved rows, values and hashes",
+    "cases": [
+      "VM-UPGRADE-CLOSED"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-UPGRADE-RUNNING",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Upgrade while old process is running; orderly handoff, no stale workers or corrupt DB",
+    "cases": [
+      "VM-UPGRADE-RUNNING"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-SHORTCUTS",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Start-menu/desktop shortcuts resolve to installed executable",
+    "cases": [
+      "VM-SHORTCUTS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-ASSOCIATIONS",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Open test `.torrent` and `magnet:` from Explorer/browser; exact source arrives once",
+    "cases": [
+      "VM-ASSOCIATIONS"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-HOST-REGISTRATION",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Inspect Chrome/Edge/Firefox manifests and registration; load extension; real native ping and transfer",
+    "cases": [
+      "VM-HOST-REGISTRATION"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-LOGIN",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Enable guest-only startup; guest logout/login; one app process, usable UI/native host",
+    "cases": [
+      "VM-LOGIN"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-REBOOT",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Guest reboot; startup and native host recover; queued synthetic transfers resume with matching hashes",
+    "cases": [
+      "VM-REBOOT"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-UPDATE-VALID",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Use a test update manifest/package; real download, integrity verification and installer handoff",
+    "cases": [
+      "VM-UPDATE-VALID"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-UPDATE-BAD-HASH",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Alter one package byte; reject before executing; existing app remains usable",
+    "cases": [
+      "VM-UPDATE-BAD-HASH"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-UPDATE-CANCEL",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Cancel a slow update; no installer starts and original app remains usable",
+    "cases": [
+      "VM-UPDATE-CANCEL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-UNINSTALL",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Remove installation; shortcuts/associations/host entries cleaned; synthetic downloads preserved",
+    "cases": [
+      "VM-UNINSTALL"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-QUEUE-QUIT",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "After final successful guest job, app quits exactly once",
+    "cases": [
+      "VM-QUEUE-QUIT"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-QUEUE-LOCK",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Guest locks only after final job; operator unlocks; no duplicate action",
+    "cases": [
+      "VM-QUEUE-LOCK"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-QUEUE-SLEEP",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Record `powercfg /a`; supported guest sleeps after final job and resumes intact",
+    "cases": [
+      "VM-QUEUE-SLEEP"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-QUEUE-HIBERNATE",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Supported guest hibernates after final job and resumes intact; otherwise NOT APPLICABLE with OS evidence",
+    "cases": [
+      "VM-QUEUE-HIBERNATE"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-QUEUE-SHUTDOWN",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Guest shuts down after final job; host stays running; inspect persisted completion after boot",
+    "cases": [
+      "VM-QUEUE-SHUTDOWN"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Windows VM",
+    "feature": "VM-SMARTSCREEN",
+    "prerequisites": "Verified Windows Python/dependencies and isolated profile; case-specific tools/services in preflight and source runner",
+    "expected": "Record signing/SmartScreen outcome without bypassing any block",
+    "cases": [
+      "VM-SMARTSCREEN"
+    ],
+    "unit_modules": [],
+    "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "scroll",
+    "prerequisites": "Healthy disposable Chrome/app/native host and deterministic loopback fixture",
+    "expected": "Overlay tracks visible media, hides when media is offscreen, targets media beneath controls or resets on document navigation; overlap download hash matches.",
+    "cases": [
+      "BROWSER-OVERLAY-SCROLL"
+    ],
+    "unit_modules": [],
+    "limits": "Real Chrome/CDP mouse and DOM; no personal profile."
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "overlapping-control",
+    "prerequisites": "Healthy disposable Chrome/app/native host and deterministic loopback fixture",
+    "expected": "Overlay tracks visible media, hides when media is offscreen, targets media beneath controls or resets on document navigation; overlap download hash matches.",
+    "cases": [
+      "BROWSER-OVERLAY-OVERLAPPING-CONTROL"
+    ],
+    "unit_modules": [],
+    "limits": "Real Chrome/CDP mouse and DOM; no personal profile."
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "navigation",
+    "prerequisites": "Healthy disposable Chrome/app/native host and deterministic loopback fixture",
+    "expected": "Overlay tracks visible media, hides when media is offscreen, targets media beneath controls or resets on document navigation; overlap download hash matches.",
+    "cases": [
+      "BROWSER-OVERLAY-NAVIGATION"
+    ],
+    "unit_modules": [],
+    "limits": "Real Chrome/CDP mouse and DOM; no personal profile."
+  }
+]

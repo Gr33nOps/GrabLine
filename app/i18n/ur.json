@@ -331,7 +331,6 @@
   "Import settings…": "درآمد کی ترتیبات کو محفوظ کریں",
   "Import {count}": "{count} درآمد کریں",
   "Imported {count} download(s)": "درآمد شدہ {count} ڈاؤن لوڈز",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "درآمد شدہ {count} سیٹنگ(سیٹنگز) ۔ ان سب کو دیکھنے کے لیے سیٹنگز (یا دوبارہ شروع کریں) دوبارہ کھولیں ۔",
   "Importing {done}/{total} …": "{done}/{total} درآمد کیا جا رہا ہے...",
   "Inspect URL": "URL کا معائنہ کریں",
   "Inspecting {url} …": "{url} کا معائنہ کیا جا رہا ہے…",
@@ -569,6 +568,7 @@
   "Right-click a download for one-off scheduling: Start at… a chosen time, or Start after… another download finishes.": "ون آف شیڈولنگ کے لیے ڈاؤن لوڈ پر دائیں کلک کریں: پر شروع کریں... ایک منتخب کردہ وقت، یا اس کے بعد شروع کریں... ایک اور ڈاؤن لوڈ ختم ہو جاتا ہے ۔",
   "Right-click a download to override its speed limit, connections, and mirrors.": "اس کی رفتار کی حد، کنکشنز اور آئینے کو اوور رائیڈ کرنے کے لیے کسی ڈاؤن لوڈ پر دائیں کلک کریں ۔",
   "Run command:": "کمانڈ چلائیں:",
+  "S3 endpoint:": "S3 اینڈ پوائنٹ:",
   "SFTP/SCP private-key file (optional)": "SFTP/SCP نجی کلید فائل (اختیاری)",
   "SHA-256 copied for {name}": "SHA -256 {name} کے لیے کاپی کیا گیا",
   "SHA-256:      {checksum}": "SHA-256: {checksum}",
@@ -823,7 +823,7 @@
   "end  e.g. 2:45": "اختتام مثال کے طور پر 2:45",
   "feed URL, or:  feed URL | filter text\none per line": "فیڈ URL، یا: فیڈ URL | فلٹر متن\nفی لائن ایک",
   "find -> replace   (one rule per line)": "تلاش کریں -> تبدیل کریں (ایک قاعدہ فی لائن)",
-  "host, or the S3 endpoint (e.g. s3.us-west.amazonaws.com)": "میزبان، یا S3 اینڈ پوائنٹ (جیسے s3.us-west.amazonaws.com)",
+  "host, or the S3 bucket name": "ہوسٹ یا S3 بکٹ کا نام",
   "hosts that skip the proxy, comma separated": "پراکسی کو چھوڑنے والے میزبان، کوما سے الگ",
   "http(s):// · socks5:// · socks4:// host:port  (blank = direct)": "http(s):// · socks5:// · socks4:// host:port (خالی = براہ راست)",
   "https://example.com/search?q=%s": "https://example.com/search?q=%s",
@@ -832,6 +832,7 @@
   "one folder per line, e.g. /home/me/Movies": "ایک فولڈر فی لائن، جیسے /home/me/Movies",
   "one password per line": "فی لائن ایک پاس ورڈ",
   "only scan these types, e.g. exe, msi, zip (blank = all)": "صرف ان اقسام کو اسکین کریں، جیسے exe، msi، zip (خالی = تمام)",
+  "optional, e.g. https://minio.example:9000": "اختیاری، مثلاً https://minio.example:9000",
   "password, key passphrase, or S3 secret key": "پاس ورڈ، کلیدی پاس فریز، یا S3 خفیہ کلید",
   "reading details …": "تفصیلات پڑھی جا رہی ہیں …",
   "start  e.g. 1:20": "شروع کریں جیسے 1:20",
@@ -888,5 +889,6 @@
   "{url}\n\nGoogle Safe Browsing flags this as {threat}. Download anyway?": "{url}\n\nگوگل سیف براؤزنگ اسے {threat} قرار دیتی ہے۔ پھر بھی ڈاؤن لوڈ کریں؟",
   "{url}\n\nThis download is over unencrypted HTTP. It could be tampered with in transit. Download anyway?": "{url}\n\nیہ ڈاؤن لوڈ غیر خفیہ کردہ HTTP پر ہے۔ ٹرانزٹ میں اس کے ساتھ چھیڑ چھاڑ کی جا سکتی ہے۔ ویسے بھی ڈاؤن لوڈ کریں؟",
   "{url}\nClick to choose quality and download.": "{url}\nکوالٹی منتخب کرنے اور ڈاؤن لوڈ کرنے کے لیے کلک کریں۔",
-  "── Checksums ──": "── چیکسم ──"
+  "── Checksums ──": "── چیکسم ──",
+  "The selected quality is unavailable. Choose another quality or try again later.": "منتخب معیار دستیاب نہیں ہے۔ کوئی دوسرا معیار منتخب کریں یا بعد میں دوبارہ کوشش کریں۔"
 }
