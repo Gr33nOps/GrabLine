@@ -1905,7 +1905,6 @@ class DownloadManager:
                     self._fair_limiters.pop(job.id, None)
                     self._fair_applied.pop(job.id, None)
                     self._record_completion(job.id)
-                elif status is JobStatus.FAILED:
-                    if not self._schedule_retry(job.id):
-                        self._try_mirror(job.id)
+                elif status is JobStatus.FAILED and not self._schedule_retry(job.id):
+                    self._try_mirror(job.id)
                 self._cond.notify_all()
