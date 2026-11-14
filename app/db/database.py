@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -110,6 +111,7 @@ CREATE TABLE IF NOT EXISTS handoffs (
     payload    TEXT NOT NULL DEFAULT '[]',
     quality    TEXT,
     headers    TEXT NOT NULL DEFAULT '{}',
+    options    TEXT NOT NULL DEFAULT '{}',
     claimed    INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -118,6 +120,21 @@ CREATE TABLE IF NOT EXISTS handoffs (
 -- ones accumulate for the life of the profile.
 CREATE INDEX IF NOT EXISTS idx_handoffs_unclaimed ON handoffs(claimed, id);
 """
+
+_log = logging.getLogger(__name__)
+
+
+def _load_handoff_options(handoff_id: int, raw: str | None) -> dict[str, Any]:
+    """Decode a handoff's options JSON; anything malformed becomes {} (never raises)."""
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        value = None
+    if not isinstance(value, dict):
+        _log.warning("handoff %s has malformed options; ignoring them", handoff_id)
+        return {}
+    return value
+
 
 #: Columns added after Phase 0, applied to pre-existing databases on open.
 _JOBS_MIGRATIONS = {
@@ -134,6 +151,7 @@ _HANDOFFS_MIGRATIONS = {
     "payload": "ALTER TABLE handoffs ADD COLUMN payload TEXT NOT NULL DEFAULT '[]'",
     "quality": "ALTER TABLE handoffs ADD COLUMN quality TEXT",
     "headers": "ALTER TABLE handoffs ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'",
+    "options": "ALTER TABLE handoffs ADD COLUMN options TEXT NOT NULL DEFAULT '{}'",
 }
 
 
@@ -692,12 +710,13 @@ class Database:
         payload: Sequence[str] = (),
         quality: str | None = None,
         headers: Mapping[str, str] | None = None,
+        options: dict[str, Any] | None = None,
     ) -> int:
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO handoffs "
-                "(url, page_url, page_title, source, payload, quality, headers) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(url, page_url, page_title, source, payload, quality, headers, options) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url,
                     page_url,
@@ -706,6 +725,7 @@ class Database:
                     json.dumps(list(payload)),
                     quality,
                     json.dumps(dict(headers or {})),
+                    json.dumps(options or {}, sort_keys=True, separators=(",", ":")),
                 ),
             )
         handoff_id = cur.lastrowid
@@ -745,6 +765,7 @@ class Database:
                 payload=tuple(json.loads(row["payload"] or "[]")),
                 quality=row["quality"],
                 headers=json.loads(row["headers"] or "{}"),
+                options=_load_handoff_options(row["id"], row["options"]),
             )
             for row in rows
         ]
