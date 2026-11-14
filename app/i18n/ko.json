@@ -331,7 +331,6 @@
   "Import settings…": "설정 가져오기…",
   "Import {count}": "{count}개 가져오기",
   "Imported {count} download(s)": "{count}개의 다운로드를 가져왔습니다",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "{count}개의 설정을 가져왔습니다. 모두 보려면 설정을 다시 열거나(또는 재시작하세요).",
   "Importing {done}/{total} …": "가져오는 중 {done}/{total}…",
   "Inspect URL": "URL 검사",
   "Inspecting {url} …": "{url} 검사 중…",

@@ -331,7 +331,6 @@
   "Import settings…": "Einstellungen importieren…",
   "Import {count}": "{count} importieren",
   "Imported {count} download(s)": "{count} Download(s) importiert",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "{count} Einstellung(en) importiert. Öffnen Sie Einstellungen erneut (oder starten Sie neu), um sie alle zu sehen.",
   "Importing {done}/{total} …": "Import {done}/{total}…",
   "Inspect URL": "URL prüfen",
   "Inspecting {url} …": "{url} wird geprüft …",

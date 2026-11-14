@@ -158,3 +158,61 @@ python scripts/windows_qa/build_report.py --output 'C:\path\to\workspace\outputs
 All remaining VM, external account/API, live-site and physical-hardware results
 must remain explicit. `NOT APPLICABLE` is not a pass. A prepared guest package is
 not an executed VM test. No release or tag is part of these commands.
+
+
+## Exhaustive settings checks
+
+Use an isolated `LOCALAPPDATA`, set `GRABLINE_QA_ROOT` to a disposable run directory,
+and put the verified FFmpeg/Deno/7-Zip locations on PATH. From the source root:
+
+```powershell
+python scripts/windows_qa/control_inventory.py
+python scripts/windows_qa/settings_matrix.py
+python scripts/windows_qa/settings_extra_checks.py
+python scripts/windows_qa/settings_reopen_checks.py
+python scripts/windows_qa/settings_action_checks.py
+python scripts/windows_qa/settings_effect_checks.py
+python scripts/windows_qa/visual_checks.py
+python scripts/windows_qa/scaling_checks.py
+```
+
+The inventory has 150 controls across 19 sections (38 shortcut editors included).
+`settings_reopen_checks.py` clicks the embedded Save button for a changed value,
+reopens each field against a fresh SQLite connection, checks Cancel preserves
+stored preferences, and restores the original value. It isolates the autostart
+provider; this is not evidence of actual login registration. A disposable queue
+provides an alternate default-queue choice. No personal profile is read or changed.
+
+The action runner records section/button inventories, renders all sections and
+checks import/export, invalid/cancelled import, Reset, statistics, database
+maintenance, path selection and cancellation, diagnostics, shortcut help,
+account/setup dialog opening and About/update dispatch. File-picker results and
+OS dispatch are explicitly test boundaries. The effect runner separately checks
+live timers, density/columns, manager rates, engine options, job defaults, stats,
+libtorrent configuration and the production notification/power callbacks.
+Captured OS callbacks are unit checks, not physical notifications or power tests.
+
+Run the genuine pinned FFmpeg installer separately (uses HTTPS and disposable
+app storage, downloads an upstream archive and executes the verified binaries):
+
+```powershell
+python scripts/windows_qa/settings_ffmpeg_check.py
+```
+
+A dated upstream release can disappear under upstream retention policies. If the
+installer reports HTTP 404, refresh the relevant platform pin from the official
+release asset digest, verify the actual downloaded checksum, and rerun the real
+installer. Never remove checksum verification or replace a pin with an unverified
+rolling download. Logging changes are documented to apply on the next launch;
+`settings_action_checks.py` verifies both enabled/debug and disabled/error states
+in fresh processes.
+
+Generate the settings-only report after verification and a separate package build:
+
+```powershell
+python scripts/windows_qa/settings_report.py --output 'C:\path\to\workspace\outputs\grabline-settings-audit'
+```
+
+All 150 control results are separate from provider/hardware/VM effects in the
+report. User-owned credentials, browser registration, physical display settings
+and disruptive OS actions are not modified by these settings commands.

@@ -65,3 +65,18 @@ Do not interpret the test counts as complete native-GUI or external-provider
 certification. Disruptive Windows integration remains gated on a disposable VM;
 Hyper-V management was denied to the current account during the audit. Current
 blockers and exact build/source identities belong in the generated audit ledger.
+
+
+For an exhaustive settings pass, use the settings commands in the audit harness.
+They inventory every exposed field, click Save, reopen against a fresh database
+connection, check Cancel, exercise maintenance actions and verify runtime effects.
+Do not equate a stored setting with its physical effect: startup/power actions
+need the disposable VM, API integrations need test keys, and battery/router
+behaviour needs the corresponding hardware. Logging is applied on next launch.
+Settings imports now reload the visible fields and live consumers immediately;
+Reset also reloads shortcut editors, and RSS/watch intervals update on Save.
+
+The follow-up settings pass reached 993 passing Windows tests (14 POSIX-only
+skips, 15 public-network cases excluded) and 42 extension passes. All 150 exposed
+controls passed changed-value Save/reopen/Cancel checks. This verifies the stated
+Qt/local scopes; unavailable physical/VM/provider effects remain separate.

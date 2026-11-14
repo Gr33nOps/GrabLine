@@ -748,6 +748,8 @@ class MainWindow(QMainWindow):
         if isinstance(app, QApplication):
             theme.apply_theme(app, self.settings.theme, accent=self.settings.accent_color or None)
         self.manager.reload_settings()
+        self._rss_timer.setInterval(self.settings.rss_interval_minutes * 60_000)
+        self._watch_timer.setInterval(self.settings.torrent_watch_interval_seconds * 1000)
         self._dashboard_view._timer.setInterval(self.settings.dashboard_refresh_ms)
         self._apply_table_prefs()
         self._retint_all()

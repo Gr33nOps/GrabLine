@@ -331,7 +331,6 @@
   "Import settings…": "सेटिंग्स आयात करें…",
   "Import {count}": "{count} आयात करें",
   "Imported {count} download(s)": "{count} डाउनलोड आयात किए गए",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "{count} सेटिंग आयात की गईं। सभी देखने के लिए सेटिंग्स फिर से खोलें (या पुनः प्रारंभ करें)।",
   "Importing {done}/{total} …": "आयात हो रहा है {done}/{total}…",
   "Inspect URL": "URL निरीक्षण करें",
   "Inspecting {url} …": "{url} का निरीक्षण…",

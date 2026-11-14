@@ -1889,3 +1889,79 @@ def test_browser_focus_restores_minimized_window(db: Database, tmp_path: Path):
     finally:
         window.shutdown()
         manager.shutdown()
+
+
+def test_settings_save_updates_import_poll_timers(db: Database, tmp_path: Path):
+    _qapp()
+    s = Settings(db)
+    s.download_dir = tmp_path
+    manager = DownloadManager(db, settings=s, max_concurrent=0)
+    window = MainWindow(manager, s)
+    try:
+        s.rss_interval_minutes = 7
+        s.torrent_watch_interval_seconds = 13
+        window._on_settings_applied()
+        assert window._rss_timer.interval() == 7 * 60_000
+        assert window._watch_timer.interval() == 13_000
+    finally:
+        window.shutdown()
+        manager.shutdown()
+
+
+def test_settings_reset_reloads_shortcut_editors(db: Database, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from app.ui.settings_dialog import SettingsDialog
+    from app.ui.shortcuts import DEFAULTS, normalize
+
+    _qapp()
+    s = Settings(db)
+    first = DEFAULTS[0]
+    s.shortcuts = {first.id: "Ctrl+Alt+Z"}
+    dialog = SettingsDialog(s)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    try:
+        dialog._reset_settings()
+        assert not s.shortcuts
+        assert normalize(
+            dialog._shortcuts_page._edits[first.id].keySequence().toString()
+        ) == normalize(first.default)
+    finally:
+        dialog.reject()
+
+
+def test_settings_import_refreshes_fields_and_live_callback(
+    db: Database, tmp_path: Path, monkeypatch
+):
+    import json
+
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    from app.ui.settings_view import SettingsView
+    from app.ui.shortcuts import DEFAULTS, normalize
+
+    _qapp()
+    s = Settings(db)
+    callbacks = []
+    view = SettingsView(s, lambda: callbacks.append(True))
+    exported = tmp_path / "settings.json"
+    exported.write_text(
+        json.dumps(
+            {
+                "speed_limit_kbps": "321",
+                "shortcut_overrides": json.dumps({DEFAULTS[0].id: "Ctrl+Alt+Z"}),
+            }
+        )
+    )
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(exported), "JSON"))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    try:
+        view._dialog._import_settings()
+        assert s.speed_limit_kbps == 321
+        assert view._dialog.speed_spin.value() == 321
+        assert callbacks == [True]
+        assert normalize(
+            view._dialog._shortcuts_page._edits[DEFAULTS[0].id].keySequence().toString()
+        ) == normalize("Ctrl+Alt+Z")
+    finally:
+        view.close()

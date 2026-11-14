@@ -331,7 +331,6 @@
   "Import settings…": "設定をインポート…",
   "Import {count}": "{count} 件をインポート",
   "Imported {count} download(s)": "{count} 件のダウンロードをインポートしました",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "{count} 件の設定をインポートしました。すべて表示するには設定を再度開いて（または再起動して）ください。",
   "Importing {done}/{total} …": "インポート中 {done}/{total}…",
   "Inspect URL": "URL を検査",
   "Inspecting {url} …": "{url} を検査中…",

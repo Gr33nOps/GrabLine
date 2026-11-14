@@ -331,7 +331,6 @@
   "Import settings…": "Импорт настроек…",
   "Import {count}": "Импорт: {count}",
   "Imported {count} download(s)": "Импортировано {count} загрузок",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "Импортировано {count} настроек. Откройте Настройки снова (или перезапустите), чтобы увидеть их все.",
   "Importing {done}/{total} …": "Импорт {done}/{total}…",
   "Inspect URL": "Проверить URL",
   "Inspecting {url} …": "Проверка {url} …",

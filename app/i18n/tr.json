@@ -331,7 +331,6 @@
   "Import settings…": "Ayarları içe aktar…",
   "Import {count}": "{count} öğe içe aktar",
   "Imported {count} download(s)": "{count} indirme içe aktarıldı",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "{count} ayar içe aktarıldı. Tümünü görmek için Ayarlar'ı yeniden açın (veya yeniden başlatın).",
   "Importing {done}/{total} …": "İçe aktarılıyor {done}/{total}…",
   "Inspect URL": "URL'yi incele",
   "Inspecting {url} …": "{url} denetleniyor…",

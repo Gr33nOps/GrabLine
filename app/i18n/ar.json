@@ -331,7 +331,6 @@
   "Import settings…": "استيراد الإعدادات…",
   "Import {count}": "استيراد {count}",
   "Imported {count} download(s)": "تم استيراد {count} تنزيل",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "تم استيراد {count} إعداد. أعد فتح الإعدادات (أو أعد التشغيل) لرؤيتها جميعًا.",
   "Importing {done}/{total} …": "استيراد {done}/{total}…",
   "Inspect URL": "فحص الرابط",
   "Inspecting {url} …": "جارٍ فحص {url} …",

@@ -48,6 +48,7 @@ for node in ast.walk(tree):
             ):
                 wiring[field.attr] = target.attr
 wiring["language_combo"] = "language"
+wiring["watch_dir_edit"] = "torrent_watch_dir"
 rows = []
 for field, widget in vars(dialog).items():
     if not isinstance(widget, (QCheckBox, QComboBox, QLineEdit, QPlainTextEdit, QAbstractSpinBox)):

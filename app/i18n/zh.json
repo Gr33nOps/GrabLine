@@ -331,7 +331,6 @@
   "Import settings…": "导入设置…",
   "Import {count}": "导入 {count} 项",
   "Imported {count} download(s)": "已导入 {count} 个下载",
-  "Imported {count} setting(s). Reopen Settings (or restart) to see them all.": "已导入 {count} 项设置。请重新打开设置（或重启）以查看全部内容。",
   "Importing {done}/{total} …": "正在导入 {done}/{total}…",
   "Inspect URL": "检查链接",
   "Inspecting {url} …": "正在检查 {url} …",
