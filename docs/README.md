@@ -32,6 +32,7 @@ for packaged downloads; the `dev` branch may contain changes beyond that build.
 | --- | --- |
 | [Release process](../RELEASING.md) | Versioning, verification, branch history and the current retention policy |
 | [Packaging](../packaging/README.md) | Native build tools, portable bundles, installers and extension ZIPs |
+| [Website maintenance](website.md) | Separate site repository, release dispatch, legacy links and deployment checks |
 | [Store listing kit](store-listing.md) | Extension descriptions, permissions and reviewer notes |
 | [Security model](security-model.md) | Trust boundaries and enforced/advisory checks |
 | [Security reporting](../SECURITY.md) | Private vulnerability reports and supported versions |

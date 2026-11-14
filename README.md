@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="website/assets/logo.png" width="88" height="88" alt="GrabLine logo" />
+<img src="app/ui/assets/logo.png" width="88" height="88" alt="GrabLine logo" />
 
 # GrabLine
 
@@ -140,7 +140,7 @@ Licensed under [AGPL-3.0-or-later][license]. Dependency licenses remain their
 own; FFmpeg and Deno are provisioned separately rather than bundled in installers.
 
 [releases]: https://github.com/GrabLine/GrabLine/releases/latest
-[website]: https://grabline.github.io/GrabLine/
+[website]: https://grabline.github.io/
 [issues]: https://github.com/GrabLine/GrabLine/issues
 [amo]: https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/
 [support]: https://ko-fi.com/zain021xd

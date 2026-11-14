@@ -95,3 +95,7 @@ GitHub Packages contains an informational image at `ghcr.io/grabline/grabline-ap
 (releases before the move to the GrabLine organization: `ghcr.io/gr33nops/grabline-app`);
 it is not a runnable desktop container. End users install from
 [the latest release](https://github.com/GrabLine/GrabLine/releases/latest).
+The public [download website](https://grabline.github.io/#download) is maintained
+in [its own repository](https://github.com/GrabLine/grabline.github.io); packaging
+does not bundle or deploy the site. The browser extension remains in this repo
+and in the desktop bundle.

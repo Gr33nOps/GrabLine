@@ -78,7 +78,8 @@ Allow only one test to control desktop input at a time.
 ## Review, commit and publish
 
 Review `git diff`, run the affected checks, then commit and push the topic branch
-or reviewed `dev` change. Changes on `main` need the normal CI/Pages workflow.
+or reviewed `dev` change. Changes on `main` need the normal CI workflow.
+The website deploys from its [separate repository](website.md).
 Installer publication is a separate versioned action described in
 [RELEASING.md](../RELEASING.md); do not create a tag for a documentation update.
 

@@ -20,7 +20,7 @@ host. Never relax the allow-list to accept arbitrary extensions.
 | Field | Value |
 | --- | --- |
 | Name | GrabLine Connect |
-| Homepage | https://grabline.github.io/GrabLine/ |
+| Homepage | https://grabline.github.io/ |
 | Source / support | https://github.com/GrabLine/GrabLine |
 | Privacy policy | https://github.com/GrabLine/GrabLine/blob/main/PRIVACY.md |
 | Firefox identity | `grabline@grabline.dev` |

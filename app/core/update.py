@@ -113,7 +113,7 @@ def latest_release(proxy: str | None = None) -> tuple[str, str] | None:
 
 #: Where the "Download update" fallback points: the website's download
 #: section, which always links the current installers.
-WEBSITE_DOWNLOAD_URL = "https://grabline.github.io/GrabLine/#download"
+WEBSITE_DOWNLOAD_URL = "https://grabline.github.io/#download"
 
 
 #: Asset-name fragments that identify a CPU architecture, mapped to the

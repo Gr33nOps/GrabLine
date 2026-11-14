@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions and help
+    url: https://github.com/GrabLine/GrabLine/discussions/categories/q-a
+    about: Ask usage and setup questions in Discussions Q&A.
   - name: Documentation and troubleshooting
     url: https://github.com/GrabLine/GrabLine/blob/main/docs/README.md
     about: Start with installation, usage, pairing and troubleshooting guides.

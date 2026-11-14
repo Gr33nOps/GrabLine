@@ -95,21 +95,24 @@ enforced application-integrity checks. Read the relevant tests before editing.
 
 ### 6. Verification and publication
 
-Use [Testing](testing.md) for isolated checks. Read all four workflows in
+Use [Testing](testing.md) for isolated checks. Read the three workflows in
 [.github/workflows](../.github/workflows) and explain which events run CI,
-deploy Pages, publish the informational package and create installers.
+publish the informational package and create installers. Pages deploys from
+[the website repository](https://github.com/GrabLine/grabline.github.io);
+[Website maintenance](website.md) explains release dispatch and old-link checks.
 
 Current branch history is ordinary Git history:
 
 ```text
 topic change → reviewed dev commit → normal merge/fast-forward to main
-  → CI and Pages
+  → CI
   → a new version tag, only when releasing → native builds and publication
+    → dispatch the separate website deployment
 ```
 
 Never recreate or force-push an orphan `main`. Never move an existing published
-tag. The owner currently retains only the newest release/tag; see
-[RELEASING.md](../RELEASING.md) for verification and cleanup policy.
+tag or delete a published version tag. See [RELEASING.md](../RELEASING.md) for
+verification and history-preservation policy.
 
 ## Practice projects
 
