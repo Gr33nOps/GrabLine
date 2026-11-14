@@ -106,6 +106,7 @@ from app.ui import (
     guard,
     icons,
     motion,
+    remote_add,
     theme,
     threads,
     work_threads,
@@ -304,6 +305,10 @@ class MainWindow(QMainWindow):
         self._prev_status: dict[int, JobStatus] = {}
         self._was_active = False
         self._resolve_threads: list[work_threads.ResolveThread] = []
+        # Phone remote: the unattended add path and the listener service
+        # (created on demand; the listener stays off until a phone is paired).
+        self._remote_adder: remote_add.UnattendedAdder | None = None
+        self._remote_service: Any = None
         self._file_ops: set[work_threads.FileOpThread] = set()
         # Cancel flags for unbounded file ops (the installer download): set on
         # shutdown so the worker stops promptly and the exit wait doesn't time
@@ -1012,6 +1017,10 @@ class MainWindow(QMainWindow):
     def _drain_handoffs(self) -> None:
         seen: set[str] = set()
         for handoff in self.manager.db.claim_handoffs():
+            if handoff.source == remote_add.PHONE_SOURCE:
+                # A paired phone: no one is at the PC, so never a dialog.
+                self._phone_adder().add(handoff)
+                continue
             # One browser click can deposit the same URL many times (extension
             # retry / dual webRequest+onCreated). Claiming once still left a
             # batch of identical rows - collapse them here so we only open one
@@ -1050,6 +1059,35 @@ class MainWindow(QMainWindow):
                     headers=handoff.headers,
                     from_browser=True,
                 )
+
+    def _phone_adder(self) -> remote_add.UnattendedAdder:
+        if self._remote_adder is None:
+            self._remote_adder = remote_add.UnattendedAdder(
+                self.manager,
+                self.resolver,
+                self.settings,
+                resolve_folder=self._phone_folder,
+                queue_exists=self._queue_exists,
+                on_outcome=self._on_phone_outcome,
+                parent=self,
+            )
+        return self._remote_adder
+
+    def _phone_folder(self, folder_id: str) -> Path | None:
+        """A folder id the phone chose, mapped back to a path only if it is
+        one of the PC's own download folders (never a path from the phone)."""
+        service = self._remote_service
+        return service.resolve_folder(folder_id) if service is not None else None
+
+    def _queue_exists(self, queue_id: int) -> bool:
+        return any(queue.id == queue_id for queue in self.manager.db.list_queues())
+
+    def _on_phone_outcome(self, outcome: remote_add.AddOutcome) -> None:
+        service = self._remote_service
+        if service is not None:
+            service.add_outcome(outcome)
+        if outcome.result == "queued":
+            self.refresh()
 
     def _open_gallery(self, urls: list[str], page_title: str | None) -> None:
         """F2.2: the extension collected a page's images - pick and batch."""
