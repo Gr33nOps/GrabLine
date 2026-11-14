@@ -214,7 +214,8 @@ def restart_current() -> bool:
         from PySide6.QtWidgets import QApplication
 
         if QApplication.instance() is not None:
-            return bool(QProcess.startDetached(command[0], command[1:]))
+            started, _pid = QProcess.startDetached(command[0], command[1:])
+            return started
     except Exception:
         pass
     import subprocess
