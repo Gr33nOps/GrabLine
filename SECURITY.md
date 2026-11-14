@@ -8,7 +8,7 @@ outside the download folder, running shell commands from remote input, or
 exfiltrating secrets: please report it **privately** through GitHub Security
 Advisories:
 
-[Open a private vulnerability report](https://github.com/Gr33nOps/GrabLine/security/advisories/new)
+[Open a private vulnerability report](https://github.com/GrabLine/GrabLine/security/advisories/new)
 while signed in to GitHub (Security → Report a vulnerability).
 
 Include affected version/OS, a minimal reproduction, expected security boundary,
@@ -31,7 +31,7 @@ trust boundaries and past hardening work.
 
 ## Supported versions
 
-The [latest published version](https://github.com/Gr33nOps/GrabLine/releases/latest)
+The [latest published version](https://github.com/GrabLine/GrabLine/releases/latest)
 is the supported release. Older versions are not patched separately; the owner
 currently retains only the latest release/tag. Include the exact commit if the
 finding affects unreleased source. Historical release notes remain in

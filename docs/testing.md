@@ -103,8 +103,8 @@ Release source commit: `28170759ceba7915bbaa40a9846647978ddf8ea8`.
 Corresponding development commit: `1d36bc9c24f68f5e24caf18c000ce8ba2fcd7a18`.
 Both had source tree `979e261326a385753d5f207de26d434f923379c6`.
 
-Public evidence: [CI run](https://github.com/Gr33nOps/GrabLine/actions/runs/43605774944),
-[native builds](https://github.com/Gr33nOps/GrabLine/actions/runs/43606317150),
+Public evidence: [CI run](https://github.com/GrabLine/GrabLine/actions/runs/43605774944),
+[native builds](https://github.com/GrabLine/GrabLine/actions/runs/43606317150),
 and [release notes](releases/1.32.15.md). Detailed local browser/settings/guest
 ledgers and sanitized logs are produced by the harness, not bundled into the app.
 These are historical results for that revision, not fresh test claims for later edits.

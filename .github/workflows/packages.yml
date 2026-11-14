@@ -71,7 +71,7 @@ jobs:
           GrabLine ${V}
 
           Installers: ${SRC}/releases
-          Website: https://gr33nops.github.io/GrabLine/
+          Website: https://grabline.github.io/GrabLine/
           EOF
           {
             echo "FROM scratch"

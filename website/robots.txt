@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://gr33nops.github.io/GrabLine/sitemap.xml
+Sitemap: https://grabline.github.io/GrabLine/sitemap.xml

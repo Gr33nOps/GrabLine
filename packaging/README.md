@@ -91,6 +91,7 @@ Inspect the final published files as well as local build output. Use the
 smoke tests and guest integration are distinct scopes.
 
 Builds are unsigned. FFmpeg/Deno are fetched separately with checksum checks.
-GitHub Packages contains an informational image at `ghcr.io/gr33nops/grabline-app`;
+GitHub Packages contains an informational image at `ghcr.io/grabline/grabline-app`
+(releases before the move to the GrabLine organization: `ghcr.io/gr33nops/grabline-app`);
 it is not a runnable desktop container. End users install from
-[the latest release](https://github.com/Gr33nOps/GrabLine/releases/latest).
+[the latest release](https://github.com/GrabLine/GrabLine/releases/latest).

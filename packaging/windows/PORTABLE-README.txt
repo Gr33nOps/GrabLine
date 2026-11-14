@@ -33,4 +33,4 @@ Deleting this program folder does not remove your data, downloads, keyring
 secrets or necessarily browser/startup registration. Remove those integrations
 deliberately if retiring the app. This is not a portable data profile.
 
-Documentation: https://github.com/Gr33nOps/GrabLine/blob/main/docs/README.md
+Documentation: https://github.com/GrabLine/GrabLine/blob/main/docs/README.md

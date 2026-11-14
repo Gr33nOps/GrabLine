@@ -1,7 +1,7 @@
 # GrabLine documentation
 
 These guides describe the 1.32.15 application and current repository workflow.
-Use the [latest release](https://github.com/Gr33nOps/GrabLine/releases/latest)
+Use the [latest release](https://github.com/GrabLine/GrabLine/releases/latest)
 for packaged downloads; the `dev` branch may contain changes beyond that build.
 
 ## Install and use

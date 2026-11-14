@@ -100,7 +100,7 @@ system libraries and additional development tools.
 **Windows PowerShell**
 
 ```powershell
-git clone https://github.com/Gr33nOps/GrabLine.git
+git clone https://github.com/GrabLine/GrabLine.git
 Set-Location GrabLine
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
@@ -110,7 +110,7 @@ py -3.12 -m venv .venv
 **Linux / macOS**
 
 ```sh
-git clone https://github.com/Gr33nOps/GrabLine.git
+git clone https://github.com/GrabLine/GrabLine.git
 cd GrabLine
 python3.12 -m venv .venv
 . .venv/bin/activate
@@ -139,14 +139,14 @@ privately through [the security policy](SECURITY.md).
 Licensed under [AGPL-3.0-or-later][license]. Dependency licenses remain their
 own; FFmpeg and Deno are provisioned separately rather than bundled in installers.
 
-[releases]: https://github.com/Gr33nOps/GrabLine/releases/latest
-[website]: https://gr33nops.github.io/GrabLine/
-[issues]: https://github.com/Gr33nOps/GrabLine/issues
+[releases]: https://github.com/GrabLine/GrabLine/releases/latest
+[website]: https://grabline.github.io/GrabLine/
+[issues]: https://github.com/GrabLine/GrabLine/issues
 [amo]: https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/
 [support]: https://ko-fi.com/zain021xd
 [license]: LICENSE
-[ci]: https://github.com/Gr33nOps/GrabLine/actions/workflows/ci.yml
-[download-badge]: https://img.shields.io/github/v/release/Gr33nOps/GrabLine?label=download&color=0170fd
-[ci-badge]: https://img.shields.io/github/actions/workflow/status/Gr33nOps/GrabLine/ci.yml?branch=main&label=CI
+[ci]: https://github.com/GrabLine/GrabLine/actions/workflows/ci.yml
+[download-badge]: https://img.shields.io/github/v/release/GrabLine/GrabLine?label=download&color=0170fd
+[ci-badge]: https://img.shields.io/github/actions/workflow/status/GrabLine/GrabLine/ci.yml?branch=main&label=CI
 [license-badge]: https://img.shields.io/badge/license-AGPL--3.0--or--later-blue
 [amo-badge]: https://img.shields.io/amo/v/grabline-connect?label=Firefox&color=ff7139

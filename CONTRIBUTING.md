@@ -22,7 +22,7 @@ Git is required. Deno runs the extension's JavaScript tests. FFmpeg/FFprobe and
 ### Windows PowerShell
 
 ```powershell
-git clone https://github.com/Gr33nOps/GrabLine.git
+git clone https://github.com/GrabLine/GrabLine.git
 Set-Location GrabLine
 git switch dev
 py -3.12 -m venv .venv
@@ -38,7 +38,7 @@ checkout, optional QA tools and isolated test commands.
 ### Linux / macOS
 
 ```sh
-git clone https://github.com/Gr33nOps/GrabLine.git
+git clone https://github.com/GrabLine/GrabLine.git
 cd GrabLine
 git switch dev
 python3.12 -m venv .venv

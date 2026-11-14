@@ -83,6 +83,6 @@ Use the app to remove saved cloud accounts if their keyring entries should be
 deleted. Uninstalling the program does not necessarily remove history, downloads,
 browser profiles or OS keyring records. See [uninstall instructions](docs/install.md#uninstall).
 
-Ask a general question through [GitHub issues](https://github.com/Gr33nOps/GrabLine/issues).
+Ask a general question through [GitHub issues](https://github.com/GrabLine/GrabLine/issues).
 Use [SECURITY.md](SECURITY.md) for a private security report. Do not attach
 personal databases, browser profiles, credentials or raw crash dumps to public issues.
