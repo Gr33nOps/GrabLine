@@ -8,6 +8,7 @@ import socket
 import socketserver
 import threading
 import time
+from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
@@ -41,10 +42,21 @@ class HTTPProxy(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        assert self.path.startswith(origin.url("")), self.path
+        target = httpx.URL(self.path)
+        assert origin._httpd is not None
+        if (
+            target.scheme != "http"
+            or target.host != "127.0.0.1"
+            or target.port != origin._httpd.server_port
+            or target.username
+            or target.password
+        ):
+            self.send_error(403, "Only the disposable fixture origin is allowed")
+            return
         requests.append(self.path)
         headers = {k: v for k, v in self.headers.items() if k.lower() in {"range", "if-range"}}
-        response = httpx.get(self.path, headers=headers, trust_env=False)
+        request_url = httpx.URL(origin.url("/")).copy_with(raw_path=target.raw_path)
+        response = httpx.get(request_url, headers=headers, trust_env=False)
         self.send_response(response.status_code)
         for key in ("Content-Length", "Content-Range", "Accept-Ranges", "Content-Type", "ETag"):
             if key in response.headers:
@@ -110,6 +122,31 @@ socks.daemon_threads = True
 for server in (http, socks):
     threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
+    with case("NETWORK-PROXY-ORIGIN-BOUNDARY", "real local proxy integration") as evidence:
+        forbidden = MediaServer()
+        forbidden.start()
+        try:
+            forbidden.add("/blocked.bin", b"must not be requested")
+            # A raw proxy request retains userinfo that high-level clients may strip.
+            crafted = origin.url("") + "@" + forbidden.url("/blocked.bin").removeprefix("http://")
+            client = HTTPConnection("127.0.0.1", http.server_port, timeout=5)
+            try:
+                client.request(
+                    "GET",
+                    crafted,
+                    headers={
+                        "Proxy-Authorization": "Basic " + base64.b64encode(b"qa:qa-only").decode()
+                    },
+                )
+                response = client.getresponse()
+                response.read()
+                assert response.status == 403, response.status
+                assert forbidden.request_count("/blocked.bin") == 0
+                evidence.update(http_status=response.status, outside_origin_requests=0)
+            finally:
+                client.close()
+        finally:
+            forbidden.stop()
     for scheme, server in (("http", http), ("socks5", socks)):
         proxy = f"{scheme}://qa:qa-only@127.0.0.1:{server.server_address[1]}"
         wrong = proxy.replace("qa-only", "incorrect")

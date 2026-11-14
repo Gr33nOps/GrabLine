@@ -46,8 +46,17 @@ gh secret set WEBSITE_DISPATCH_TOKEN -R GrabLine/GrabLine
 ```
 
 The token is not needed in the website repository. Verify its permissions by
-observing a real release dispatch after the desktop workflow is merged. Merely
-seeing a secret name is not proof that the request works.
+running the manual dispatch check after its workflow is merged:
+
+```sh
+gh workflow run website-dispatch-check.yml -R GrabLine/GrabLine --ref main
+```
+
+Verify both that check and the resulting Pages run in the website repository.
+It uses the actual configured secret and sends the same event as the release
+workflow, without building installers or publishing a release. Merely seeing a
+secret name is not proof that the request works. Normal release publication
+should still be followed by its own dispatch/deployment verification.
 
 ## Compatibility checks
 

@@ -1,0 +1,27 @@
+name: Website dispatch check
+
+on:
+  workflow_dispatch:
+
+# This check uses only the dedicated cross-repository secret. It does not need
+# the workflow token to read or write the desktop repository.
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify the configured website dispatch secret
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::WEBSITE_DISPATCH_TOKEN is not configured."
+            exit 1
+          fi
+          gh api --method POST repos/GrabLine/grabline.github.io/dispatches \
+            -f event_type=release-published \
+            -f 'client_payload[verification]=manual-dispatch-check' --silent
+          echo "Website dispatch accepted; verify the resulting website Pages run."

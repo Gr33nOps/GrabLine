@@ -95,9 +95,10 @@ enforced application-integrity checks. Read the relevant tests before editing.
 
 ### 6. Verification and publication
 
-Use [Testing](testing.md) for isolated checks. Read the three workflows in
+Use [Testing](testing.md) for isolated checks. Read the four workflows in
 [.github/workflows](../.github/workflows) and explain which events run CI,
-publish the informational package and create installers. Pages deploys from
+publish the informational package, create installers and verify the optional
+website-dispatch secret without a release. Pages deploys from
 [the website repository](https://github.com/GrabLine/grabline.github.io);
 [Website maintenance](website.md) explains release dispatch and old-link checks.
 

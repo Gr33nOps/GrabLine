@@ -135,6 +135,59 @@ def test_non_cloud_urls_are_ignored():
     assert cloudlinks.direct_download_url("ftp://host/file") is None
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evildropbox.com/file.zip",
+        "https://evildropboxusercontent.com/file.zip",
+        "https://onedrive.live.com.evil.test/file.zip",
+        "https://evilonedrive.live.com/file.zip",
+        "https://notsharepoint.com/file.zip",
+        "https://evil1drv.ms/file.zip",
+        "https://box.com.evil.test/shared/static/file.zip",
+        "https://app.box.com@evil.test/shared/static/file.zip",
+    ],
+)
+def test_cloud_provider_lookalikes_are_not_rewritten(url: str):
+    """Provider text in another hostname/userinfo must not select that provider."""
+    assert cloudlinks.direct_download_url(url) is None
+
+
+@pytest.mark.parametrize("authority", ["www.dropbox.com:443", "WWW.DROPBOX.COM"])
+def test_dropbox_uses_the_hostname_independently_of_port_and_case(authority: str):
+    assert cloudlinks.direct_download_url(f"https://{authority}/s/abc/file.zip?dl=0") == (
+        f"https://{authority}/s/abc/file.zip?dl=1"
+    )
+
+
+def test_sharepoint_with_an_explicit_port_still_uses_the_content_endpoint():
+    direct = cloudlinks.direct_download_url("https://tenant.sharepoint.com:443/shared/file")
+    assert direct is not None
+    prefix = "https://api.onedrive.com/v1.0/shares/u!"
+    assert direct.startswith(prefix) and direct.endswith("/root/content")
+    token = direct.removeprefix(prefix).removesuffix("/root/content")
+    assert base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode() == (
+        "https://tenant.sharepoint.com:443/shared/file"
+    )
+
+
+@pytest.mark.parametrize("host", ["notdropbox.com", "box.com.evil.test", "mygoogle.com"])
+def test_nextcloud_share_is_not_excluded_by_provider_text_in_an_unrelated_host(host: str):
+    assert cloudlinks.direct_download_url(f"https://{host}/s/TOKEN123") == (
+        f"https://{host}/s/TOKEN123/download"
+    )
+
+
+@pytest.mark.parametrize("host", ["notmega.nz", "noticloud.com", "drive.proton.me.evil.test"])
+def test_unsupported_provider_lookalikes_are_not_rejected(host: str):
+    assert cloudlinks.unsupported_cloud_reason(f"https://{host}/file") is None
+
+
+def test_unsupported_provider_is_recognized_with_an_explicit_port():
+    reason = cloudlinks.unsupported_cloud_reason("https://mega.nz:443/file")
+    assert reason is not None and "Mega" in reason
+
+
 # --------------------------------------------------------------- resolver
 
 

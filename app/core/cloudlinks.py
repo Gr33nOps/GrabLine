@@ -19,6 +19,11 @@ _DRIVE_HOSTS = {"drive.google.com", "docs.google.com"}
 _DRIVE_CONTENT_HOST = "drive.usercontent.google.com"
 
 
+def _is_provider_host(parts: SplitResult, domain: str) -> bool:
+    host = (parts.hostname or "").lower()
+    return host == domain or host.endswith("." + domain)
+
+
 def _google_drive(url: str, parts: SplitResult) -> str | None:
     host = (parts.hostname or "").lower()
     if host == _DRIVE_CONTENT_HOST:
@@ -51,10 +56,9 @@ def is_google_drive_file(url: str) -> bool:
 
 
 def _dropbox(url: str, parts: SplitResult) -> str | None:
-    host = parts.netloc.lower()
-    if host.endswith("dropboxusercontent.com"):
+    if _is_provider_host(parts, "dropboxusercontent.com"):
         return url  # already a direct-content host
-    if not host.endswith("dropbox.com"):
+    if not _is_provider_host(parts, "dropbox.com"):
         return None
     query = parse_qs(parts.query)
     query["dl"] = ["1"]  # dl=1 forces the file instead of the preview page
@@ -63,9 +67,9 @@ def _dropbox(url: str, parts: SplitResult) -> str | None:
 
 
 def _onedrive(url: str, parts: SplitResult) -> str | None:
-    host = parts.netloc.lower()
-    known = (
-        host.endswith("1drv.ms") or "onedrive.live.com" in host or host.endswith("sharepoint.com")
+    known = any(
+        _is_provider_host(parts, domain)
+        for domain in ("1drv.ms", "onedrive.live.com", "sharepoint.com")
     )
     if not known:
         return None
@@ -82,7 +86,7 @@ _OTHER_SHARE_HOSTS = ("box.com", "dropbox.com", "google.com", "onedrive.live.com
 def _nextcloud(url: str, parts: SplitResult) -> str | None:
     # Nextcloud / ownCloud is self-hosted (any host), so this /s/ transform is
     # the catch-all - skip the other providers whose /s/ we handle elsewhere.
-    if any(known in parts.netloc.lower() for known in _OTHER_SHARE_HOSTS):
+    if any(_is_provider_host(parts, known) for known in _OTHER_SHARE_HOSTS):
         return None
     match = re.search(r"(/s/[-\w]+)/?$", parts.path)
     if not match:
@@ -93,7 +97,7 @@ def _nextcloud(url: str, parts: SplitResult) -> str | None:
 
 
 def _box(url: str, parts: SplitResult) -> str | None:
-    if "box.com" not in parts.netloc.lower():
+    if not _is_provider_host(parts, "box.com"):
         return None
     if "/shared/static/" in parts.path:
         return url  # already the direct static form
@@ -135,8 +139,7 @@ def unsupported_cloud_reason(url: str) -> str | None:
     """An honest, specific message for a cloud host GrabLine deliberately does
     not download from, or None. Keeps us from silently mangling the URL."""
     parts = urlsplit(url)
-    host = parts.netloc.lower()
     for known, reason in _UNSUPPORTED.items():
-        if host == known or host.endswith("." + known) or host.endswith(known):
+        if _is_provider_host(parts, known):
             return reason
     return None
