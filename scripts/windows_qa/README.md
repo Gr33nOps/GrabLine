@@ -140,10 +140,12 @@ authenticated transports and calls genuine pause/cancel methods at a received
 chunk boundary. Its results are distinct from clicking the native app toolbar.
 
 A fatal Windows 0xC0000005 in python312.dll was observed during repeated Qt
-accessibility inspection of a live quality dialog. The underlying cause remains
-unresolved. Prefer `win32_backend.py` for bounded quality-dialog observation;
-do not call a working fallback a crash fix. `fault_dump_probe.py` is an opt-in
-diagnostic, not a production repair. Do not operate Windows Security Alert or
+accessibility inspection of a live quality dialog. The remaining-effects probe
+subsequently reproduced the same fault offset in the all-thread traceback dumper;
+Windows now uses faulting-thread logging. Three cold native sessions passed with
+that production setting. Preserve the failing baseline separately; this bounded
+verification does not certify every native path. `fault_dump_probe.py` remains an
+opt-in diagnostic. Do not operate Windows Security Alert or
 other protected permission dialogs; preserve the blocker and let the user act.
 
 The report builder consumes explicitly selected run directories and keeps earlier
@@ -216,3 +218,37 @@ python scripts/windows_qa/settings_report.py --output 'C:\path\to\workspace\outp
 All 150 control results are separate from provider/hardware/VM effects in the
 report. User-owned credentials, browser registration, physical display settings
 and disruptive OS actions are not modified by these settings commands.
+
+## Remaining Windows effects
+
+Use an isolated checkout and a dedicated `GRABLINE_QA_ROOT`. Reuse the verified
+runtime/tools, and set `PYTHONPATH` to that checkout. Run one native desktop test
+at a time; these opt-in probes can show app windows and play a synthetic tone.
+
+```powershell
+python scripts/windows_qa/native_crash_repeat.py --all-threads -1
+python scripts/windows_qa/remaining_network_checks.py
+python scripts/windows_qa/remaining_audio_check.py
+python scripts/windows_qa/remaining_notification_check.py
+python scripts/windows_qa/remaining_notification_check.py --foreground
+python scripts/windows_qa/remaining_effects_report.py --output 'C:\path\to\workspace\outputs\grabline-remaining-audit'
+```
+
+The crash runner's `-1` uses the actual production configuration; `0` forces
+faulting-thread logging and `1` reproduces the historical all-thread setting.
+The latter may deliberately crash its disposable child. UIA reads verify the
+owned process/window/profile before access. Raw crash dumps can contain process
+memory; keep them local and exclude profiles, databases and dumps from reports.
+
+The network runner makes real public DHT and invalid-key reputation requests,
+using only synthetic hashes/URLs, and probes the current gateway without changing
+its configuration. No valid-key certification follows from an error response.
+The audio runner requires optional PyAudioWPatch in an isolated tool directory;
+it retains aggregate tone energies, not captured system audio. Notification
+observation can remain blocked by Windows shell state; do not change system
+notification/privacy settings to force a pass.
+
+`remaining_effects_report.py` assembles the explicit host/guest ledger and existing
+suite/package evidence; it does not execute missing cases or convert blockers
+into passes. Preserve previous attempts on rerun. Use the guest-specific guide
+for disruptive integration checks, never run those actions against the host.

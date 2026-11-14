@@ -58,3 +58,32 @@ prerequisite. A prepared script or a successful host build is never a guest pass
 Preserve an earlier failure and its reason when retrying after fixing the setup.
 Write each case into `cases/<ID>.json` using the schema in the host harness.
 Do not upload browser profiles, vault entries, passwords or personal history.
+
+## Windows Sandbox follow-up
+
+When Hyper-V management is unavailable, Windows Sandbox can execute a subset.
+`remaining_guest_checks.py` refuses to proceed unless the machine reports
+`Virtual Machine`, the user is `WDAGUtilityAccount`, and the hostname differs
+from the development host. Set `GRABLINE_QA_ROOT` to the writable results mapping.
+Map source, Python runtime, site-packages, tools, packaging and the final package
+read-only. Disable clipboard, microphone, camera and printer redirection. Keep
+the helper database distinct from the packaged app database/native host profile.
+
+Run the `functional`, `lock` and `shutdown` phases in separate fresh sandboxes.
+The functional phase compiles the real installer using the pinned, signature-
+verified Inno compiler supplied in the results directory, installs per-user,
+checks registration/transfers/update handling, and uninstalls while preserving
+synthetic downloads. The benign update fixture writes a marker; this does not
+certify upgrading from a previous release. Paths and commands are recorded in
+the run's `.wsb` configurations and console logs.
+
+The lock phase asserts the guest input desktop becomes inaccessible after a
+completed hashed job; it does not automate authentication/unlock. The shutdown
+phase records completion and System event 1074. Its request marker alone is not
+a shutdown pass: separately observe the guest connection ending while the host
+remains running. Terminate only the test-owned Sandbox client after observation.
+
+Sandbox cannot retain a login/reboot cycle. Preserve those persistent-VM blockers
+and the unsupported sleep/hibernate results from `powercfg /a`. Shell association
+registry checks do not substitute for every Explorer/browser protocol launch or
+SmartScreen/signing observation in a persistent clean guest.
