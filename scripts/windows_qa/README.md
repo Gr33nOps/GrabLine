@@ -80,6 +80,7 @@ python scripts/windows_qa/hidden_window_checks.py
 python scripts/windows_qa/site_selector_checks.py
 python scripts/windows_qa/browser_extended.py
 python scripts/windows_qa/browser_final_actions.py
+python scripts/windows_qa/browser_edge_checks.py
 python scripts/windows_qa/browser_native_flows.py
 python scripts/windows_qa/browser_failure_checks.py
 python scripts/windows_qa/native_windows_checks.py

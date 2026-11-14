@@ -1879,5 +1879,38 @@
     ],
     "unit_modules": [],
     "limits": ""
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "scroll",
+    "prerequisites": "Healthy disposable Chrome/app/native host and deterministic loopback fixture",
+    "expected": "Overlay tracks visible media, hides when media is offscreen, targets media beneath controls or resets on document navigation; overlap download hash matches.",
+    "cases": [
+      "BROWSER-OVERLAY-SCROLL"
+    ],
+    "unit_modules": [],
+    "limits": "Real Chrome/CDP mouse and DOM; no personal profile."
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "overlapping-control",
+    "prerequisites": "Healthy disposable Chrome/app/native host and deterministic loopback fixture",
+    "expected": "Overlay tracks visible media, hides when media is offscreen, targets media beneath controls or resets on document navigation; overlap download hash matches.",
+    "cases": [
+      "BROWSER-OVERLAY-OVERLAPPING-CONTROL"
+    ],
+    "unit_modules": [],
+    "limits": "Real Chrome/CDP mouse and DOM; no personal profile."
+  },
+  {
+    "area": "Browser overlay",
+    "feature": "navigation",
+    "prerequisites": "Healthy disposable Chrome/app/native host and deterministic loopback fixture",
+    "expected": "Overlay tracks visible media, hides when media is offscreen, targets media beneath controls or resets on document navigation; overlap download hash matches.",
+    "cases": [
+      "BROWSER-OVERLAY-NAVIGATION"
+    ],
+    "unit_modules": [],
+    "limits": "Real Chrome/CDP mouse and DOM; no personal profile."
   }
 ]

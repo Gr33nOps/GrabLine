@@ -16,6 +16,7 @@ parser.add_argument(
         "browser_native_flows",
         "data_queue_checks",
         "browser_final_actions",
+        "browser_edge_checks",
     ],
 )
 parser.add_argument("cases", nargs="+")
@@ -29,7 +30,7 @@ if args.url_tag:
 tree = ast.parse(source)
 selected = []
 found = set()
-if args.script in ("data_queue_checks", "browser_final_actions"):
+if args.script in ("data_queue_checks", "browser_final_actions", "browser_edge_checks"):
 
     class Cases(ast.NodeTransformer):
         def visit_With(self, node):

@@ -25,7 +25,7 @@ workspace = qa.parents[1]
 output = Path(args.output).resolve()
 assert output.is_relative_to(workspace / "outputs"), output
 output.mkdir(parents=True, exist_ok=True)
-roots = [ROOT, qa / "run-torrent-safe", qa / "run-one-hour-final"]
+roots = [ROOT, qa / "run-torrent-safe", qa / "run-one-hour-final", qa / "run-browser-edges"]
 latest = {}
 history = []
 for root in roots:
