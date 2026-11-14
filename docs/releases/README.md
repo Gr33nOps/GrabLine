@@ -5,7 +5,7 @@
 **[GrabLine 1.32.15](1.32.15.md)** combines Windows/settings/browser fixes with
 download isolation, media recovery and website improvements.
 
-Get packages from the [latest GitHub release](https://github.com/Gr33nOps/GrabLine/releases/latest).
+Get packages from the [latest GitHub release](https://github.com/GrabLine/GrabLine/releases/latest).
 The owner currently keeps only the newest release and version tag. Older binary
 assets and old tag URLs were removed; the documents below preserve historical
 notes, not downloadable or separately maintained builds.

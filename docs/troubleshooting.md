@@ -1,7 +1,7 @@
 # Troubleshooting GrabLine
 
 Check the app version under Settings → About and the extension version in your
-browser's extensions page. Use the [latest release](https://github.com/Gr33nOps/GrabLine/releases/latest)
+browser's extensions page. Use the [latest release](https://github.com/GrabLine/GrabLine/releases/latest)
 when reproducing a problem, and keep desktop/extension versions aligned.
 
 ## The extension cannot connect

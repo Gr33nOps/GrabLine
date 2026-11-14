@@ -52,7 +52,7 @@ from app.core.settings import MAX_CONNECTIONS, SESSION_BROWSERS, Settings
 from app.ui import chrome, components, design, guard, theme, threads
 from app.ui.format import human_bytes
 
-_PROJECT_URL = "https://github.com/Gr33nOps/GrabLine"
+_PROJECT_URL = "https://github.com/GrabLine/GrabLine"
 _SUPPORT_URL = "https://ko-fi.com/zain021xd"
 
 

@@ -210,7 +210,7 @@ jobs:
     # the release publish when a leg had failed - so a tag could end up with,
     # say, no macOS .dmg, and the website's download button pointed at a
     # release that silently had nothing for that platform. A missing installer
-    # is a failed release, not a partial one: fix the build and re-tag.
+    # is a failed release, not a partial one: fix the build and publish a new tag.
     needs: build
     runs-on: ubuntu-latest
     if: ${{ github.ref_type == 'tag' }}
@@ -263,3 +263,19 @@ jobs:
           files: artifacts/**/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+      - name: Update website downloads
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::WEBSITE_DISPATCH_TOKEN is not configured; deploy the website manually from GrabLine/grabline.github.io Actions."
+            exit 0
+          fi
+          if ! gh api --method POST repos/GrabLine/grabline.github.io/dispatches \
+            -f event_type=release-published \
+            -f "client_payload[tag]=$RELEASE_TAG"; then
+            echo "::warning::Website dispatch failed; the release is published. Deploy the website manually from GrabLine/grabline.github.io Actions."
+          fi

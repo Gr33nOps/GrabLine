@@ -59,7 +59,7 @@ Maintainer: GrabLine <noreply@grabline.dev>
 Installed-Size: ${INSTALLED_KB}
 Depends: libc6, libglib2.0-0, libgl1, libegl1, libxkbcommon0, libdbus-1-3
 Recommends: ffmpeg
-Homepage: https://github.com/Gr33nOps/GrabLine
+Homepage: https://github.com/GrabLine/GrabLine
 Description: Download manager with browser integration
  Grabline downloads files, videos, streams and torrents, with a browser
  extension that hands links to the app. Segmented downloading, a queue

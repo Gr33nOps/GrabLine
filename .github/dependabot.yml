@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Karachi
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Karachi
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+# Existing workflows use full commit SHAs with # vN comments.
+# Review dependency-update PRs to retain that form; this configuration does not
+# replace any current uses: reference with a floating tag.
+# target-branch controls version-update PRs; security updates use GitHub's default
+# branch behavior. Keep main as the existing default branch.

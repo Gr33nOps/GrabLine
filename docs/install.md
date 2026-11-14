@@ -1,6 +1,8 @@
 # Install and update GrabLine
 
-Download packages from the [latest release](https://github.com/Gr33nOps/GrabLine/releases/latest).
+Download packages from the [latest release](https://github.com/GrabLine/GrabLine/releases/latest).
+The [download website](https://grabline.github.io/#download) selects packages for
+each supported desktop platform. Older website links redirect to this address.
 Packaged builds include Python and application libraries. FFmpeg and Deno are
 provisioned separately when needed; RAR/7Z extraction needs an installed 7-Zip.
 For source installations, see [Contributing](../CONTRIBUTING.md).

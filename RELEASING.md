@@ -1,7 +1,7 @@
 # Releasing GrabLine
 
 Ordinary source and documentation changes do not need a new release. A version
-tag publishes installers; `main` also deploys the website. Read
+tag publishes installers and requests a deployment in the separate website repo. Read
 [Contributing](CONTRIBUTING.md), [Testing](docs/testing.md) and
 [Packaging](packaging/README.md) before publishing.
 
@@ -15,8 +15,9 @@ history; those instructions are obsolete.
 ## Prepare a version
 
 1. Inspect the working tree, fetch `origin` and combine reviewed changes on `dev`.
-2. Update the version consistently in `app/__init__.py`, `pyproject.toml`,
-   `extension/manifest.json` and the `softwareVersion` field in `website/index.html`.
+2. Update the version consistently in `app/__init__.py`, `pyproject.toml` and
+   `extension/manifest.json`. Desktop and extension versions stay aligned. The
+   website sets its own `softwareVersion` from release metadata at deploy time.
 3. Write `docs/releases/<version>.md` and update the
    [release-note index](docs/releases/README.md). Describe resulting behaviour,
    verification and material limitations.
@@ -51,9 +52,13 @@ After publication:
 2. Verify actual downloaded package hashes against the published checksums and
    GitHub digests; smoke-test the published Windows portable artifact.
 3. Give the release a readable title/body based on the checked-in release notes.
-4. Check Pages' `latest.json`, website download selection and the app's latest
-   release discovery. Pages waits for the current version's tag build before
-   falling back to the latest available release.
+4. Verify the `release-published` dispatch and successful Pages run in
+   [GrabLine/grabline.github.io](https://github.com/GrabLine/grabline.github.io/actions).
+   Check https://grabline.github.io/latest.json, website download selection and
+   the app's latest-release discovery. The site fetches the latest published
+   release and stamps its JSON-LD version automatically. The release stays
+   successful if `WEBSITE_DISPATCH_TOKEN` is missing or dispatch fails; in that
+   case deploy the site manually. See [Website maintenance](docs/website.md).
 5. Inspect the Packages workflow; if its earlier `main` run resolved the previous
    release, dispatch it again after publication. Its image is an informational
    repository-linked package, not a runnable GrabLine application container.
@@ -68,16 +73,19 @@ retag different code under the same version or hand-publish a partial platform
 set. For an infrastructure retry, verify the source identity and build inputs;
 never silently replace verified public artifacts with different content.
 
-## Current retention policy
+## Published tags and release history
 
-The repository owner chose to keep **only the newest published release and its
-matching version tag** on 14 November 2026. Current retained version: `v1.32.15`.
-Historical release notes remain in [docs/releases](docs/releases/README.md).
-Older package download/tag URLs may no longer resolve.
+Published version tags are immutable: do not move, update or delete them.
+Preserve branch history, including `main` and `dev`; never force-push or recreate
+either branch. Repository rulesets protect those branches and `v*` tags while
+allowing ordinary maintainer pushes and creation of new release tags.
 
-There is no automatic deletion workflow. For an authorized future cleanup,
-first verify the new release, save release metadata and tag commit references,
-identify the exact obsolete versions, and preserve branches/source history.
-Removing a GitHub release deletes its hosted assets; removing a tag removes its
-named source reference. A metadata backup does not preserve binary installers.
-Keep a verified archive before deletion when rollback or upgrade tests need it.
+The repository retains `v1.32.15` following an earlier owner-approved cleanup.
+Historical release notes remain in [docs/releases](docs/releases/README.md);
+older download/tag URLs removed by that cleanup may no longer resolve. Future
+release work must preserve published tags rather than repeat that cleanup.
+
+There is no automatic release deletion workflow. Any future cleanup of hosted
+release assets requires separate owner approval and a verified archive when
+rollback or upgrade tests need it. Saving metadata does not preserve installers.
+Never delete a branch or published tag as part of a release cleanup.

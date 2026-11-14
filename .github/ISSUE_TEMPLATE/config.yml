@@ -1,8 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions and help
+    url: https://github.com/GrabLine/GrabLine/discussions/categories/q-a
+    about: Ask usage and setup questions in Discussions Q&A.
   - name: Documentation and troubleshooting
-    url: https://github.com/Gr33nOps/GrabLine/blob/main/docs/README.md
+    url: https://github.com/GrabLine/GrabLine/blob/main/docs/README.md
     about: Start with installation, usage, pairing and troubleshooting guides.
   - name: Report a security vulnerability privately
-    url: https://github.com/Gr33nOps/GrabLine/security/advisories/new
+    url: https://github.com/GrabLine/GrabLine/security/advisories/new
     about: Do not disclose exploitable findings in a public issue.

@@ -22,7 +22,7 @@ Git is required. Deno runs the extension's JavaScript tests. FFmpeg/FFprobe and
 ### Windows PowerShell
 
 ```powershell
-git clone https://github.com/Gr33nOps/GrabLine.git
+git clone https://github.com/GrabLine/GrabLine.git
 Set-Location GrabLine
 git switch dev
 py -3.12 -m venv .venv
@@ -38,7 +38,7 @@ checkout, optional QA tools and isolated test commands.
 ### Linux / macOS
 
 ```sh
-git clone https://github.com/Gr33nOps/GrabLine.git
+git clone https://github.com/GrabLine/GrabLine.git
 cd GrabLine
 git switch dev
 python3.12 -m venv .venv
@@ -86,7 +86,7 @@ suite or every opt-in audit. See [Testing](docs/testing.md) for the full scope.
 
 - `dev` is the integration branch. Start a topic branch from current `dev` and
   normally target pull requests there.
-- `main` is the public stable branch and deploys the website. Changes reach it
+- `main` is the public stable branch. Changes reach it
   by ordinary merges or fast-forwards. Preserve history; never force-push it.
 - Version tags trigger installer publication. Ordinary development/documentation
   pushes do not publish a release. Follow [RELEASING.md](RELEASING.md) when a
@@ -96,6 +96,12 @@ Check `git status`, fetch `origin`, and preserve other contributors' changes.
 Keep a pull request focused; explain the problem, resulting behaviour and actual
 validation. Use the supplied PR template. Do not commit downloaded tools,
 build output, local test evidence, profiles, databases, secrets or raw dumps.
+
+The [website](https://grabline.github.io/) has its own repository,
+[GrabLine/grabline.github.io](https://github.com/GrabLine/grabline.github.io).
+Desktop code, the browser extension, packaging and QA stay together here.
+See [Website maintenance](docs/website.md) for deployment and old-link checks.
+Published tags are immutable; `main` and `dev` reject deletion and force pushes.
 
 ## Design and security conventions
 

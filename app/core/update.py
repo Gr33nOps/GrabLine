@@ -31,7 +31,7 @@ class UpdateCancelled(DownloadError):
 
 log = logging.getLogger(__name__)
 
-_LATEST = "https://api.github.com/repos/Gr33nOps/GrabLine/releases/latest"
+_LATEST = "https://api.github.com/repos/GrabLine/GrabLine/releases/latest"
 _NUM = re.compile(r"\d+")
 
 #: GitHub rejects / stalls anonymous clients that omit a User-Agent. Identify
@@ -113,7 +113,7 @@ def latest_release(proxy: str | None = None) -> tuple[str, str] | None:
 
 #: Where the "Download update" fallback points: the website's download
 #: section, which always links the current installers.
-WEBSITE_DOWNLOAD_URL = "https://gr33nops.github.io/GrabLine/#download"
+WEBSITE_DOWNLOAD_URL = "https://grabline.github.io/#download"
 
 
 #: Asset-name fragments that identify a CPU architecture, mapped to the
