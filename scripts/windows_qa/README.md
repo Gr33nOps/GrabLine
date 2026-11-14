@@ -1,5 +1,10 @@
 # GrabLine Windows audit harness
 
+For standard suite commands and the recorded release baseline, see
+[Testing and coverage](../../docs/testing.md). These scripts are opt-in audit
+tools; some report builders retain curated run paths from the original audit.
+Review and adapt those paths in an isolated copy before assembling a new report.
+
 These opt-in integration checks use real engines, local services and isolated
 Qt/browser profiles. They are not part of application startup. Read each case's
 testing level: offscreen Qt, controlled site DOM, actual toolbar popup, external

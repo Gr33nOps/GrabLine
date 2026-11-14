@@ -1,156 +1,131 @@
 # GrabLine Connect
 
-A thin, auditable browser extension (MV3, one codebase for Chrome / Edge /
-Brave / Firefox). It detects media, decorates the page, and hands URLs to the
-desktop app. Every download, merge, and conversion happens in the app; the
-whole extension is meant to be readable in one sitting.
+GrabLine's browser companion detects media, provides hover/context-menu actions
+and hands URLs to the desktop app over Native Messaging. Media processing and
+managed downloads run in GrabLine. Start with the
+[installation guide](../docs/install.md#browser-extension) for normal use.
 
-## What it does
+## Install and pair
 
-- **Toolbar popup** styled like the app: pairing status, quick actions (open
-  GrabLine, grab this tab, paste a link), the media detected in this tab, a
-  live view of your recent downloads, and the interception and hover
-  preferences.
-- **The hover button hands off to the app**: click the GrabLine logo button on
-  a supported site and the URL goes straight to GrabLine, which opens its
-  **Download Info dialog**
-  (name, folder, category, and a quality choice for video) and starts. The
-  quality is picked in the app, not on the page, so there is no in-page panel
-  to keep in sync with the site's DOM.
-- **Live progress pill**: anything grabbed from a tab shows its percentage
-  bottom-right in that tab, streamed from the app over Native Messaging.
-- **Right-click → "Download with GrabLine"** on any link, image, video,
-  audio, selection, or page
-- **Right-click → "Download all images with GrabLine"**: every
-  big-enough image on the page lands in the app as a selectable thumbnail
-  grid (a wrapping link to a full-size image wins over the thumbnail src)
-- **Hover download button** on videos and audio. Images are opt-in via the
-  popup, since a button on every avatar and thumbnail is noise and right-click
-  plus the gallery grabber already cover images. There is a per-site off
-  switch and a master switch in the popup.
-- **Download takeover** (on by default): browser downloads of
-  files are handed to GrabLine. Firefox intercepts attachment and binary-file
-  responses before the browser creates a download item; once accepted, retries
-  and failures stay in GrabLine. Chromium uses a paused browser fallback until
-  the desktop download completes because store-installed MV3 extensions cannot
-  block responses. Toggle off in the popup to use browser downloads.
-  Browser-generated blobs, POST exports, assistant-generated files, and sites
-  requiring a browser verification session stay in the browser. If GrabLine is
-  closed or rejects a handoff, the original browser response proceeds normally.
+**Firefox:** use the signed
+[Mozilla Add-ons listing](https://addons.mozilla.org/en-US/firefox/addon/grabline-connect/).
+For temporary development testing, select `extension/manifest.json` in Firefox's
+temporary-add-on loader. A temporary add-on is removed when Firefox restarts.
 
-It talks to the desktop app over Native Messaging only: the browser launches
-GrabLine's host process and pipes JSON over stdio. There is no localhost
-server and no open port, and the host manifests pin the extension IDs allowed
-to connect.
+**Chromium development:** open the browser's extension manager, enable Developer
+mode and load this repository's `extension/` folder. The source manifest contains
+a key for a stable unpacked identity. Store-targeted release ZIPs omit that key,
+so unpacking a store ZIP is not equivalent to loading this source folder.
 
-## Pairing (two steps)
+In the desktop app, use Settings → Browser Integration → **Pair browsers**.
+For intentional source pairing, from the environment containing this checkout:
 
-1. **Register the native host** - in the GrabLine app: **Settings → Pair
-   browsers** (one click, covers Chrome/Chromium/Edge/Brave/Vivaldi/Opera/Arc/Firefox on
-   Windows, macOS, and Linux). Terminal alternative:
-
-   ```bash
-   python -m app.native_host.install
-   ```
-
-2. **Load the extension:**
-   - **Chrome / Edge / Brave:** `chrome://extensions` → enable *Developer
-     mode* → *Load unpacked* → select this `extension/` folder. The manifest
-     pins a stable ID, so pairing works no matter where the folder lives.
-   - **Firefox:** `about:debugging#/runtime/this-firefox` → *Load Temporary
-     Add-on* → select `extension/manifest.json` (session-only; see below for
-     the permanent install).
-
-Open the toolbar popup: it should say **connected**. If it says *not paired*,
-re-run step 1 and reload the extension. If it says *app not running*, that's
-fine - handed-off URLs queue in the database and the app picks them up the
-moment it starts.
-
-### How permanent is this?
-
-- **Chrome / Edge / Brave:** an unpacked extension **survives restarts** -
-  it stays installed until you remove it. The only cost is the "developer
-  mode" reminder on the extensions page. Fully permanent, banner-free
-  installs come with Chrome Web Store publication (kit in
-  [docs/store-listing.md](../docs/store-listing.md)).
-- **Firefox:** temporary add-ons are wiped on every restart - that's a
-  Firefox rule for unsigned extensions, not something GrabLine can change.
-  The fix is free and doesn't require a public listing: upload
-  `dist/grabline-connect-firefox-*.zip` to addons.mozilla.org as
-  **unlisted** (Submit New Add-on → "On your own"), and AMO's automated
-  review signs it within minutes. The signed `.xpi` it gives back installs
-  permanently in normal Firefox (drag it onto the browser). Re-sign each
-  new version the same way.
-
-## How a URL travels
-
+```sh
+python -m app.native_host.install
 ```
-right-click / hover button / popup → background.js → Native Messaging host
-    → handoffs table (SQLite) → desktop app polls → resolver
-    → Download Info dialog → the queue
+
+Registration changes which local host this browser invokes. Pair the intended
+source/installed copy, keep its path stable and reload the extension after edits.
+The native host allow-list must include the extension's actual identity; do not
+relax it to accept arbitrary extensions.
+
+Open the popup to inspect status. **Connected** means the host sees the app;
+**app not running** means the host answers but the GUI is closed; **not paired**
+means native-host discovery/registration failed. Explicit download handoffs can
+queue for next launch, while takeover requires a running app. Open GrabLine/Open
+Settings focuses a running app; launch it first if it is closed.
+
+## Actions and preferences
+
+- Popup: Open GrabLine, Open Settings, Grab This Tab, paste/send a URL, detected
+  media and recent downloads.
+- Hover: video/audio buttons, opt-in image buttons, master/per-site switches,
+  four corner positions and progress display.
+- Context menu: send a link/image/media/page or selected URLs; collect images
+  or links into the app's selection dialog before Download All.
+- Media discovery: list response-derived files and HLS/DASH streams for the tab.
+  Discovery is not a guarantee that a protected or expired stream will download.
+
+## Download takeover
+
+Takeover is on by default and can be disabled in the popup.
+
+| Browser | Behaviour |
+| --- | --- |
+| Chromium | Pauses an eligible browser download, hands it to the running app and retains a browser fallback while the desktop transfer runs. Recovery follows the implemented job/browser state. |
+| Firefox | Intercepts eligible attachment/binary responses before a browser download item is created; after acceptance, retries/failures remain in the desktop app. |
+
+Browser-generated blobs, POST exports, assistant-generated files and supported
+browser-verification exclusions remain in the browser. If the app is unavailable
+or rejects an automatic handoff, the browser download remains responsible for
+the response. Test recovery in the actual browser; a simulated API success is
+not proof of a recovered file.
+
+## How the bridge works
+
+```text
+page/popup/context menu
+  → background.js
+  → length-prefixed JSON over Native Messaging stdio
+  → local host validation
+  → SQLite handoffs
+  → desktop resolver, Download Info and queue
 ```
+
+There is no listening localhost server. The native host validates message size,
+schemes, fields and header contents. Progress/recent state is read from the
+app's database. While tracking a handoff, the background script keeps a native
+port and polls for status; this is distinct from pointer-driven hover handling.
+See [Privacy](../PRIVACY.md) for cookies and retained local request headers.
 
 ## Site modules
 
-A site module is a ~25-line matcher: hovered element in, `{anchor, url}`
-out. The shared machinery - the shadow-root button, the show dwell, the
-"keep the button alive while an inline preview player covers the thumbnail"
-logic - lives once in `content/sites/button.js`.
+Shared button machinery lives in `content/sites/button.js`. Dedicated selectors
+and canonical URL logic are in:
 
-- **youtube.js** - hover the button on video thumbnails (home, search, channels,
-  Shorts shelf) *and on the player itself* on watch/Shorts pages; both hand
-  the watch URL to the app, which opens its Download Info dialog. Also covers
-  **YouTube Music** (song links and the bottom player bar - MP3 is one hover
-  and one click away). The generic overlay stands back on YouTube entirely.
-- **vimeo.js** - hover the button on links to `vimeo.com/<id>` videos (also
-  player.vimeo.com embeds via `all_frames`).
-- **x.js** - hover the button on videos inside tweets; sends the tweet's
-  permalink (timeline videos are blob-backed, so the permalink is the only
-  URL worth handing over).
-- **soundcloud.js** - hover the button on the bottom play bar (whatever is
-  playing now) and on track titles in lists; sends the track's permalink,
-  never the browse page you happen to be on.
-- **reddit.js** - hover the button on shreddit-player / post media (including
-  Shadow DOM video and YouTube link-post thumbnails); sends the post
-  permalink so yt-dlp can resolve the real file.
-- **dailymotion.js** - hover on `/video/<id>` links and inside the
-  geo.dailymotion.com player iframe (`all_frames`); sends the canonical
-  watch URL.
+| Module | Target |
+| --- | --- |
+| `youtube.js` | Watch pages, thumbnails, Shorts and YouTube Music |
+| `vimeo.js` | Video links and supported player embeds |
+| `x.js` | Video tweet permalinks |
+| `soundcloud.js` | Track titles and the current player |
+| `instagram.js` | Supported post/reel permalinks |
+| `reddit.js` | Post media, including supported open Shadow DOM |
+| `dailymotion.js` | Video links and supported player frames |
 
-The generic overlay also runs in every frame (`all_frames`) and walks open
-Shadow DOM so HTML5 players that hide `<video>` in web components still get
-a button on sites without a dedicated module.
+The generic overlay handles HTML5 media, permitted frames and open Shadow DOM.
+Browser-restricted pages cannot run normal content scripts. Site DOM changes,
+accounts and region/bot checks remain external dependencies; controlled selector
+fixtures do not certify live-site downloads.
 
-Every selector lives at the top of its module; when a site's DOM churns,
-that one file is the whole blast radius, and right-click + paste keep
-working regardless.
+## Verify a change
 
-## Tests
+From the repository root:
 
-The pure logic (byte formatting, stream naming, button positioning) is covered
-by Deno tests that load each `content/lib/*.js` module in isolation:
-
-```
-deno test --allow-read extension/test/
+```sh
+deno test --allow-read extension/test
 ```
 
-Anything touching the DOM, `chrome.*`/`browser.*`, or the MV3 lifecycle still
-needs a manual pass: load the unpacked extension in **both** Firefox and Chrome
-and exercise the sniffer, hover button (generic + site modules), the app's
-Download Info dialog, context menus, interception, gallery/links/selection grab,
-progress pill, and popup.
+The Deno suite tests isolated JavaScript logic. Real browser/GUI cases live in
+the [Windows QA harness](../scripts/windows_qa/README.md): popup actions,
+preferences/restarts, collections, overlays, takeover, recovery and progress.
+Use disposable profiles with a matching app/native-host database and fresh
+fixture URLs. Inspect console/worker logs, jobs and final file hashes.
 
-## Publishing to the stores
+An actual toolbar popup and `chrome-extension://.../popup/popup.html` opened
+as a tab are separate testing levels. Keep Firefox and Chromium results separate.
+The [testing guide](../docs/testing.md) records release evidence and limits.
 
-`python scripts/package_extension.py` builds store-ready zips for Chrome
-and Firefox (each store wants a slightly different manifest); the listing
-text, permission justifications, and reviewer notes are prewritten in
-[docs/store-listing.md](../docs/store-listing.md).
+## Package and publish
 
-## How the progress pill works
+```sh
+python scripts/package_extension.py --out dist
+```
 
-The background script keeps a persistent Native Messaging port open while the
-downloads it started are running, asks the host for status once a second, and
-the host answers from the app's SQLite jobs table. The open port also keeps
-the MV3 service worker alive for exactly as long as there is something to
-report.
+The script creates Chrome and Firefox ZIPs with target-specific manifests,
+removing the source identity key and unsupported browser-specific fields or
+permissions. AMO signing/store submission is a separate operation; the Firefox
+ZIP is not itself a permanently signed add-on. Before publishing, verify the
+actual assigned extension ID against the desktop allow-list and test pairing.
+See the [store listing kit](../docs/store-listing.md) and
+[release process](../RELEASING.md).

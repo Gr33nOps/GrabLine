@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible GrabLine or GrabLine Connect problem.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the troubleshooting guide and existing issues first.
+        Do not post passwords, cookies, API keys, private URLs, databases or raw dumps.
+        Report exploitable security issues privately using SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: App and extension versions
+      description: Include both versions if the browser is involved.
+      placeholder: "GrabLine 1.32.15; GrabLine Connect 1.32.15"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and installation
+      description: OS/version, architecture, installed/portable/source; browser/version if relevant.
+      placeholder: "Windows 11 x64, portable; Chrome"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Give exact steps and a public or synthetic sample when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour and error
+      description: Include whether the problem also occurs in the desktop app without the extension.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized diagnostics or screenshots
+      description: Review Settings → About → Copy diagnostics and relevant log excerpts before posting. Remove secrets and unrelated history.

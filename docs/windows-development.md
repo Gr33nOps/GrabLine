@@ -1,95 +1,96 @@
 # Windows development and QA
 
-The development checkout is `D:\Projects\app dev\GrabLine`, on branch `dev`.
-Its `.venv` is the application environment. Keep synthetic QA history and browser
-profiles outside that checkout; the normal user database is under
-`%LOCALAPPDATA%\Grabline`.
+Use Python 3.12 and PowerShell. On the configured development PC the checkout is
+`D:\Projects\app dev\GrabLine`, branch `dev`; its `.venv` is the application
+environment. On another machine choose any writable checkout path.
 
-From PowerShell in the checkout:
+## Set up and run
+
+For a new checkout, follow [Contributing](../CONTRIBUTING.md). For the existing
+PC checkout:
 
 ```powershell
+Set-Location 'D:\Projects\app dev\GrabLine'
+git status --short --branch
+git fetch origin
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\.venv\Scripts\python.exe -m app
+```
+
+Only create the environment when it is missing:
+
+```powershell
+py -3.12 -m venv .venv
+```
+
+No activation or PowerShell execution-policy change is required. Do not run
+`git reset --hard` or overwrite another contributor's work to update a checkout.
+
+## Verify a change
+
+```powershell
 .\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format --check .
 .\.venv\Scripts\python.exe -m mypy app --platform linux
-```
-
-The explicit mypy platform matches the existing CI target. It does not claim
-that Linux-only branches were executed on Windows.
-
-For the Windows suite, first set a dedicated data directory and supply verified
-FFmpeg, FFprobe and 7-Zip executables on PATH:
-
-```powershell
-$env:QT_QPA_PLATFORM = 'offscreen'
-$env:LOCALAPPDATA = Join-Path $env:TEMP 'grabline-unit-profile'
-.\.venv\Scripts\python.exe -m pytest -m 'not network' --timeout=90 --timeout-method=thread -p no:cacheprovider
-```
-
-Use a fresh terminal to return to the normal desktop profile, or remove the two
-environment overrides before launching the app normally. Do not test against a
-personal database. Network-marked tests and external service accounts require
-their own explicit evidence and are not certified by this local suite.
-
-The extension tests use the installed Deno executable:
-
-```powershell
 deno test --allow-read extension/test
 ```
 
-See [the Windows audit harness](../scripts/windows_qa/README.md) for real browser,
-native GUI, local authenticated services, media validation, resumable cases,
-packaging and the one-hour soak. The disposable guest package is separate.
+The mypy platform is the existing CI target. It does not imply execution of
+Linux-only branches on Windows. [Testing](testing.md) contains the isolated
+full-suite command and explains platform skips and public-network exclusions.
 
-Before editing, inspect `git status` and fetch `origin`. Review a change with
-`git diff`; run the affected reproduction and required checks before committing.
-Push the reviewed commit to `origin dev`. Publishing a release or tag is a
-separate action.
+## Tools and profiles
 
-Native-host registration points to the development launcher and its source.
-When testing an isolated source revision, the harness uses a startup path override
-for its own child processes. It does not replace normal browser registration.
-For normal extension development, reload the unpacked extension after a change;
-browser restart alone can retain installed script caches. Audit profiles are
-keyed to an extension source hash and verify the running handoff function.
+| Tool | Needed for |
+| --- | --- |
+| FFmpeg and FFprobe | Media generation, merging/conversion and output inspection |
+| Deno | Extension tests and applicable yt-dlp JavaScript extraction |
+| 7-Zip (`7z`) | External archive extraction checks, including RAR/7Z |
+| PyInstaller and Pillow | Local native packaging and icons |
+| Playwright, pywinauto and pywin32 | Opt-in real browser / Windows GUI audit |
 
-The November 2026 Windows audit adds reproducible local-service/browser/Qt QA
-commands and regression fixes. Its full suite reached 990 passing tests, with
-14 POSIX-only skips and 15 public-network tests excluded; the extension suite
-reached 42 passes. Separate public samples, local authenticated transfers and
-packaged smoke tests are recorded by the audit harness.
+Check installed tools before dependent cases:
 
-The initial native 0xC0000005 observation was subsequently reproduced in the
-all-thread traceback dumper. Windows now logs the faulting thread only; three
-cold-start/native-accessibility repetitions passed through the corrected entry
-point. This addresses the reproduced crash path, not every possible native fault.
-Do not interpret the test counts as complete native-GUI or external-provider
-certification. Current blockers and exact build/source identities belong in the
-generated audit ledger.
+```powershell
+Get-Command ffmpeg, ffprobe, deno, 7z -ErrorAction SilentlyContinue
+```
 
+Keep QA databases, downloads and browser profiles outside the source checkout.
+The normal database lives under `%LOCALAPPDATA%\Grabline`; never point a test
+at personal history. Both app and native host must use the same isolated data
+directory and source revision. The `.venv` launcher PID may differ from the
+actual Python child owning the app window.
 
-For an exhaustive settings pass, use the settings commands in the audit harness.
-They inventory every exposed field, click Save, reopen against a fresh database
-connection, check Cancel, exercise maintenance actions and verify runtime effects.
-Do not equate a stored setting with its physical effect: startup/power actions
-need the disposable VM, API integrations need test keys, and battery/router
-behaviour needs the corresponding hardware. Logging is applied on next launch.
-Settings imports now reload the visible fields and live consumers immediately;
-Reset also reloads shortcut editors, and RSS/watch intervals update on Save.
+## Browser development
 
-The follow-up settings pass reached 993 passing Windows tests (14 POSIX-only
-skips, 15 public-network cases excluded) and 42 extension passes. All 150 exposed
-controls passed changed-value Save/reopen/Cancel checks. This verifies the stated
-Qt/local scopes; unavailable physical/VM/provider effects remain separate.
+Use [GrabLine Connect's pairing guide](../extension/README.md). Register a source
+host only when intentionally pairing this development checkout; doing so changes
+the browser's normal host registration. Reload the unpacked extension after code
+changes and check the loaded source/version. Browser restart alone may retain
+cached installed scripts.
 
-The remaining-effects follow-up reached 1,006 passing Windows tests, with the same
-14 platform skips and 15 public-network exclusions, plus 42 extension passes.
-It also corrected malformed VirusTotal/Safe Browsing success-response handling;
-real invalid-key calls were checked separately. The final package passed its
-native-host checksum smoke test and isolated Windows Sandbox installer, startup
-registration, update handoff/cancel/bad-hash, uninstall and queue-action checks.
-Sandbox does not preserve login/reboot state; a persistent disposable VM is still
-required for those cases. Physical battery, router mappings, human audibility,
-visible Windows toasts and valid-key service checks retain separate results.
-See the remaining-effects commands in the harness guide for reproduction.
+The [Windows QA harness](../scripts/windows_qa/README.md) uses disposable profiles
+and explicit child-process overrides. Start its fixture server on a fresh dynamic
+port and read the generated manifest; old localhost addresses are not reusable.
+Allow only one test to control desktop input at a time.
+
+## Review, commit and publish
+
+Review `git diff`, run the affected checks, then commit and push the topic branch
+or reviewed `dev` change. Changes on `main` need the normal CI/Pages workflow.
+Installer publication is a separate versioned action described in
+[RELEASING.md](../RELEASING.md); do not create a tag for a documentation update.
+
+## Evidence and known limits
+
+The [testing guide](testing.md) records the 1.32.15 release baseline and links
+its CI/build runs. Settings coverage distinguishes all 150 editable controls in
+19 sections from physical OS/provider effects. Save/reopen/Cancel assertions do
+not prove a power transition, audible sound, visible toast or authenticated
+external service.
+
+Windows crash logging retains the faulting thread's native trace, avoiding the
+all-thread dumper crash reproduced during the audit. This corrects that observed
+path, not every possible native failure. Use the harness's individual results and
+keep guest-only actions in a [disposable VM](../scripts/windows_qa/guest/README.md).

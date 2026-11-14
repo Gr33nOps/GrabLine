@@ -7,8 +7,8 @@ rights are needed, so this build also works from a USB stick.
 First launch
 ------------
 Windows does not recognise the publisher, because this build is not code
-signed. SmartScreen shows "Windows protected your PC". Click "More info",
-then "Run anyway". You only see this once per version.
+signed. Review any Windows reputation/signing prompt and verify the downloaded
+package against SHA256SUMS.txt from the release. Do not disable OS protection.
 
 Browser extension
 -----------------
@@ -19,13 +19,18 @@ paired, open Settings > Browser Integration and use "Pair browsers".
 What this build does not do
 ---------------------------
 A portable copy does not create Start menu or desktop shortcuts, does not
-register magnet links or .torrent files, and does not offer to start with
-Windows. Use the installer (Grabline-Setup-<version>.exe) if you want those.
+register magnet links or .torrent files through an installer. Startup settings
+and browser pairing can still create per-user integration. Keep this folder's
+path stable after pairing. Use Grabline-Setup-<version>.exe for installer tasks.
 
 Your data
 ---------
 Settings, the download list and statistics live in:
     %LOCALAPPDATA%\Grabline
 
-Downloads go to your Downloads folder unless you change it in Settings.
-Deleting this folder removes the program but not your data or downloads.
+Downloads default to %USERPROFILE%\Downloads\Grabline unless changed in Settings.
+Deleting this program folder does not remove your data, downloads, keyring
+secrets or necessarily browser/startup registration. Remove those integrations
+deliberately if retiring the app. This is not a portable data profile.
+
+Documentation: https://github.com/Gr33nOps/GrabLine/blob/main/docs/README.md
