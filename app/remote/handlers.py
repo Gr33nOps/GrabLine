@@ -413,6 +413,10 @@ class RemoteHandlers:
 
     # --------------------------------------------------------------- queues
 
+    def _h_subscribe(self, _device: str, _f: dict[str, Any]) -> dict[str, Any]:
+        # The listener keeps the topic set and fills in ``topics``.
+        return {"type": "subscribed", "state": self.global_state()}
+
     def _h_queues(self, _device: str, _f: dict[str, Any]) -> dict[str, Any]:
         return {
             "type": "queues",
