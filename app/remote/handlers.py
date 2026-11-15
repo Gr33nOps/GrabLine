@@ -13,6 +13,8 @@ issued (``app.remote.folders``), jobs are ids from the PC's own database.
 from __future__ import annotations
 
 import logging
+import mimetypes
+import os
 import re
 import time
 from collections.abc import Callable
@@ -26,7 +28,8 @@ from app.core import instance
 from app.core.mediaurl import captured_video_page
 from app.core.models import Job, JobKind, JobStatus
 from app.native_host import host
-from app.remote import folders
+from app.remote import fetch, folders
+from app.remote.outbox import Outbox
 from app.remote.schema import QUALITIES, Request, RequestError, encode_cursor
 
 if TYPE_CHECKING:
@@ -111,6 +114,7 @@ def job_object(
     live: LiveFigures,
     *,
     request_id: str | None,
+    fetchable: bool = False,
 ) -> dict[str, Any]:
     downloading = job.status is JobStatus.DOWNLOADING
     name = job.title or job.filename or ""
@@ -129,7 +133,7 @@ def job_object(
         "finishedAt": _unix(updated) if job.status in _FINAL else None,
         "error": strip_paths(job.error) if job.status is JobStatus.FAILED else None,
         "requestId": request_id,
-        "fetchable": False,
+        "fetchable": fetchable,
     }
 
 
@@ -160,6 +164,12 @@ class RemoteHandlers:
         self._clock = clock
         self._recent: dict[tuple[str, str, str | None, int | None, str | None], tuple[float, int]]
         self._recent = {}
+        self.outbox = Outbox(self._db)
+        self._hasher = fetch.FileHasher()
+
+    def close(self) -> None:
+        """Stop background hashing (app exit)."""
+        self._hasher.close()
 
     # ------------------------------------------------------------ dispatch
 
@@ -168,6 +178,9 @@ class RemoteHandlers:
         try:
             if request.type == "analyze":
                 self._do_analyze(request.fields, respond, fail)
+                return
+            if request.type == "fileHash":
+                self._do_hash(request.fields, respond, fail)
                 return
             method = getattr(self, "_h_" + request.type, None)
             if method is None:
@@ -312,7 +325,109 @@ class RemoteHandlers:
             updated,
             self._live(job.id),
             request_id=self._log.request_for_job(job.id, device),
+            fetchable=self._file_of(job) is not None,
         )
+
+    # ---------------------------------------------------- files and outbox
+
+    @staticmethod
+    def _file_of(job: Job) -> os.stat_result | None:
+        """The stat of a completed job's one regular output file, else None."""
+        if job.status is not JobStatus.COMPLETED or not job.filename:
+            return None
+        return fetch.regular_file(job.dest_path)
+
+    def _h_files(self, _device: str, f: dict[str, Any]) -> dict[str, Any]:
+        after = f.get("after")
+        wanted: list[tuple[Job, os.stat_result]] = []
+        more = False
+        for job in sorted(self._db.list_jobs(), key=lambda j: j.id, reverse=True):
+            if job.status is not JobStatus.COMPLETED or (after is not None and job.id >= after):
+                continue
+            info = self._file_of(job)
+            if info is None:
+                continue
+            if len(wanted) == f["limit"]:
+                more = True
+                break
+            wanted.append((job, info))
+        files = []
+        for job, info in wanted:
+            _created, updated = self._db.job_timestamps(job.id)
+            files.append(
+                {
+                    "jobId": job.id,
+                    "name": strip_paths(job.filename, 512) or "",
+                    "size": info.st_size,
+                    "finishedAt": _unix(updated) or int(info.st_mtime),
+                    "mime": mimetypes.guess_type(job.filename)[0],
+                }
+            )
+        return {
+            "type": "files",
+            "files": files,
+            "nextCursor": encode_cursor(wanted[-1][0].id) if (wanted and more) else None,
+        }
+
+    def _servable(self, job_id: int) -> tuple[Job, os.stat_result]:
+        job = self._db.get_job(job_id)
+        if job is None:
+            raise RequestError("notFound", "no such job")
+        if job.status is not JobStatus.COMPLETED:
+            raise RequestError("conflict", "the download is not finished")
+        info = self._file_of(job)
+        if info is None:
+            raise RequestError("notFound", "the file is gone")
+        return job, info
+
+    def _h_fetch(self, _device: str, f: dict[str, Any]) -> dict[str, Any]:
+        job, info = self._servable(f["jobId"])
+        size = info.st_size
+        etag = fetch.etag_of(info)
+        if f.get("etag") is not None and f["etag"] != etag:
+            raise RequestError("conflict", "the file changed")
+        offset: int = f["offset"]
+        if offset > size:
+            raise RequestError("conflict", "offset is past the end")
+        length = size - offset if f.get("length") is None else min(f["length"], size - offset)
+        ticket = fetch.FileTicket(str(job.dest_path), size, etag, offset, length, job.id)
+        # The listener thread removes ``_open`` and adds ``streamId``.
+        return {
+            "type": "fetchStart",
+            "jobId": job.id,
+            "name": strip_paths(job.filename, 512) or "",
+            "size": size,
+            "offset": offset,
+            "length": length,
+            "etag": etag,
+            "chunkSize": fetch.CHUNK_SIZE,
+            "windowBytes": fetch.WINDOW_BYTES,
+            "_open": ticket,
+        }
+
+    def _do_hash(self, f: dict[str, Any], respond: Responder, fail: Failer) -> None:
+        job, info = self._servable(f["jobId"])
+        size, mtime = info.st_size, int(info.st_mtime)
+        etag = fetch.etag_of(info)
+        path = str(job.dest_path)
+
+        def done(digest: str | None) -> None:
+            if digest is None:
+                fail(RequestError("conflict", "the file changed or is gone"))
+                return
+            respond(
+                {"type": "fileHash", "jobId": job.id, "size": size, "etag": etag, "sha256": digest}
+            )
+
+        if not self._hasher.submit(path, size, mtime, done):
+            raise RequestError("rateLimited", "busy", retryAfterMs=2000)
+
+    def _h_outbox(self, device: str, _f: dict[str, Any]) -> dict[str, Any]:
+        items = self.outbox.items_for(device)
+        return {"type": "outbox", "items": [item.as_wire() for item in items]}
+
+    def _h_outboxAck(self, device: str, f: dict[str, Any]) -> dict[str, Any]:
+        return {"type": "ok", "removed": self.outbox.ack(device, f["itemIds"])}
 
     def _h_jobs(self, device: str, f: dict[str, Any]) -> dict[str, Any]:
         statuses = _FILTERS[f["filter"]]

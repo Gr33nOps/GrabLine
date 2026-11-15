@@ -1087,6 +1087,32 @@ class MainWindow(QMainWindow):
             return
         self._remote_service = service
 
+    def _add_send_to_phone_menu(self, menu: QMenu) -> dict[QAction, str | None]:
+        """A "Send to phone" submenu: one entry per paired phone plus "Any
+        phone". Returns action -> device id (None = any phone)."""
+        service = self._remote_service
+        phones = service.store.list() if service is not None else []
+        send_menu = menu.addMenu(t("Send to phone"))
+        send_menu.setEnabled(bool(phones))
+        actions: dict[QAction, str | None] = {}
+        if not phones:
+            send_menu.setToolTip(t("Pair a phone in Settings"))
+            return actions
+        for device in phones:
+            actions[send_menu.addAction(device.name)] = device.device_id
+        send_menu.addSeparator()
+        actions[send_menu.addAction(t("Any phone"))] = None
+        return actions
+
+    def _send_to_phone(self, device_id: str | None, view: JobView) -> None:
+        service = self._remote_service
+        if service is None:
+            return
+        queued = service.queue_for_phone(device_id, view.url, view.display_name)
+        self.statusBar().showMessage(
+            t("Sent to your phone") if queued else t("This link cannot be sent to a phone"), 3000
+        )
+
     def _phone_adder(self) -> remote_add.UnattendedAdder:
         if self._remote_adder is None:
             self._remote_adder = remote_add.UnattendedAdder(
@@ -2334,6 +2360,7 @@ class MainWindow(QMainWindow):
         copy_magnet = menu.addAction(t("Copy magnet link"))
         copy_magnet.setVisible(view.kind is JobKind.TORRENT)
         redownload = menu.addAction(t("Download again"))
+        send_actions = self._add_send_to_phone_menu(menu)
         # Convert to… - every FFmpeg target that makes sense for this file,
         # grouped Video / Audio / Image, plus the tuned GIF dialog.
         ffmpeg_path = find_ffmpeg(self.settings)
@@ -2434,6 +2461,8 @@ class MainWindow(QMainWindow):
             self._copy_magnet(view)
         elif chosen is redownload:
             self.begin_add_url(view.url, allow_duplicate=True)
+        elif chosen in send_actions:
+            self._send_to_phone(send_actions[chosen], view)
         elif to_gif is not None and chosen is to_gif and ffmpeg_path is not None:
             GifDialog(ffmpeg_path, file_path, self).exec()
         elif chosen in convert_actions and ffmpeg_path is not None:

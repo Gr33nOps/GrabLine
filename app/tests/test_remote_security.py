@@ -133,7 +133,7 @@ WIRE_TESTS = {
     "invalid/oversize.marker.json": "test_fixture_oversize_two_megabyte_frame",
     "invalid/notJson.marker.json": "test_fixture_not_json",
     "invalid/flood.marker.json": "test_fixture_flood_100_a_second_for_3_seconds",
-    "invalid/fetch.unfinishedJob.json": "test_fixture_fetch_is_not_served_in_phase_1",
+    "invalid/fetch.unfinishedJob.json": "test_fixture_fetch_unfinished_job",
     "fetch.ack.json": "test_fixture_fetch_ack_gets_no_reply",
 }
 
@@ -558,29 +558,27 @@ def test_fixture_flood_100_a_second_for_3_seconds(rig: Rig) -> None:
     assert other.status == 101
 
 
-def test_fixture_fetch_is_not_served_in_phase_1(rig: Rig) -> None:
-    """``invalid/fetch.unfinishedJob.json`` expects ``conflict`` from a PC that
-    serves ``fetch`` (Phase 4). This PC's ``authOk.features`` has no ``fetch``,
-    and section 10 then requires ``unsupported``; nothing reaches the GUI."""
+def test_fixture_fetch_unfinished_job(env: Env, tmp_path: Path) -> None:
+    """``invalid/fetch.unfinishedJob.json`` (QA-40): a job that is still
+    downloading is never served. The fixture's job 41 is the one made here."""
     fixture = load("invalid/fetch.unfinishedJob.json")
     assert fixture["expectError"] == "conflict"
-    phone, pin = rig.paired_phone()
-    client, nonce = rig.hello(pin)
-    client.send(phone.auth_request(pin, nonce))
-    assert "fetch" not in client.message()["features"]
-    client.send(fixture["message"])
-    reply = client.message()
-    assert reply["id"] == fixture["message"]["id"] and reply["code"] == "unsupported"
-    settle(0.1)
-    assert rig.gui.requests == []
+    _phone, _pin, client = service_login(env)
+    job = env.db.create_job(URL, str(env.dest), "running.bin")
+    env.db.set_job_status(job.id, JobStatus.DOWNLOADING, None)
+    (env.dest / "running.bin").write_bytes(b"x" * 100)
+    reply = ask(client, {**fixture["message"], "jobId": job.id})
+    assert reply["id"] == fixture["message"]["id"] and reply["code"] == "conflict"
+    assert not [f for f in client.frames if f[0] == wire.OP_BINARY]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="PROTOCOL.md sections 2 and 9: fetchAck is a notification (no id, no reply, not "
-    "charged to the bucket). listener.py _authed() runs it through schema.validate, which "
-    "raises badRequest for the missing id, so the phone gets an error reply and pays a token.",
-)
+def test_fixture_fetch_path(env: Env) -> None:
+    fixture = load("invalid/fetch.path.json")
+    _phone, _pin, client = service_login(env)
+    reply = ask(client, fixture["message"])
+    assert reply["id"] == fixture["message"]["id"] and reply["code"] == fixture["expectError"]
+
+
 def test_fixture_fetch_ack_gets_no_reply(rig: Rig) -> None:
     fixture = load("fetch.ack.json")
     assert "id" not in fixture["message"]

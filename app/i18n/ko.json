@@ -920,5 +920,10 @@
   "Remove {name}? It will stop working at once.": "{name}을(를) 제거할까요? 즉시 작동이 중지됩니다.",
   "Scan this code with GrabLine on your phone.": "휴대폰의 GrabLine으로 이 코드를 스캔하세요.",
   "This PC isn't on a private network.": "이 PC는 사설 네트워크에 연결되어 있지 않습니다.",
-  "Too many wrong codes. Show a new code.": "잘못된 코드가 너무 많습니다. 새 코드를 표시하세요."
+  "Too many wrong codes. Show a new code.": "잘못된 코드가 너무 많습니다. 새 코드를 표시하세요.",
+  "Any phone": "모든 휴대폰",
+  "Pair a phone in Settings": "설정에서 휴대폰을 페어링하세요",
+  "Send to phone": "휴대폰으로 보내기",
+  "Sent to your phone": "휴대폰으로 보냈습니다",
+  "This link cannot be sent to a phone": "이 링크는 휴대폰으로 보낼 수 없습니다"
 }

@@ -920,5 +920,10 @@
   "Remove {name}? It will stop working at once.": "Удалить {name}? Он сразу перестанет работать.",
   "Scan this code with GrabLine on your phone.": "Отсканируйте этот код в GrabLine на телефоне.",
   "This PC isn't on a private network.": "Этот ПК не находится в частной сети.",
-  "Too many wrong codes. Show a new code.": "Слишком много неверных кодов. Покажите новый код."
+  "Too many wrong codes. Show a new code.": "Слишком много неверных кодов. Покажите новый код.",
+  "Any phone": "Любой телефон",
+  "Pair a phone in Settings": "Свяжите телефон в настройках",
+  "Send to phone": "Отправить на телефон",
+  "Sent to your phone": "Отправлено на ваш телефон",
+  "This link cannot be sent to a phone": "Эту ссылку нельзя отправить на телефон"
 }

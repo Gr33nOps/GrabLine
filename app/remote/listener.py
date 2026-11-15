@@ -72,9 +72,11 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import secrets
 import socket as _socket
 import ssl
+import stat
 import threading
 import time
 from collections import deque
@@ -87,7 +89,7 @@ from PySide6.QtNetwork import QAbstractSocket, QHostAddress, QNetworkInformation
 
 from app import __version__
 from app.native_host.host import PROTOCOL_VERSION
-from app.remote import addresses, certs, schema, wire
+from app.remote import addresses, certs, fetch, schema, wire
 from app.remote.devices import DeviceStore, b64url_encode, clean_device_name
 from app.remote.pairing import (
     APPROVAL_TIMEOUT_SECONDS,
@@ -118,7 +120,17 @@ LINGER_S = 1.0  # how long a closed connection may take to go away
 MAX_TLS_HANDSHAKE_BYTES = 65536
 EVENT_BACKLOG_BYTES = 1_048_576  # unsent bytes above which events are skipped
 MAX_BACKLOG_BYTES = 8 * 1_048_576  # unsent bytes above which the peer is dropped
-DEFAULT_FEATURES = ("jobs", "control", "global", "queues", "analyze", "events")
+DEFAULT_FEATURES = (
+    "jobs",
+    "control",
+    "global",
+    "queues",
+    "analyze",
+    "events",
+    "files",
+    "fetch",
+    "outbox",
+)
 
 CLOSE_MALFORMED = 4400
 CLOSE_UNAUTHORIZED = 4401
@@ -163,6 +175,23 @@ def _dumps(message: dict[str, Any]) -> str | None:
     return text if size <= FRAME_LIMIT else None
 
 
+class _Stream:
+    """One ``fetch`` in progress on a connection: the open file and the
+    flow-control counters (all absolute file offsets)."""
+
+    def __init__(self, stream_id: int, handle: Any, ticket: fetch.FileTicket, now: float) -> None:
+        self.id = stream_id
+        self.file = handle
+        self.end = ticket.offset + ticket.length
+        self.next = ticket.offset  # first byte not yet queued
+        self.acked = ticket.offset  # first byte the phone has not confirmed
+        self.last_ack = now
+
+    def close(self) -> None:
+        with contextlib.suppress(OSError):
+            self.file.close()
+
+
 class _Channel(QObject):
     """One accepted connection: TCP socket, TLS state, WebSocket framing and
     the protocol state the listener keeps for it. Listener thread only."""
@@ -198,7 +227,12 @@ class _Channel(QObject):
         self.gap = False
         self.sent_at: deque[float] = deque()
         self.deferred: dict[tuple[str, object], dict[str, Any]] = {}
+        self.stream: _Stream | None = None
+        self.stream_seq = 0
+        self.ack_times: deque[float] = deque()
+        self.pumping = False
         sock.readyRead.connect(self._on_ready_read)
+        sock.bytesWritten.connect(self._on_bytes_written)
         sock.disconnected.connect(self._on_disconnected)
 
     # ----------------------------------------------------------- reading
@@ -235,6 +269,11 @@ class _Channel(QObject):
             self._flush()
         except (ssl.SSLError, OSError, ValueError):
             self.abort()
+
+    @Slot()
+    def _on_bytes_written(self) -> None:
+        if self.stream is not None:
+            self._owner.channel_writable(self)
 
     def _plain(self, chunk: bytes) -> None:
         if self.stage == "open":
@@ -287,6 +326,17 @@ class _Channel(QObject):
 
     def set_frame_limit(self, limit: int) -> None:
         self._parser.max_message = limit
+
+    def send_binary(self, payload: bytes) -> bool:
+        if self.stage != "open":
+            return False
+        try:
+            self._tls.write(wire.encode_frame(wire.OP_BINARY, payload))
+            self._flush()
+        except (ssl.SSLError, OSError, ValueError):
+            self.abort()
+            return False
+        return True
 
     def send_text(self, text: str) -> bool:
         if self.stage != "open":
@@ -751,6 +801,9 @@ class RemoteListener(QObject):
             self._tokens.pop(token, None)
         channel.pending.clear()
         channel.deferred.clear()
+        if channel.stream is not None:
+            channel.stream.close()
+            channel.stream = None
         if channel.topics:
             channel.topics.clear()
             self._count_subscribers()
@@ -1110,6 +1163,9 @@ class RemoteListener(QObject):
         device_id = channel.device_id
         if device_id is None:
             return
+        if isinstance(message, dict) and message.get("type") == "fetchAck":
+            self._ack(channel, message)  # a notification: no reply, no token
+            return
         limiter = self._limiters.setdefault(device_id, DeviceLimiter())
         request_id = schema.request_id(message)
         request: schema.Request | None = None
@@ -1158,6 +1214,10 @@ class RemoteListener(QObject):
             )
         elif kind == "unpair":
             self._unpair(channel, request.id)
+        elif kind == "fetchCancel":
+            self._cancel_stream(channel, request)
+        elif kind == "fetch" and self._streams_busy(channel, device_id):
+            self._send_error(channel, request.id, "conflict", "a transfer is already running")
         else:
             if kind == "subscribe":
                 channel.topics = set(request.fields["topics"])
@@ -1174,6 +1234,135 @@ class RemoteListener(QObject):
             for channel, _rid, kind in self._tokens.values()
             if kind == "analyze" and channel.device_id == device_id
         )
+
+    # --------------------------------------------------------------- fetch
+
+    def _streams_busy(self, channel: _Channel, device_id: str) -> bool:
+        """Section 9: one stream per connection, two per device. A ``fetch``
+        the GUI is still answering counts as a stream."""
+
+        def busy(peer: _Channel) -> bool:
+            return peer.stream is not None or any(
+                owner is peer and kind == "fetch" for owner, _rid, kind in self._tokens.values()
+            )
+
+        if busy(channel):
+            return True
+        peers = self._by_device.get(device_id, [])
+        return sum(1 for peer in peers if busy(peer)) >= fetch.MAX_STREAMS_PER_DEVICE
+
+    def _open_stream(
+        self, channel: _Channel, request_id: str, ticket: object, now: float
+    ) -> _Stream | None:
+        """Open the file a ``FileTicket`` names. The path came from the PC's
+        own job table, never from the phone; the handle is checked again
+        because the file may have changed since the GUI looked."""
+        if not isinstance(ticket, fetch.FileTicket):
+            self._send_error(channel, request_id, "internal", "internal error")
+            return None
+        if channel.stream is not None:
+            self._send_error(channel, request_id, "conflict", "a transfer is already running")
+            return None
+        try:
+            handle = open(ticket.path, "rb")  # noqa: SIM115 - held for the stream
+        except OSError:
+            self._send_error(channel, request_id, "notFound", "the file is gone")
+            return None
+        try:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise FileNotFoundError
+            if info.st_size != ticket.size or fetch.etag_of(info) != ticket.etag:
+                handle.close()
+                self._send_error(channel, request_id, "conflict", "the file changed")
+                return None
+            handle.seek(ticket.offset)
+        except OSError:
+            handle.close()
+            self._send_error(channel, request_id, "notFound", "the file is gone")
+            return None
+        channel.stream_seq += 1
+        return _Stream(channel.stream_seq, handle, ticket, now)
+
+    def _cancel_stream(self, channel: _Channel, request: schema.Request) -> None:
+        stream = channel.stream
+        self._send(channel, {"id": request.id, "type": "ok", "protocolVersion": PROTOCOL_VERSION})
+        if stream is not None and stream.id == request.fields["streamId"]:
+            self._end_stream(channel, "cancelled")
+
+    def _end_stream(self, channel: _Channel, status: str, code: str | None = None) -> None:
+        stream = channel.stream
+        if stream is None:
+            return
+        channel.stream = None
+        stream.close()
+        event: dict[str, Any] = {
+            "type": "fetchEnd",
+            "protocolVersion": PROTOCOL_VERSION,
+            "streamId": stream.id,
+            "status": status,
+            "nextOffset": stream.next if status == "complete" else stream.acked,
+        }
+        if code is not None:
+            event["code"] = code
+        self._send(channel, event)
+
+    def _ack(self, channel: _Channel, message: dict[str, Any]) -> None:
+        """``fetchAck``: no id, no reply, not charged to the token bucket.
+        At most 50 a second per connection; anything extra or odd is ignored."""
+        now = time.monotonic()
+        times = channel.ack_times
+        while times and now - times[0] >= 1.0:
+            times.popleft()
+        if len(times) >= fetch.ACKS_PER_SECOND:
+            return
+        times.append(now)
+        stream = channel.stream
+        stream_id, received = message.get("streamId"), message.get("received")
+        if (
+            stream is None
+            or type(stream_id) is not int
+            or stream_id != stream.id
+            or type(received) is not int
+            or received < 0
+        ):
+            return
+        stream.acked = max(stream.acked, min(received, stream.next))
+        stream.last_ack = now
+        self._pump(channel)
+
+    def channel_writable(self, channel: _Channel) -> None:
+        """The socket drained some bytes: more of the file may be queued."""
+        self._pump(channel)
+
+    def _pump(self, channel: _Channel) -> None:
+        """Queue chunks while the phone's window and the socket backlog allow
+        (section 13): never a byte at or beyond ``acked + windowBytes``, never
+        a chunk while more than 1 MiB is waiting to be written."""
+        stream = channel.stream
+        if stream is None or channel.stage != "open" or channel.pumping:
+            return
+        channel.pumping = True
+        try:
+            while channel.stream is stream and stream.next < stream.end:
+                room = stream.acked + fetch.WINDOW_BYTES - stream.next
+                if room <= 0 or channel.backlog() > fetch.STREAM_BACKLOG_BYTES:
+                    return
+                want = min(fetch.CHUNK_SIZE, stream.end - stream.next, room)
+                try:
+                    data = stream.file.read(want)
+                except OSError:
+                    data = b""
+                if not data:  # the file shrank under us
+                    self._end_stream(channel, "error", "failed")
+                    return
+                if not channel.send_binary(fetch.frame(stream.id, stream.next, data)):
+                    return
+                stream.next += len(data)
+            if channel.stream is stream:
+                self._end_stream(channel, "complete")
+        finally:
+            channel.pumping = False
 
     def _count_subscribers(self) -> None:
         count = sum(1 for channel in self._channels if channel.topics)
@@ -1227,6 +1416,15 @@ class RemoteListener(QObject):
         if not isinstance(body, dict) or not isinstance(body.get("type"), str):
             self._send_error(channel, request_id, "internal", "internal error")
             return
+        stream: _Stream | None = None
+        if kind == "fetch":
+            ticket = body.get("_open")  # the file handle's recipe stays off the wire
+            body = {key: value for key, value in body.items() if key != "_open"}
+            if body["type"] == "fetchStart":
+                stream = self._open_stream(channel, request_id, ticket, time.monotonic())
+                if stream is None:
+                    return
+                body["streamId"] = stream.id
         reply: dict[str, Any] = {
             "id": request_id,
             "type": body["type"],
@@ -1237,7 +1435,14 @@ class RemoteListener(QObject):
         if kind == "subscribe":
             reply["type"] = "subscribed"
             reply["topics"] = [topic for topic in _TOPICS if topic in channel.topics]
-        if not self._send(channel, reply) and channel.stage == "open":
+        sent = self._send(channel, reply)
+        if stream is not None:
+            if sent and channel.stage == "open":
+                channel.stream = stream
+                self._pump(channel)  # the first chunks follow the fetchStart reply
+            else:
+                stream.close()
+        if not sent and channel.stage == "open":
             self._send_error(channel, request_id, "internal", "internal error")
 
     def _reply_error(
@@ -1267,8 +1472,16 @@ class RemoteListener(QObject):
         topic = _EVENT_TOPICS.get(name.split(".", 1)[0])
         if topic is None:
             return
+        # ``_device`` aims an event (``outbox.added``) at one phone's connections.
+        target = event.get("_device")
+        if "_device" in event:
+            event = {key: value for key, value in event.items() if key != "_device"}
         for channel in list(self._channels):
-            if channel.device_id is not None and topic in channel.topics:
+            if (
+                channel.device_id is not None
+                and topic in channel.topics
+                and (target is None or channel.device_id == target)
+            ):
                 self._queue_event(channel, name, event)
 
     @staticmethod
@@ -1346,6 +1559,10 @@ class RemoteListener(QObject):
                         channel.close(CLOSE_AUTH_TIMEOUT)
                     else:
                         channel.abort()
+            elif (
+                channel.stream is not None and now - channel.stream.last_ack >= fetch.STALL_SECONDS
+            ):
+                self._end_stream(channel, "error", "failed")  # section 13 "Stall"
             elif now - channel.last_rx >= IDLE_TIMEOUT_S:
                 channel.close(wire.CLOSE_GOING_AWAY)
             elif channel.deferred:

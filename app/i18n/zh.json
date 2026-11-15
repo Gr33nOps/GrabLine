@@ -920,5 +920,10 @@
   "Remove {name}? It will stop working at once.": "移除 {name}?它将立即停止工作。",
   "Scan this code with GrabLine on your phone.": "请用手机上的 GrabLine 扫描此代码。",
   "This PC isn't on a private network.": "这台电脑不在私有网络中。",
-  "Too many wrong codes. Show a new code.": "错误代码过多。请显示新代码。"
+  "Too many wrong codes. Show a new code.": "错误代码过多。请显示新代码。",
+  "Any phone": "任意手机",
+  "Pair a phone in Settings": "请在设置中配对手机",
+  "Send to phone": "发送到手机",
+  "Sent to your phone": "已发送到你的手机",
+  "This link cannot be sent to a phone": "此链接无法发送到手机"
 }

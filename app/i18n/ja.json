@@ -920,5 +920,10 @@
   "Remove {name}? It will stop working at once.": "{name} を削除しますか? すぐに使えなくなります。",
   "Scan this code with GrabLine on your phone.": "スマートフォンの GrabLine でこのコードをスキャンしてください。",
   "This PC isn't on a private network.": "この PC はプライベートネットワークに接続されていません。",
-  "Too many wrong codes. Show a new code.": "誤ったコードが多すぎます。新しいコードを表示してください。"
+  "Too many wrong codes. Show a new code.": "誤ったコードが多すぎます。新しいコードを表示してください。",
+  "Any phone": "任意のスマートフォン",
+  "Pair a phone in Settings": "設定でスマートフォンをペアリングしてください",
+  "Send to phone": "スマートフォンに送信",
+  "Sent to your phone": "スマートフォンに送信しました",
+  "This link cannot be sent to a phone": "このリンクはスマートフォンに送信できません"
 }

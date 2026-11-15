@@ -920,5 +920,10 @@
   "Remove {name}? It will stop working at once.": "{name} kaldırılsın mı? Hemen çalışmayı bırakacak.",
   "Scan this code with GrabLine on your phone.": "Bu kodu telefonunuzdaki GrabLine ile tarayın.",
   "This PC isn't on a private network.": "Bu bilgisayar özel bir ağda değil.",
-  "Too many wrong codes. Show a new code.": "Çok fazla yanlış kod. Yeni bir kod gösterin."
+  "Too many wrong codes. Show a new code.": "Çok fazla yanlış kod. Yeni bir kod gösterin.",
+  "Any phone": "Herhangi bir telefon",
+  "Pair a phone in Settings": "Ayarlar'da bir telefon eşleştirin",
+  "Send to phone": "Telefona gönder",
+  "Sent to your phone": "Telefonunuza gönderildi",
+  "This link cannot be sent to a phone": "Bu bağlantı bir telefona gönderilemez"
 }

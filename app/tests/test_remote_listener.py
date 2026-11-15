@@ -418,7 +418,17 @@ def test_pair_approve_then_login(rig: Rig) -> None:
     assert ok["type"] == "authOk" and ok["id"] == "r-2"
     assert ok["port"] == rig.listener.port and ok["appRunning"] is True
     assert ok["addresses"][0] == "10.0.2.2" and "127.0.0.1" not in ok["addresses"]
-    assert ok["features"] == ["jobs", "control", "global", "queues", "analyze", "events"]
+    assert ok["features"] == [
+        "jobs",
+        "control",
+        "global",
+        "queues",
+        "analyze",
+        "events",
+        "files",
+        "fetch",
+        "outbox",
+    ]
     # The code is single use.
     second, nonce2 = rig.hello(qr["f"])
     second.send(Phone().pair_request(qr["c"], qr["f"], nonce2))
@@ -520,6 +530,8 @@ def test_ping_round_trip_through_the_gui(rig: Rig) -> None:
     assert client.message()["code"] == "forbidden"
     client.send({"id": "p-3", "type": "gallery"})
     assert client.message()["code"] == "unsupported"
+    # A PC that does not advertise a feature answers its messages "unsupported".
+    rig.listener._features = ("jobs", "events")
     client.send({"id": "p-4", "type": "files"})
     assert client.message()["code"] == "unsupported"
     assert len(rig.gui.requests) == 1

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal, Slot
 
-from app.remote import folders
+from app.remote import folders, schema
 from app.remote.devices import DeviceStore
 from app.remote.events import EventTracker
 from app.remote.handlers import RemoteHandlers, analysis_reply
@@ -185,6 +185,7 @@ class RemoteService(QObject):
         self._timer.stop()
         for thread in list(self._analyze_threads):
             thread.wait(2000)
+        self.handlers.close()
         if self._listener is not None:
             self._listener.shutdown()
 
@@ -217,7 +218,35 @@ class RemoteService(QObject):
             else self.store.remove(device_id)
         )
         self.requests.forget_device(device_id)
+        self.handlers.outbox.forget_device(device_id)
         return removed
+
+    # ---------------------------------------------------------- send to phone
+
+    def queue_for_phone(
+        self,
+        device_id: str | None,
+        url: str,
+        title: str | None = None,
+        quality: str | None = None,
+    ) -> int | None:
+        """ "Send to my phone": queue ``url`` for one paired device, or for any
+        phone (``None``), and tell subscribed phones. Returns the item id, or
+        None if the link is not one the protocol carries."""
+        clean = schema.valid_url(url)
+        if clean is None or (device_id is not None and self.store.get(device_id) is None):
+            return None
+        outbox = self.handlers.outbox
+        item_id = outbox.add(device_id, clean, title[:512] if title else None, quality)
+        if self._listener is not None:
+            targets = (
+                [device_id] if device_id is not None else [d.device_id for d in self.store.list()]
+            )
+            for target in targets:
+                self._listener.broadcast(
+                    {"event": "outbox.added", "count": outbox.count_for(target), "_device": target}
+                )
+        return item_id
 
     # --------------------------------------------------- main window hooks
 

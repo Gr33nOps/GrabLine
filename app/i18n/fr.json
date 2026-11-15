@@ -920,5 +920,10 @@
   "Remove {name}? It will stop working at once.": "Retirer {name} ? Il cessera de fonctionner immédiatement.",
   "Scan this code with GrabLine on your phone.": "Scannez ce code avec GrabLine sur votre téléphone.",
   "This PC isn't on a private network.": "Ce PC n'est pas sur un réseau privé.",
-  "Too many wrong codes. Show a new code.": "Trop de codes erronés. Affichez un nouveau code."
+  "Too many wrong codes. Show a new code.": "Trop de codes erronés. Affichez un nouveau code.",
+  "Any phone": "N'importe quel téléphone",
+  "Pair a phone in Settings": "Associez un téléphone dans les Réglages",
+  "Send to phone": "Envoyer au téléphone",
+  "Sent to your phone": "Envoyé à votre téléphone",
+  "This link cannot be sent to a phone": "Ce lien ne peut pas être envoyé à un téléphone"
 }
