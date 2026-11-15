@@ -20,7 +20,8 @@ may queue for next launch; automatic takeover requires the app to be running.
 Open GrabLine/Open Settings focuses a running app, so launch it first.
 
 Do not use an old `127.0.0.1` test URL to diagnose pairing. The app's production
-browser bridge uses Native Messaging, not a local web server. QA fixture URLs
+browser bridge uses Native Messaging, not a local web server. (Phone pairing is
+separate and uses the optional phone listener on your local network.) QA fixture URLs
 exist only while their specific test server is running.
 
 ## A browser download stays in Chrome or Firefox

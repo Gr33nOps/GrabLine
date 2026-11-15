@@ -8,7 +8,9 @@ tests and implementation are the final reference for behaviour.
 
 GrabLine is a PySide6 desktop app coordinating several transfer engines around
 a SQLite database. The browser companion sends validated handoffs to the same
-pipeline used by pasted URLs. It does not expose a localhost web service.
+pipeline used by pasted URLs. It does not expose a localhost web service. The
+only listener is the optional phone-remote one in `app/remote/`, off until you
+pair a phone (see the [security model](security-model.md#phone-remote-listener)).
 
 ```mermaid
 flowchart LR

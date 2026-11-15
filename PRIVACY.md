@@ -54,7 +54,8 @@ GrabLine authors.
 
 The extension may attach request context such as `Referer`, `User-Agent` or
 cookies when sending a chosen URL to the app. That local handoff uses Native
-Messaging stdio, not an author-operated server or listening localhost port.
+Messaging stdio, not an author-operated server or a listening port. (The
+optional phone listener is separate; see [Phone](#phone).)
 Required headers can be retained with a job in the local database. Sensitive
 credentials are origin-scoped by the transfer pipeline; see
 [the security model](docs/security-model.md).
@@ -71,6 +72,33 @@ and takeover. These allow access to sensitive browsing context; only enable the
 extension in profiles where you want those features. GrabLine Connect has no
 remote analytics or remote-code loader. Its own app communication uses Native
 Messaging; browser fallback downloads still make normal network requests.
+
+## Phone
+
+This section covers the optional GrabLine for Android app and the phone
+listener in the desktop app. There are no analytics, no accounts and no
+GrabLine servers in either.
+
+| Who | What it contacts |
+| --- | --- |
+| The PC | Listens only on your local network (private and link-local addresses), and only while a phone is paired or a pairing code is showing. It is off otherwise. It never asks your router to open a port and is not reachable from the internet |
+| The phone | Connects only to the PCs you paired, over your local network |
+| The phone, from Phase 2 | The download servers you chose, for downloads you started on the phone |
+| The phone, from Phase 3 | yt-dlp update servers, only for updates you approve |
+
+Nothing is sent to the GrabLine authors. The phone never reads cookies or
+signed-in sessions from other apps or browsers.
+
+**Stored on the PC** (in the data folder): the name, public key, pairing time
+and last-seen time of each paired phone; the PC's pairing certificate and its
+private key (readable by your account only); links you queued for a phone.
+Removing a phone deletes its row. "Reset phone connections" deletes the
+certificate.
+
+**Stored on the phone:** the addresses of each paired PC, the PC's certificate
+pin, the phone's device key (in Android Keystore, not exportable), a cached job
+list, and the outbox of links waiting for a PC. Removing a PC from the phone
+deletes these for that PC. Crash logs stay on the phone until you share one.
 
 ## Export, removal and reporting
 
