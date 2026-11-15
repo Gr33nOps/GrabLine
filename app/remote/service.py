@@ -92,6 +92,8 @@ class RemoteService(QObject):
         self._timer.setInterval(POLL_MS)
         self._timer.timeout.connect(self._poll)
         self._analyze_threads: list[Any] = []
+        #: Devices removed in this session; requests already queued for them are dropped.
+        self._removed: set[str] = set()
         # Safety net: a window that is never closed (tests, a crash path) must
         # not leave the listener thread running at interpreter exit.
         app = QCoreApplication.instance()
@@ -208,6 +210,7 @@ class RemoteService(QObject):
 
     def remove_device(self, device_id: str) -> bool:
         """Revoke at once (QA-06): connections close before this returns."""
+        self._removed.add(device_id)
         removed = (
             self._listener.revoke_device(device_id)
             if self._listener is not None
@@ -225,7 +228,8 @@ class RemoteService(QObject):
         if outcome.device_id and outcome.request_id and outcome.job_ids:
             self.requests.record_jobs(outcome.device_id, outcome.request_id, outcome.job_ids)
         if outcome.result == "failed":
-            log.info("a phone link could not be added: %s", outcome.message)
+            # The message can hold the URL or a path: keep it out of the log.
+            log.info("a phone link could not be added")
 
     # ------------------------------------------------------------ requests
 
@@ -233,6 +237,11 @@ class RemoteService(QObject):
     def _on_request(self, token: int, device_id: str, request: object) -> None:
         if not isinstance(request, Request):
             self.listener.replyError(token, "internal", "internal error")
+            return
+        # PROTOCOL 8: a request queued before a revoke must not act after it.
+        # The listener drops the reply; this stops the side effect too.
+        if device_id in self._removed or self.store.get(device_id) is None:
+            self.listener.replyError(token, "unauthorized", "unauthorized")
             return
         if request.type == "subscribe":
             self.listener.reply(

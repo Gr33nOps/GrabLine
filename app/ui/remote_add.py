@@ -116,7 +116,8 @@ class UnattendedAdder(QObject):
         try:
             self._add(handoff, url, options, request_id)
         except Exception as exc:  # never let a phone link break the drain loop
-            log.exception("unattended add failed for a phone link")
+            # Type only: the message can carry the URL or a path.
+            log.error("unattended add failed for a phone link (%s)", type(exc).__name__)
             self._report(request_id, url, "failed", message=str(exc) or "could not add")
 
     def busy(self) -> bool:
@@ -181,7 +182,7 @@ class UnattendedAdder(QObject):
                     url,
                 )
             except Exception as exc:
-                log.exception("unattended add failed after analysis")
+                log.error("unattended add failed after analysis (%s)", type(exc).__name__)
                 self._report(request_id, url, "failed", message=str(exc) or "could not add")
 
         thread.finished.connect(finished)
