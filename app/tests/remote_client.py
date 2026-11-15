@@ -117,6 +117,8 @@ class Client:
             assert b"permessage-deflate" not in self.response.lower()
         self.sock.settimeout(None)
         self.inbox: queue.Queue[tuple[str, Any]] = queue.Queue()
+        #: Every frame as it arrived: (opcode, raw payload, time.monotonic()).
+        self.frames: list[tuple[int, bytes, float]] = []
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
 
@@ -141,6 +143,7 @@ class Client:
                     size = struct.unpack(">Q", self._exact(8))[0]
                 payload = self._exact(size)
                 opcode = first & 0x0F
+                self.frames.append((opcode, payload, time.monotonic()))
                 if opcode == wire.OP_TEXT:
                     self.inbox.put(("text", json.loads(payload)))
                 elif opcode == wire.OP_CLOSE:
