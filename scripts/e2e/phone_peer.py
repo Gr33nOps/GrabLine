@@ -123,7 +123,8 @@ def main() -> int:
     _Media.files = {FAST_NAME: _payload(FAST_SIZE, 1), SLOW_NAME: _payload(SLOW_SIZE, 2)}
     media = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Media)
     threading.Thread(target=media.serve_forever, daemon=True).start()
-    media_base = f"http://10.0.2.2:{media.server_address[1]}"
+    # The PC fetches these, not the phone: they must be reachable from the PC.
+    media_base = f"http://127.0.0.1:{media.server_address[1]}"
 
     service = RemoteService(manager, settings, resolver)
     state: dict[str, object] = {"events": [], "mediaBase": media_base, "dataDir": str(data_dir)}
