@@ -9,58 +9,37 @@ here depends on a Qt TLS backend and nothing is skipped.
 from __future__ import annotations
 
 import base64
-import contextlib
 import hashlib
 import json
 import os
-import queue
 import socket
 import ssl
 import struct
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from PySide6.QtCore import QCoreApplication, QObject, Slot
+from PySide6.QtCore import QObject, Slot
 
 from app.db.database import Database
 from app.remote import addresses, wire
 from app.remote import listener as listener_module
-from app.remote.certs import pin_from_spki
-from app.remote.devices import DeviceStore, auth_transcript, b64url_decode, b64url_encode
+from app.remote.devices import DeviceStore, b64url_decode, b64url_encode
 from app.remote.listener import RemoteListener
-from app.remote.pairing import compute_code_proof, compute_server_proof
+from app.remote.pairing import compute_server_proof
 from app.remote.ratelimit import DeviceLimiter, FailureTracker, TokenBucket
 from app.remote.schema import Request
 from app.tests.qt_app import ensure_app
+from app.tests.remote_client import Client, Phone, mask_frame, pump, settle
 
 pytestmark = pytest.mark.timeout(60)
 
 
 # ------------------------------------------------------------------ helpers
-
-
-def pump(condition: Callable[[], bool], timeout: float = 5.0) -> bool:
-    """Run the GUI thread's event loop until ``condition`` holds."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        QCoreApplication.processEvents()
-        if condition():
-            return True
-        time.sleep(0.005)
-    QCoreApplication.processEvents()
-    return condition()
-
-
-def settle(seconds: float = 0.2) -> None:
-    pump(lambda: False, timeout=seconds)
 
 
 class FakeClock:
@@ -131,176 +110,6 @@ class Gui(QObject):
     @Slot(str)
     def on_error(self, code: str) -> None:
         self.errors.append(code)
-
-
-def _mask_frame(opcode: int, payload: bytes, declared: int | None = None) -> bytes:
-    size = len(payload) if declared is None else declared
-    head = bytes([0x80 | opcode])
-    if size < 126:
-        head += bytes([0x80 | size])
-    elif size < 65536:
-        head += bytes([0x80 | 126]) + struct.pack(">H", size)
-    else:
-        head += bytes([0x80 | 127]) + struct.pack(">Q", size)
-    mask = os.urandom(4)
-    count = len(payload)
-    if not count:
-        return head + mask
-    key = (mask * (count // 4 + 1))[:count]
-    body = (int.from_bytes(payload, "big") ^ int.from_bytes(key, "big")).to_bytes(count, "big")
-    return head + mask + body
-
-
-class Client:
-    """A minimal phone: TLS with a pin check, then WebSocket text frames."""
-
-    def __init__(
-        self,
-        port: int,
-        *,
-        pin: str | None = None,
-        path: str = "/remote",
-        headers: tuple[str, ...] = (),
-    ) -> None:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE  # the pin below is the trust decision
-        raw = socket.create_connection(("127.0.0.1", port), timeout=5)
-        self.sock = context.wrap_socket(raw)
-        self.tls_version = self.sock.version()
-        der = self.sock.getpeercert(binary_form=True)
-        assert der is not None
-        certificate = x509.load_der_x509_certificate(der)
-        self.pin = pin_from_spki(
-            certificate.public_key().public_bytes(
-                serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-            )
-        )
-        if pin is not None:
-            assert self.pin == pin, "the server's key does not match the pin"
-        key = base64.b64encode(os.urandom(16)).decode()
-        lines = [
-            f"GET {path} HTTP/1.1",
-            "Host: pc",
-            "Upgrade: websocket",
-            "Connection: Upgrade",
-            f"Sec-WebSocket-Key: {key}",
-            "Sec-WebSocket-Version: 13",
-            "Sec-WebSocket-Extensions: permessage-deflate",
-            *headers,
-        ]
-        self.sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
-        head = b""
-        while b"\r\n\r\n" not in head:
-            chunk = self.sock.recv(4096)
-            if not chunk:
-                break
-            head += chunk
-        self.response, _, self._rest = head.partition(b"\r\n\r\n")
-        self.status = int(self.response.split(b" ")[1]) if self.response else 0
-        if self.status == 101:
-            assert wire.accept_key(key).encode() in self.response
-            assert b"permessage-deflate" not in self.response.lower()
-        self.sock.settimeout(None)
-        self.inbox: queue.Queue[tuple[str, Any]] = queue.Queue()
-        self._reader = threading.Thread(target=self._read, daemon=True)
-        self._reader.start()
-
-    def _exact(self, size: int) -> bytes:
-        data = self._rest[:size]
-        self._rest = self._rest[size:]
-        while len(data) < size:
-            chunk = self.sock.recv(size - len(data))
-            if not chunk:
-                raise EOFError
-            data += chunk
-        return data
-
-    def _read(self) -> None:
-        try:
-            while True:
-                first, second = self._exact(2)
-                size = second & 0x7F
-                if size == 126:
-                    size = struct.unpack(">H", self._exact(2))[0]
-                elif size == 127:
-                    size = struct.unpack(">Q", self._exact(8))[0]
-                payload = self._exact(size)
-                opcode = first & 0x0F
-                if opcode == wire.OP_TEXT:
-                    self.inbox.put(("text", json.loads(payload)))
-                elif opcode == wire.OP_CLOSE:
-                    self.inbox.put(("close", struct.unpack(">H", payload[:2])[0]))
-                elif opcode == wire.OP_PONG:
-                    self.inbox.put(("pong", payload))
-        except (OSError, EOFError, ValueError):
-            self.inbox.put(("eof", None))
-
-    def next(self, timeout: float = 5.0) -> tuple[str, Any]:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            QCoreApplication.processEvents()
-            try:
-                return self.inbox.get(timeout=0.005)
-            except queue.Empty:
-                continue
-        raise AssertionError("no frame from the listener")
-
-    def message(self, timeout: float = 5.0) -> dict[str, Any]:
-        kind, value = self.next(timeout)
-        assert kind == "text", f"expected a message, got {kind} {value}"
-        assert isinstance(value, dict)
-        return value
-
-    def closed_with(self, timeout: float = 5.0) -> int:
-        kind, value = self.next(timeout)
-        assert kind == "close", f"expected a close frame, got {kind} {value}"
-        return int(value)
-
-    def send(self, message: dict[str, Any]) -> None:
-        self.sock.sendall(_mask_frame(wire.OP_TEXT, json.dumps(message).encode()))
-
-    def send_raw(self, data: bytes) -> None:
-        self.sock.sendall(data)
-
-    def close(self) -> None:
-        with contextlib.suppress(OSError):
-            self.sock.close()
-
-
-class Phone:
-    """A device key plus the pairing and login steps."""
-
-    def __init__(self, name: str = "Pixel 8") -> None:
-        self.name = name
-        self.key = ec.generate_private_key(ec.SECP256R1())
-        self.public = self.key.public_key().public_bytes(
-            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        self.device_id = ""
-
-    def pair_request(self, code: str, pin: str, nonce: bytes, version: int = 6) -> dict[str, Any]:
-        proof = compute_code_proof(code, nonce, pin, self.public)
-        return {
-            "id": "r-1",
-            "type": "pair",
-            "protocolVersion": version,
-            "deviceName": self.name,
-            "publicKey": b64url_encode(self.public),
-            "codeProof": b64url_encode(proof),
-        }
-
-    def auth_request(self, pin: str, nonce: bytes, version: int = 6) -> dict[str, Any]:
-        signature = self.key.sign(
-            auth_transcript(nonce, pin, self.device_id), ec.ECDSA(hashes.SHA256())
-        )
-        return {
-            "id": "r-2",
-            "type": "auth",
-            "protocolVersion": version,
-            "deviceId": self.device_id,
-            "signature": b64url_encode(signature),
-        }
 
 
 class Rig:
@@ -714,14 +523,14 @@ def test_ping_round_trip_through_the_gui(rig: Rig) -> None:
     client.send({"id": "p-4", "type": "files"})
     assert client.message()["code"] == "unsupported"
     assert len(rig.gui.requests) == 1
-    client.send_raw(_mask_frame(wire.OP_TEXT, b"not json"))
+    client.send_raw(mask_frame(wire.OP_TEXT, b"not json"))
     assert client.closed_with() == 4400
 
 
 def test_binary_frame_is_malformed(rig: Rig) -> None:
     phone, pin = rig.paired_phone()
     client = rig.login(phone, pin)
-    client.send_raw(_mask_frame(wire.OP_BINARY, b"\x00\x01"))
+    client.send_raw(mask_frame(wire.OP_BINARY, b"\x00\x01"))
     assert client.closed_with() == 4400
 
 
@@ -782,11 +591,11 @@ def test_oversized_frame_closes_1009_and_listener_keeps_running(rig: Rig) -> Non
     client.send({"id": "big", "type": "ping", "pad": "x" * 1_000_000})
     assert client.message()["type"] == "pong"
     # ... a 2 MB frame is refused from its header; the payload is never read.
-    client.send_raw(_mask_frame(wire.OP_TEXT, b"x" * 65536, declared=2 * 1024 * 1024))
+    client.send_raw(mask_frame(wire.OP_TEXT, b"x" * 65536, declared=2 * 1024 * 1024))
     assert client.closed_with() == 1009
     # Before login the limit is 4 KiB.
     early, _nonce = rig.hello(pin)
-    early.send_raw(_mask_frame(wire.OP_TEXT, b"x" * 5000))
+    early.send_raw(mask_frame(wire.OP_TEXT, b"x" * 5000))
     assert early.closed_with() == 1009
     assert rig.listener.running
     fresh = rig.login(phone, pin)
@@ -833,7 +642,7 @@ def test_flood_closes_4429_and_refuses_the_device(rig: Rig) -> None:
     phone, pin = rig.paired_phone()
     client = rig.login(phone, pin)
     burst = b"".join(
-        _mask_frame(wire.OP_TEXT, json.dumps({"id": f"f-{i}", "type": "ping"}).encode())
+        mask_frame(wire.OP_TEXT, json.dumps({"id": f"f-{i}", "type": "ping"}).encode())
         for i in range(400)
     )
     client.send_raw(burst)
@@ -973,22 +782,22 @@ def test_wire_parser_is_strict() -> None:
     assert wire.parse_upgrade(b"GET /remote HTTP/1.1")[0] == 400
 
     parser = wire.FrameParser(16, 4400)
-    stream = _mask_frame(wire.OP_PING, b"hi") + _mask_frame(wire.OP_TEXT, b'{"a":1}')
+    stream = mask_frame(wire.OP_PING, b"hi") + mask_frame(wire.OP_TEXT, b'{"a":1}')
     events: list[tuple[str, object]] = []
     for index in range(len(stream)):  # one byte at a time
         events.extend(parser.feed(stream[index : index + 1]))
     assert events == [("ping", b"hi"), ("text", '{"a":1}')]
-    part1 = bytearray(_mask_frame(wire.OP_TEXT, b"12345678"))
+    part1 = bytearray(mask_frame(wire.OP_TEXT, b"12345678"))
     part1[0] &= 0x7F  # not final
     assert parser.feed(bytes(part1)) == []
-    assert parser.feed(_mask_frame(wire.OP_CONTINUATION, b"123456789")) == [("fail", 1009)]
-    assert parser.feed(_mask_frame(wire.OP_TEXT, b"x")) == []  # dead after a failure
+    assert parser.feed(mask_frame(wire.OP_CONTINUATION, b"123456789")) == [("fail", 1009)]
+    assert parser.feed(mask_frame(wire.OP_TEXT, b"x")) == []  # dead after a failure
     assert wire.FrameParser(16).feed(wire.encode_frame(wire.OP_TEXT, b"x")) == [("fail", 1002)]
-    compressed = bytearray(_mask_frame(wire.OP_TEXT, b"x"))
+    compressed = bytearray(mask_frame(wire.OP_TEXT, b"x"))
     compressed[0] |= 0x40  # RSV1: permessage-deflate was never negotiated
     assert wire.FrameParser(16).feed(bytes(compressed)) == [("fail", 1002)]
-    assert wire.FrameParser(16, 4400).feed(_mask_frame(wire.OP_TEXT, b"\xff")) == [("fail", 4400)]
-    assert wire.FrameParser(16, 4400).feed(_mask_frame(wire.OP_BINARY, b"x")) == [("fail", 4400)]
-    assert wire.FrameParser(16).feed(_mask_frame(wire.OP_CLOSE, struct.pack(">H", 1000))) == [
+    assert wire.FrameParser(16, 4400).feed(mask_frame(wire.OP_TEXT, b"\xff")) == [("fail", 4400)]
+    assert wire.FrameParser(16, 4400).feed(mask_frame(wire.OP_BINARY, b"x")) == [("fail", 4400)]
+    assert wire.FrameParser(16).feed(mask_frame(wire.OP_CLOSE, struct.pack(">H", 1000))) == [
         ("close", 1000)
     ]

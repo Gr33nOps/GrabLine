@@ -309,6 +309,7 @@ class MainWindow(QMainWindow):
         # (created on demand; the listener stays off until a phone is paired).
         self._remote_adder: remote_add.UnattendedAdder | None = None
         self._remote_service: Any = None
+        self._start_remote_service()
         self._file_ops: set[work_threads.FileOpThread] = set()
         # Cancel flags for unbounded file ops (the installer download): set on
         # shutdown so the worker stops promptly and the exit wait doesn't time
@@ -721,7 +722,9 @@ class MainWindow(QMainWindow):
     def _make_settings_page(self) -> QWidget:
         from app.ui.settings_view import SettingsView
 
-        return SettingsView(self.settings, self._on_settings_applied)
+        return SettingsView(
+            self.settings, self._on_settings_applied, remote_service=self._remote_service
+        )
 
     def _page_for(self, key: str) -> int | None:
         """This page's index in the stack, building it on first use."""
@@ -989,6 +992,9 @@ class MainWindow(QMainWindow):
         bounded operations (a subprocess convert, a network resolve), so the
         wait terminates."""
         self._shutting_down = True
+        if self._remote_service is not None:
+            # Close phone connections first so no request reaches a dying window.
+            self._remote_service.shutdown()
         self._dashboard_view.shutdown()
         for timer in (self._timer, self._handoff_timer, self._rss_timer, self._watch_timer):
             timer.stop()
@@ -1066,6 +1072,20 @@ class MainWindow(QMainWindow):
                     headers=handoff.headers,
                     from_browser=True,
                 )
+
+    def _start_remote_service(self) -> None:
+        """The phone remote. Its listener opens no socket until a phone is
+        paired or a pairing code is showing; a failure here never stops the
+        app from starting."""
+        try:
+            from app.remote.service import RemoteService
+
+            service = RemoteService(self.manager, self.settings, self.resolver, self)
+            service.start()
+        except Exception:
+            log.exception("phone remote unavailable")
+            return
+        self._remote_service = service
 
     def _phone_adder(self) -> remote_add.UnattendedAdder:
         if self._remote_adder is None:
