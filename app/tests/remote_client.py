@@ -181,6 +181,14 @@ class Client:
         self.sock.sendall(data)
 
     def close(self) -> None:
+        # On Linux close() does not wake a thread blocked in recv(), and the
+        # freed descriptor number is handed to the next connection, which the
+        # stale reader then reads from (bad record MAC on the new client).
+        # shutdown() wakes it first; the join keeps it from outliving us.
+        with contextlib.suppress(OSError):
+            socket.socket.shutdown(self.sock, socket.SHUT_RDWR)
+        if self._reader is not threading.current_thread():
+            self._reader.join(2.0)
         with contextlib.suppress(OSError):
             self.sock.close()
 
