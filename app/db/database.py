@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -110,6 +111,7 @@ CREATE TABLE IF NOT EXISTS handoffs (
     payload    TEXT NOT NULL DEFAULT '[]',
     quality    TEXT,
     headers    TEXT NOT NULL DEFAULT '{}',
+    options    TEXT NOT NULL DEFAULT '{}',
     claimed    INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -117,7 +119,41 @@ CREATE TABLE IF NOT EXISTS handoffs (
 -- The running app polls for unclaimed rows on a timer, forever, while claimed
 -- ones accumulate for the life of the profile.
 CREATE INDEX IF NOT EXISTS idx_handoffs_unclaimed ON handoffs(claimed, id);
+
+-- Phones paired with this PC (app/remote). Only the phone's PUBLIC key is
+-- kept: reading this table gives no ability to act as a phone. Removing a row
+-- is revocation. Times are Unix seconds.
+CREATE TABLE IF NOT EXISTS remote_devices (
+    device_id    TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    public_key   BLOB NOT NULL,
+    created_at   INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL
+);
+
+-- Identity values of the phone listener (the stable pcId). Deliberately not
+-- in `settings`: those are exported, imported and reset, and an identity must
+-- not travel to another PC or vanish with "reset settings".
+CREATE TABLE IF NOT EXISTS remote_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
+
+_log = logging.getLogger(__name__)
+
+
+def _load_handoff_options(handoff_id: int, raw: str | None) -> dict[str, Any]:
+    """Decode a handoff's options JSON; anything malformed becomes {} (never raises)."""
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        value = None
+    if not isinstance(value, dict):
+        _log.warning("handoff %s has malformed options; ignoring them", handoff_id)
+        return {}
+    return value
+
 
 #: Columns added after Phase 0, applied to pre-existing databases on open.
 _JOBS_MIGRATIONS = {
@@ -134,6 +170,7 @@ _HANDOFFS_MIGRATIONS = {
     "payload": "ALTER TABLE handoffs ADD COLUMN payload TEXT NOT NULL DEFAULT '[]'",
     "quality": "ALTER TABLE handoffs ADD COLUMN quality TEXT",
     "headers": "ALTER TABLE handoffs ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'",
+    "options": "ALTER TABLE handoffs ADD COLUMN options TEXT NOT NULL DEFAULT '{}'",
 }
 
 
@@ -692,12 +729,13 @@ class Database:
         payload: Sequence[str] = (),
         quality: str | None = None,
         headers: Mapping[str, str] | None = None,
+        options: dict[str, Any] | None = None,
     ) -> int:
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO handoffs "
-                "(url, page_url, page_title, source, payload, quality, headers) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(url, page_url, page_title, source, payload, quality, headers, options) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url,
                     page_url,
@@ -706,6 +744,7 @@ class Database:
                     json.dumps(list(payload)),
                     quality,
                     json.dumps(dict(headers or {})),
+                    json.dumps(options or {}, sort_keys=True, separators=(",", ":")),
                 ),
             )
         handoff_id = cur.lastrowid
@@ -745,6 +784,7 @@ class Database:
                 payload=tuple(json.loads(row["payload"] or "[]")),
                 quality=row["quality"],
                 headers=json.loads(row["headers"] or "{}"),
+                options=_load_handoff_options(row["id"], row["options"]),
             )
             for row in rows
         ]
@@ -763,6 +803,88 @@ class Database:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+
+    # ---------------------------------------------------- remote devices
+
+    def add_remote_device(
+        self,
+        device_id: str,
+        name: str,
+        public_key: bytes,
+        created_at: int,
+        *,
+        limit: int,
+    ) -> bool:
+        """Store a paired phone. False (nothing stored) when ``limit`` devices
+        already exist or the id is taken; the count and the insert are one
+        step under the lock, so two pairings cannot both take the last slot."""
+        with self._lock, self._conn:
+            count = self._conn.execute("SELECT COUNT(*) FROM remote_devices").fetchone()[0]
+            if int(count) >= limit:
+                return False
+            cur = self._conn.execute(
+                "INSERT OR IGNORE INTO remote_devices "
+                "(device_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
+                (device_id, name, public_key, created_at, created_at),
+            )
+            return cur.rowcount == 1
+
+    def get_remote_device(self, device_id: str) -> tuple[str, str, bytes, int, int] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT device_id, name, public_key, created_at, last_seen_at "
+                "FROM remote_devices WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return (str(row[0]), str(row[1]), bytes(row[2]), int(row[3]), int(row[4]))
+
+    def list_remote_devices(self) -> list[tuple[str, str, bytes, int, int]]:
+        """Paired phones, oldest pairing first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT device_id, name, public_key, created_at, last_seen_at "
+                "FROM remote_devices ORDER BY created_at, device_id"
+            ).fetchall()
+        return [(str(r[0]), str(r[1]), bytes(r[2]), int(r[3]), int(r[4])) for r in rows]
+
+    def touch_remote_device(self, device_id: str, last_seen_at: int) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE remote_devices SET last_seen_at = ? WHERE device_id = ?",
+                (last_seen_at, device_id),
+            )
+            return cur.rowcount == 1
+
+    def delete_remote_device(self, device_id: str) -> bool:
+        """Remove (revoke) a phone; returns whether it existed."""
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM remote_devices WHERE device_id = ?", (device_id,))
+            return cur.rowcount == 1
+
+    def count_remote_devices(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) FROM remote_devices").fetchone()
+        return int(row[0])
+
+    def get_remote_meta(self, key: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM remote_meta WHERE key = ?", (key,)
+            ).fetchone()
+        return str(row[0]) if row else None
+
+    def init_remote_meta(self, key: str, value: str) -> str:
+        """Set ``key`` only if it is unset; returns the value now stored."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO remote_meta (key, value) VALUES (?, ?)", (key, value)
+            )
+            row = self._conn.execute(
+                "SELECT value FROM remote_meta WHERE key = ?", (key,)
+            ).fetchone()
+        return str(row[0])
 
     # --------------------------------------------------------- segments
 

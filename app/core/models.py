@@ -67,6 +67,8 @@ class Handoff:
     #: Extra HTTP headers (Cookie / Referer / User-Agent) so a login-gated
     #: download the browser could reach can be fetched by the app too.
     headers: dict[str, str] = field(default_factory=dict)
+    #: Per-link options (phone links); {} when none were stored.
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

@@ -1,0 +1,12 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Offset below zero.",
+  "state": "authed",
+  "message": {
+    "id": "x-12",
+    "type": "fetch",
+    "jobId": 40,
+    "offset": -1
+  },
+  "expectError": "badRequest"
+}

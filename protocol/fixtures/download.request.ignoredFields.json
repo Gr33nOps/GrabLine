@@ -1,0 +1,32 @@
+{
+  "direction": "phone-to-pc",
+  "description": "A phone that sends browser headers: the PC must ignore cookie, referer, userAgent, fallbackUrls, onlyIfRunning and source, and queue the link with no headers and source 'phone'.",
+  "state": "authed",
+  "message": {
+    "id": "r-5",
+    "type": "download",
+    "url": "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+    "requestId": "req-0004-5d2b8e9a1c3f4a70",
+    "cookie": "session=FAKE-COOKIE",
+    "referer": "https://example.com/",
+    "userAgent": "Mozilla/5.0 (fake)",
+    "fallbackUrls": [
+      "https://example.com/other.bin"
+    ],
+    "onlyIfRunning": true,
+    "source": "extension",
+    "futureField": {
+      "x": 1
+    }
+  },
+  "expectIgnored": [
+    "cookie",
+    "referer",
+    "userAgent",
+    "fallbackUrls",
+    "onlyIfRunning",
+    "source",
+    "futureField"
+  ],
+  "expectReplyType": "queued"
+}

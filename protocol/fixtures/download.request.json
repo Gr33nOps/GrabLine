@@ -1,0 +1,15 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Hand off one link with every optional field set.",
+  "state": "authed",
+  "message": {
+    "id": "r-4",
+    "type": "download",
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "requestId": "req-0002-91c0d7e2a4b84f10",
+    "quality": "1080p",
+    "queueId": 2,
+    "folderId": "fQ3J5cHRvR3JhYg",
+    "title": "Sample video"
+  }
+}

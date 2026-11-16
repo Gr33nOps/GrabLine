@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Stop a stream early.",
+  "state": "authed",
+  "message": {
+    "id": "r-32",
+    "type": "fetchCancel",
+    "streamId": 7
+  }
+}

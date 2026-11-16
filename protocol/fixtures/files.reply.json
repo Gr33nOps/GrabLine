@@ -1,0 +1,20 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Only completed single-file jobs whose file still exists.",
+  "state": "authed",
+  "message": {
+    "id": "r-30",
+    "type": "files",
+    "protocolVersion": 6,
+    "files": [
+      {
+        "jobId": 40,
+        "name": "Sample video (1080p).mp4",
+        "size": 73400320,
+        "finishedAt": 1794699400,
+        "mime": "video/mp4"
+      }
+    ],
+    "nextCursor": null
+  }
+}

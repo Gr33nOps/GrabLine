@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Global action: get.",
+  "state": "authed",
+  "message": {
+    "id": "r-21",
+    "type": "global",
+    "action": "get"
+  }
+}

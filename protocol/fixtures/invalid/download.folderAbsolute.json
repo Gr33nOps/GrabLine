@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "QA-08: folderId that is an absolute path.",
+  "state": "authed",
+  "message": {
+    "id": "x-1",
+    "type": "download",
+    "url": "https://example.com/a.zip",
+    "requestId": "req-bad-0000000000000001",
+    "folderId": "C:\\Windows\\System32"
+  },
+  "expectError": "badRequest"
+}

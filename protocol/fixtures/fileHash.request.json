@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Phase 4. Ask for the SHA-256 of a finished file, to verify a copy.",
+  "state": "authed",
+  "message": {
+    "id": "r-34",
+    "type": "fileHash",
+    "jobId": 40
+  }
+}

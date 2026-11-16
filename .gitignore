@@ -37,3 +37,6 @@ venv/
 
 # Internal working document - never ships in the repo
 docs/ui-redesign-brief.md
+
+# Local machine facts for Claude sessions
+CLAUDE.local.md

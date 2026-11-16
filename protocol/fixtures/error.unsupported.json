@@ -1,0 +1,12 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Error reply with code unsupported. 'message' is English text for logs only; the phone shows its own words.",
+  "state": "authed",
+  "message": {
+    "id": "r-7",
+    "type": "error",
+    "protocolVersion": 6,
+    "code": "unsupported",
+    "message": "unknown message type"
+  }
+}

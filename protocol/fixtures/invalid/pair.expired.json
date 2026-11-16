@@ -1,0 +1,15 @@
+{
+  "direction": "phone-to-pc",
+  "description": "QA-02: a correct proof after the 2 minutes are over, or when no QR is showing.",
+  "state": "preauth",
+  "message": {
+    "id": "x-18",
+    "type": "pair",
+    "protocolVersion": 6,
+    "deviceName": "Pixel 8",
+    "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJKgUzqYhvEgwmzQQEvg2ssxBRuKPwgQnQocViZyaHoUo8afbboXhTc-SDGQtWKSeiZY0jKbSOS2iUuCG0VwXIQ",
+    "codeProof": "Smf4OozxeARyGSFxpYre8dXqDe8DFizLRu1JIcYkVaQ"
+  },
+  "expectError": "pairingExpired",
+  "precondition": "no active pairing session"
+}

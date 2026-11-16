@@ -1,0 +1,12 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Phase 4. Resume at an offset; etag makes the PC refuse (conflict) if the file changed since.",
+  "state": "authed",
+  "message": {
+    "id": "r-33",
+    "type": "fetch",
+    "jobId": 40,
+    "offset": 36700160,
+    "etag": "s73400320-m1794699400"
+  }
+}

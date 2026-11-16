@@ -1,0 +1,10 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Generic success reply.",
+  "state": "authed",
+  "message": {
+    "id": "r-41",
+    "type": "ok",
+    "protocolVersion": 6
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "direction": "pc-to-phone",
+  "description": "A protocol-5 pong exactly as app/native_host/host.py sends it today: no id, no pcId, no pcName (QA-17). The phone must parse it and report 'PC too old'.",
+  "state": "preauth",
+  "message": {
+    "type": "pong",
+    "protocolVersion": 5,
+    "appRunning": true
+  }
+}

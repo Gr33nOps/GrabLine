@@ -1,0 +1,10 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The code proof was right; the PC is showing the Allow prompt. No id: it is an event, the reply comes later.",
+  "state": "preauth",
+  "message": {
+    "type": "pairPending",
+    "protocolVersion": 6,
+    "timeoutSeconds": 60
+  }
+}

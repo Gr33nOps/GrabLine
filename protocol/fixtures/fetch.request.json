@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Phase 4. Start streaming job 40's file from byte 0.",
+  "state": "authed",
+  "message": {
+    "id": "r-31",
+    "type": "fetch",
+    "jobId": 40,
+    "offset": 0
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "A quality label outside the fixed set.",
+  "state": "authed",
+  "message": {
+    "id": "x-1",
+    "type": "download",
+    "url": "https://example.com/a.zip",
+    "requestId": "req-bad-0000000000000001",
+    "quality": "4320p"
+  },
+  "expectError": "badRequest"
+}

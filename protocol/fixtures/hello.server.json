@@ -1,0 +1,13 @@
+{
+  "direction": "pc-to-phone",
+  "description": "First frame on every connection. nonce is 32 random bytes, base64url.",
+  "state": "preauth",
+  "message": {
+    "type": "hello",
+    "protocolVersion": 6,
+    "minClientVersion": 6,
+    "pcId": "A3D7Za2aw26jbGofVV3ZAQ",
+    "pcName": "Study PC",
+    "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+  }
+}

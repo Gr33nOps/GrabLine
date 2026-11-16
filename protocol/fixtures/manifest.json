@@ -1,0 +1,808 @@
+{
+  "protocolVersion": 6,
+  "count": 127,
+  "fixtures": [
+    {
+      "file": "analyze.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "analysis"
+    },
+    {
+      "file": "analyze.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "analyze"
+    },
+    {
+      "file": "auth.reply.ok.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "authOk"
+    },
+    {
+      "file": "auth.request.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "auth"
+    },
+    {
+      "file": "control.reply.ok.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "ok"
+    },
+    {
+      "file": "control.reply.removed.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "ok"
+    },
+    {
+      "file": "control.request.cancel.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control"
+    },
+    {
+      "file": "control.request.pause.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control"
+    },
+    {
+      "file": "control.request.remove.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control"
+    },
+    {
+      "file": "control.request.resume.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control"
+    },
+    {
+      "file": "control.request.retry.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control"
+    },
+    {
+      "file": "download.reply.duplicate.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "queued"
+    },
+    {
+      "file": "download.reply.queued.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "queued"
+    },
+    {
+      "file": "download.request.ignoredFields.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download"
+    },
+    {
+      "file": "download.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download"
+    },
+    {
+      "file": "download.request.magnet.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download"
+    },
+    {
+      "file": "download.request.minimal.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download"
+    },
+    {
+      "file": "error.badCode.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "error"
+    },
+    {
+      "file": "error.badRequest.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.conflict.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.failed.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.forbidden.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.internal.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.notFound.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.pairingDenied.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "error"
+    },
+    {
+      "file": "error.pairingExpired.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "error"
+    },
+    {
+      "file": "error.pairingLocked.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "error"
+    },
+    {
+      "file": "error.rateLimited.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.tooLarge.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.unauthorized.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "error"
+    },
+    {
+      "file": "error.unsupported.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "error"
+    },
+    {
+      "file": "error.versionTooOld.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "error"
+    },
+    {
+      "file": "event.global.updated.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "event.job.added.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "event.job.failed.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "event.job.finished.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "event.job.progress.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "event.job.removed.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "event.job.updated.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "event.outbox.added.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "fetch.ack.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "fetchAck"
+    },
+    {
+      "file": "fetch.cancel.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "fetchCancel"
+    },
+    {
+      "file": "fetch.event.end.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "fetchEnd"
+    },
+    {
+      "file": "fetch.frame.hex.txt",
+      "direction": "none",
+      "state": "none",
+      "description": "A binary fetch frame as hex: 'GLF1', streamId 7 (uint32 BE), offset 0 (uint64 BE), then the payload 'hello, file bytes'."
+    },
+    {
+      "file": "fetch.reply.start.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "fetchStart"
+    },
+    {
+      "file": "fetch.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "fetch"
+    },
+    {
+      "file": "fetch.request.resume.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "fetch"
+    },
+    {
+      "file": "fileHash.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "fileHash"
+    },
+    {
+      "file": "fileHash.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "fileHash"
+    },
+    {
+      "file": "files.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "files"
+    },
+    {
+      "file": "files.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "files"
+    },
+    {
+      "file": "focus.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "ok"
+    },
+    {
+      "file": "focus.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "focus"
+    },
+    {
+      "file": "global.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "global"
+    },
+    {
+      "file": "global.request.clearSpeedLimit.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "global"
+    },
+    {
+      "file": "global.request.get.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "global"
+    },
+    {
+      "file": "global.request.pauseAll.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "global"
+    },
+    {
+      "file": "global.request.resumeAll.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "global"
+    },
+    {
+      "file": "global.request.setSpeedLimit.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "global"
+    },
+    {
+      "file": "hello.server.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "hello"
+    },
+    {
+      "file": "hello.server.old.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "hello"
+    },
+    {
+      "file": "invalid/auth.badSignature.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "auth",
+      "expectError": "unauthorized",
+      "expectClose": 4401
+    },
+    {
+      "file": "invalid/auth.oldClient.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "auth",
+      "expectError": "versionTooOld",
+      "expectClose": 4426
+    },
+    {
+      "file": "invalid/auth.unknownDevice.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "auth",
+      "expectError": "unauthorized",
+      "expectClose": 4401
+    },
+    {
+      "file": "invalid/control.conflict.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control",
+      "expectError": "conflict"
+    },
+    {
+      "file": "invalid/control.pathAsJobId.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/control.unknownAction.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/control.unknownJob.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "control",
+      "expectError": "notFound"
+    },
+    {
+      "file": "invalid/download.badQuality.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/download.boolQueueId.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/download.fileScheme.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/download.filenameField.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "forbidden"
+    },
+    {
+      "file": "invalid/download.folderAbsolute.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/download.folderTraversal.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/download.missingRequestId.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/download.pathField.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "forbidden"
+    },
+    {
+      "file": "invalid/download.unknownFolder.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "notFound"
+    },
+    {
+      "file": "invalid/download.unknownQueue.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "notFound"
+    },
+    {
+      "file": "invalid/download.wrongTypes.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/fetch.negativeOffset.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "fetch",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/fetch.path.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "fetch",
+      "expectError": "forbidden"
+    },
+    {
+      "file": "invalid/fetch.unfinishedJob.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "fetch",
+      "expectError": "conflict"
+    },
+    {
+      "file": "invalid/flood.marker.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "ping",
+      "expectError": "rateLimited"
+    },
+    {
+      "file": "invalid/gallery.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "gallery",
+      "expectError": "unsupported"
+    },
+    {
+      "file": "invalid/global.setSpeedLimit.missingValue.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "global",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/links.tooMany.marker.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "links",
+      "expectError": "tooLarge"
+    },
+    {
+      "file": "invalid/missingId.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "ping",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/missingType.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/notJson.marker.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "expectError": "badRequest",
+      "expectClose": 4400
+    },
+    {
+      "file": "invalid/oversize.marker.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "download",
+      "expectError": "tooLarge",
+      "expectClose": 1009
+    },
+    {
+      "file": "invalid/pair.badPublicKey.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "pair",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/pair.expired.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "pair",
+      "expectError": "pairingExpired"
+    },
+    {
+      "file": "invalid/pair.wrongCode.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "pair",
+      "expectError": "badCode"
+    },
+    {
+      "file": "invalid/preauth.download.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "download",
+      "expectError": "unauthorized",
+      "expectClose": 4401
+    },
+    {
+      "file": "invalid/preauth.jobs.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "jobs",
+      "expectError": "unauthorized",
+      "expectClose": 4401
+    },
+    {
+      "file": "invalid/unknownType.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "shutdownPc",
+      "expectError": "unsupported"
+    },
+    {
+      "file": "jobs.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "jobs"
+    },
+    {
+      "file": "jobs.request.cursor.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "jobs"
+    },
+    {
+      "file": "jobs.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "jobs"
+    },
+    {
+      "file": "links.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "queued"
+    },
+    {
+      "file": "links.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "links"
+    },
+    {
+      "file": "outbox.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "outbox"
+    },
+    {
+      "file": "outbox.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "outbox"
+    },
+    {
+      "file": "outboxAck.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "ok"
+    },
+    {
+      "file": "outboxAck.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "outboxAck"
+    },
+    {
+      "file": "pair.event.pending.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "pairPending"
+    },
+    {
+      "file": "pair.reply.denied.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "error"
+    },
+    {
+      "file": "pair.reply.paired.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "paired"
+    },
+    {
+      "file": "pair.request.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "pair"
+    },
+    {
+      "file": "ping.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "pong"
+    },
+    {
+      "file": "ping.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "ping"
+    },
+    {
+      "file": "pong.v5.json",
+      "direction": "pc-to-phone",
+      "state": "preauth",
+      "type": "pong"
+    },
+    {
+      "file": "qr.manual.txt",
+      "direction": "none",
+      "state": "none",
+      "description": "Manual entry when the camera is denied: line 1 is the address the PC shows, line 2 the code as shown (dashes and case are ignored)."
+    },
+    {
+      "file": "qr.uri.txt",
+      "direction": "none",
+      "state": "none",
+      "description": "The exact text inside the pairing QR code."
+    },
+    {
+      "file": "queues.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "queues"
+    },
+    {
+      "file": "queues.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "queues"
+    },
+    {
+      "file": "recent.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "recent"
+    },
+    {
+      "file": "recent.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "recent"
+    },
+    {
+      "file": "status.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "status"
+    },
+    {
+      "file": "status.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "status"
+    },
+    {
+      "file": "subscribe.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "subscribed"
+    },
+    {
+      "file": "subscribe.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "subscribe"
+    },
+    {
+      "file": "unpair.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "ok"
+    },
+    {
+      "file": "unpair.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "unpair"
+    },
+    {
+      "file": "unsubscribe.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "ok"
+    },
+    {
+      "file": "unsubscribe.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "unsubscribe"
+    },
+    {
+      "file": "vectors.json",
+      "direction": "none",
+      "state": "none",
+      "description": "Cryptographic test vectors for pairing proofs and the auth signature."
+    }
+  ]
+}

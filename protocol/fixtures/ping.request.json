@@ -1,0 +1,9 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Liveness and version check.",
+  "state": "authed",
+  "message": {
+    "id": "r-3",
+    "type": "ping"
+  }
+}

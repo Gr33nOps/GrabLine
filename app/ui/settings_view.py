@@ -9,6 +9,7 @@ out and re-hosted here, and Save calls the dialog's ``apply()``.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtWidgets import (
     QFrame,
@@ -35,6 +36,7 @@ class SettingsView(QWidget):
         settings: Settings,
         on_applied: Callable[[], None],
         parent: QWidget | None = None,
+        remote_service: Any = None,
     ) -> None:
         super().__init__(parent)
         self._on_applied = on_applied
@@ -87,6 +89,11 @@ class SettingsView(QWidget):
         tabs = self._dialog.tabs
         self._titles: list[str] = []
         pages = [(tabs.tabText(i).replace("&&", "&"), tabs.widget(i)) for i in range(tabs.count())]
+        if remote_service is not None:
+            from app.ui.phone_page import PhonePage
+
+            # Just before About, which stays last.
+            pages.insert(max(0, len(pages) - 1), (t("Phone"), PhonePage(remote_service)))
         self._pending_pages: dict[int, QWidget] = {}
         for title, page in pages:
             if page is None:

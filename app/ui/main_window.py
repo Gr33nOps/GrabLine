@@ -106,6 +106,7 @@ from app.ui import (
     guard,
     icons,
     motion,
+    remote_add,
     theme,
     threads,
     work_threads,
@@ -304,6 +305,11 @@ class MainWindow(QMainWindow):
         self._prev_status: dict[int, JobStatus] = {}
         self._was_active = False
         self._resolve_threads: list[work_threads.ResolveThread] = []
+        # Phone remote: the unattended add path and the listener service
+        # (created on demand; the listener stays off until a phone is paired).
+        self._remote_adder: remote_add.UnattendedAdder | None = None
+        self._remote_service: Any = None
+        self._start_remote_service()
         self._file_ops: set[work_threads.FileOpThread] = set()
         # Cancel flags for unbounded file ops (the installer download): set on
         # shutdown so the worker stops promptly and the exit wait doesn't time
@@ -716,7 +722,9 @@ class MainWindow(QMainWindow):
     def _make_settings_page(self) -> QWidget:
         from app.ui.settings_view import SettingsView
 
-        return SettingsView(self.settings, self._on_settings_applied)
+        return SettingsView(
+            self.settings, self._on_settings_applied, remote_service=self._remote_service
+        )
 
     def _page_for(self, key: str) -> int | None:
         """This page's index in the stack, building it on first use."""
@@ -984,6 +992,9 @@ class MainWindow(QMainWindow):
         bounded operations (a subprocess convert, a network resolve), so the
         wait terminates."""
         self._shutting_down = True
+        if self._remote_service is not None:
+            # Close phone connections first so no request reaches a dying window.
+            self._remote_service.shutdown()
         self._dashboard_view.shutdown()
         for timer in (self._timer, self._handoff_timer, self._rss_timer, self._watch_timer):
             timer.stop()
@@ -1012,6 +1023,17 @@ class MainWindow(QMainWindow):
     def _drain_handoffs(self) -> None:
         seen: set[str] = set()
         for handoff in self.manager.db.claim_handoffs():
+            if handoff.source == remote_add.PHONE_SOURCE:
+                # A paired phone: no one is at the PC, so never a dialog.
+                self._phone_adder().add(handoff)
+                continue
+            if handoff.source == remote_add.PHONE_LINKS_SOURCE:
+                # Many links from a phone: each its own unattended add, no picker.
+                for link in handoff.payload:
+                    self._phone_adder().add(
+                        replace(handoff, url=link, source=remote_add.PHONE_SOURCE, payload=())
+                    )
+                continue
             # One browser click can deposit the same URL many times (extension
             # retry / dual webRequest+onCreated). Claiming once still left a
             # batch of identical rows - collapse them here so we only open one
@@ -1050,6 +1072,75 @@ class MainWindow(QMainWindow):
                     headers=handoff.headers,
                     from_browser=True,
                 )
+
+    def _start_remote_service(self) -> None:
+        """The phone remote. Its listener opens no socket until a phone is
+        paired or a pairing code is showing; a failure here never stops the
+        app from starting."""
+        try:
+            from app.remote.service import RemoteService
+
+            service = RemoteService(self.manager, self.settings, self.resolver, self)
+            service.start()
+        except Exception:
+            log.exception("phone remote unavailable")
+            return
+        self._remote_service = service
+
+    def _add_send_to_phone_menu(self, menu: QMenu) -> dict[QAction, str | None]:
+        """A "Send to phone" submenu: one entry per paired phone plus "Any
+        phone". Returns action -> device id (None = any phone)."""
+        service = self._remote_service
+        phones = service.store.list() if service is not None else []
+        send_menu = menu.addMenu(t("Send to phone"))
+        send_menu.setEnabled(bool(phones))
+        actions: dict[QAction, str | None] = {}
+        if not phones:
+            send_menu.setToolTip(t("Pair a phone in Settings"))
+            return actions
+        for device in phones:
+            actions[send_menu.addAction(device.name)] = device.device_id
+        send_menu.addSeparator()
+        actions[send_menu.addAction(t("Any phone"))] = None
+        return actions
+
+    def _send_to_phone(self, device_id: str | None, view: JobView) -> None:
+        service = self._remote_service
+        if service is None:
+            return
+        queued = service.queue_for_phone(device_id, view.url, view.display_name)
+        self.statusBar().showMessage(
+            t("Sent to your phone") if queued else t("This link cannot be sent to a phone"), 3000
+        )
+
+    def _phone_adder(self) -> remote_add.UnattendedAdder:
+        if self._remote_adder is None:
+            self._remote_adder = remote_add.UnattendedAdder(
+                self.manager,
+                self.resolver,
+                self.settings,
+                resolve_folder=self._phone_folder,
+                queue_exists=self._queue_exists,
+                on_outcome=self._on_phone_outcome,
+                parent=self,
+            )
+        return self._remote_adder
+
+    def _phone_folder(self, folder_id: str) -> Path | None:
+        """A folder id the phone chose, mapped back to a path only if it is
+        one of the PC's own download folders (never a path from the phone)."""
+        service = self._remote_service
+        return service.resolve_folder(folder_id) if service is not None else None
+
+    def _queue_exists(self, queue_id: int) -> bool:
+        return any(queue.id == queue_id for queue in self.manager.db.list_queues())
+
+    def _on_phone_outcome(self, outcome: remote_add.AddOutcome) -> None:
+        service = self._remote_service
+        if service is not None:
+            service.add_outcome(outcome)
+        if outcome.result == "queued":
+            self.refresh()
 
     def _open_gallery(self, urls: list[str], page_title: str | None) -> None:
         """F2.2: the extension collected a page's images - pick and batch."""
@@ -2269,6 +2360,7 @@ class MainWindow(QMainWindow):
         copy_magnet = menu.addAction(t("Copy magnet link"))
         copy_magnet.setVisible(view.kind is JobKind.TORRENT)
         redownload = menu.addAction(t("Download again"))
+        send_actions = self._add_send_to_phone_menu(menu)
         # Convert to… - every FFmpeg target that makes sense for this file,
         # grouped Video / Audio / Image, plus the tuned GIF dialog.
         ffmpeg_path = find_ffmpeg(self.settings)
@@ -2369,6 +2461,8 @@ class MainWindow(QMainWindow):
             self._copy_magnet(view)
         elif chosen is redownload:
             self.begin_add_url(view.url, allow_duplicate=True)
+        elif chosen in send_actions:
+            self._send_to_phone(send_actions[chosen], view)
         elif to_gif is not None and chosen is to_gif and ffmpeg_path is not None:
             GifDialog(ffmpeg_path, file_path, self).exec()
         elif chosen in convert_actions and ffmpeg_path is not None:

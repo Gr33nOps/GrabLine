@@ -1,0 +1,29 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The job failed; job.error says why in plain words.",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "job.failed",
+    "seq": 5,
+    "ts": 1794700005,
+    "job": {
+      "id": 39,
+      "url": "https://example.com/private/report.pdf",
+      "name": "report.pdf",
+      "status": "failed",
+      "kind": "direct",
+      "downloaded": 0,
+      "total": null,
+      "speed": 0,
+      "eta": null,
+      "queueId": null,
+      "createdAt": 1794698200,
+      "finishedAt": 1794698210,
+      "error": "The site refused this download (403)",
+      "requestId": null,
+      "fetchable": false
+    }
+  }
+}

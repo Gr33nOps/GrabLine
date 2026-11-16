@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Progress for up to 50 links.",
+  "state": "authed",
+  "message": {
+    "id": "r-10",
+    "type": "status",
+    "urls": [
+      "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+      "https://example.com/never-seen.zip"
+    ]
+  }
+}

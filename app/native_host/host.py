@@ -17,7 +17,7 @@ from app.native_host.protocol import ProtocolError, read_message, write_message
 
 log = logging.getLogger(__name__)
 
-PROTOCOL_VERSION = 5
+PROTOCOL_VERSION = 6
 
 _MAX_URL_LENGTH = 8192
 _MAX_TEXT_LENGTH = 512
@@ -38,6 +38,14 @@ def _clean_text(value: object, limit: int = _MAX_TEXT_LENGTH) -> str | None:
         return None
     value = value.strip()
     return value[:limit] if value else None
+
+
+def _extension_source(value: object) -> str:
+    """The handoff source for a browser message. Handoffs from phones carry
+    source "phone" / "phone-links"; the extension must not be able to claim
+    them, so any name starting with "phone" becomes "extension"."""
+    source = _clean_text(value) or "extension"
+    return "extension" if source.lower().startswith("phone") else source
 
 
 def _valid_url(value: object) -> str | None:
@@ -119,7 +127,7 @@ def handle_message(db: Database, message: dict[str, Any]) -> dict[str, Any]:
             url,
             page_url=_valid_url(message.get("pageUrl")),
             page_title=_clean_text(message.get("pageTitle")),
-            source=_clean_text(message.get("source")) or "extension",
+            source=_extension_source(message.get("source")),
             quality=quality,
             payload=fallbacks,
             headers=headers,

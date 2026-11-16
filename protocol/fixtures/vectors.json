@@ -1,0 +1,33 @@
+{
+  "note": "TEST VECTORS ONLY. The device key is derived from a public seed string and must never be used outside tests.",
+  "pairingCode": "7K3M9QX2RTBW",
+  "pairingCodeDisplay": "7K3M-9QX2-RTBW",
+  "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "nonceHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "pinnedFingerprint": "Le1QbEwBSOkh7PZtV1-1iOmkqUK0eHKEuxFG5_5LFg4",
+  "pinnedFingerprintHex": "2ded506c4c0148e921ecf66d575fb588e9a4a942b4787284bb1146e7fe4b160e",
+  "pinnedFingerprintSource": "SHA-256 of the ASCII string 'grabline-test-pc-spki' (stands in for the PC certificate's SubjectPublicKeyInfo DER)",
+  "pcId": "A3D7Za2aw26jbGofVV3ZAQ",
+  "deviceId": "KsucBZHeyJguN6H0BzJQiw",
+  "deviceKey": {
+    "curve": "P-256",
+    "seed": "grabline-test-device-key-1",
+    "privateScalarHex": "ba66baa4f2930f05df58a3018d7a1149310a85ad54e43bdccac623d069855029",
+    "derivation": "d = (int(SHA-256(seed)) mod (n-1)) + 1",
+    "publicKeySpkiDer": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJKgUzqYhvEgwmzQQEvg2ssxBRuKPwgQnQocViZyaHoUo8afbboXhTc-SDGQtWKSeiZY0jKbSOS2iUuCG0VwXIQ",
+    "publicKeySpkiDerSha256Hex": "2d9d80429701b0a3bdcf5811eb2bb8572f9ddf71cf8ba43f0bd8694323c4de6e"
+  },
+  "pair": {
+    "hmacKeyAscii": "7K3M9QX2RTBW",
+    "codeProofInputHex": "677261626c696e652d706169722d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2ded506c4c0148e921ecf66d575fb588e9a4a942b4787284bb1146e7fe4b160e2d9d80429701b0a3bdcf5811eb2bb8572f9ddf71cf8ba43f0bd8694323c4de6e",
+    "codeProof": "Smf4OozxeARyGSFxpYre8dXqDe8DFizLRu1JIcYkVaQ",
+    "serverProofInputHex": "677261626c696e652d7061697265642d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2ded506c4c0148e921ecf66d575fb588e9a4a942b4787284bb1146e7fe4b160e2d9d80429701b0a3bdcf5811eb2bb8572f9ddf71cf8ba43f0bd8694323c4de6e4b737563425a4865794a67754e364830427a4a516977",
+    "serverProof": "1-hrlolmMHIXUI0GE9NxjbofOOVJD19WZcpNiTRRzQw"
+  },
+  "auth": {
+    "transcriptHex": "677261626c696e652d617574682d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2ded506c4c0148e921ecf66d575fb588e9a4a942b4787284bb1146e7fe4b160e4b737563425a4865794a67754e364830427a4a516977",
+    "signatureDer": "MEUCIQDEkNVli0ImyofhN_Wu6-4n3CBTJwbf9PLA_GpHelIhsAIgGE-UGdJQPUyd2T_zsX1zDXFD6yn-mSsGqKBL67H4TCM",
+    "signatureNote": "ECDSA signatures are randomised; any signature that verifies over transcriptHex with deviceKey is valid. This one is fixed for the fixtures."
+  },
+  "qrUri": "grabline-pair:?v=1&a=192.168.1.20,10.8.0.3,%5Bfd7a:115c:a1e0::20%5D&p=47821&f=Le1QbEwBSOkh7PZtV1-1iOmkqUK0eHKEuxFG5_5LFg4&c=7K3M9QX2RTBW&i=A3D7Za2aw26jbGofVV3ZAQ&n=Study%20PC&x=1794700120"
+}

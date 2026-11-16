@@ -1,0 +1,15 @@
+{
+  "direction": "pc-to-phone",
+  "description": "One handoff holding all accepted links.",
+  "state": "authed",
+  "message": {
+    "id": "r-13",
+    "type": "queued",
+    "protocolVersion": 6,
+    "handoffId": 319,
+    "count": 3,
+    "appRunning": true,
+    "requestId": "req-0005-3c9e1f7a2b6d4c88",
+    "duplicate": false
+  }
+}

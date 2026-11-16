@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Newest jobs; limit 1..20, default 5.",
+  "state": "authed",
+  "message": {
+    "id": "r-11",
+    "type": "recent",
+    "limit": 2
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Resuming a completed job.",
+  "state": "authed",
+  "message": {
+    "id": "x-8",
+    "type": "control",
+    "jobId": 40,
+    "action": "resume"
+  },
+  "expectError": "conflict",
+  "precondition": "job 40 is completed"
+}

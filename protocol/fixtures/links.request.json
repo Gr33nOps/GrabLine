@@ -1,0 +1,16 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Many links at once (max 300). Each becomes its own unattended job; quality, queueId and folderId apply to all.",
+  "state": "authed",
+  "message": {
+    "id": "r-13",
+    "type": "links",
+    "requestId": "req-0005-3c9e1f7a2b6d4c88",
+    "urls": [
+      "https://example.com/a.zip",
+      "https://example.com/b.zip",
+      "https://example.com/c.zip"
+    ],
+    "quality": "best"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "direction": "pc-to-phone",
+  "description": "After remove the job is gone, so job is null. A finished file stays on disk.",
+  "state": "authed",
+  "message": {
+    "id": "r-20",
+    "type": "ok",
+    "protocolVersion": 6,
+    "job": null
+  }
+}

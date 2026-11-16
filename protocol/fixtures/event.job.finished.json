@@ -1,0 +1,29 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The job completed.",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "job.finished",
+    "seq": 4,
+    "ts": 1794700004,
+    "job": {
+      "id": 40,
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "name": "Sample video (1080p).mp4",
+      "status": "completed",
+      "kind": "smart",
+      "downloaded": 73400320,
+      "total": 73400320,
+      "speed": 0,
+      "eta": null,
+      "queueId": 2,
+      "createdAt": 1794699100,
+      "finishedAt": 1794699400,
+      "error": null,
+      "requestId": null,
+      "fetchable": true
+    }
+  }
+}

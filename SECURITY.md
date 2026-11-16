@@ -26,8 +26,19 @@ scan, Safe Browsing, HTTP warnings) are advisory by design. Integrity checks
 (archive path traversal, native-messaging allow-lists, subprocess argv-only
 spawns, TLS verification) are enforced.
 
+The optional **phone-remote listener** (`app/remote/`) is in scope. It is the
+only network listener in GrabLine. It is off until you pair a phone, listens
+only on private and link-local addresses, and lets a paired phone add
+downloads and control the queue. Report anything that lets an unpaired or
+revoked client reach it, bypasses the certificate pin, pairing code limits or
+device-key login, makes it listen on a public address or outside `app/remote/`,
+names a path or folder the PC did not issue, opens a dialog on the PC, or lets a
+web page connect. Use the same private process above, and include the protocol
+step (for example `pair` or `auth`) and the PC's OS. Never post pairing codes,
+keys or certificates from a real setup.
+
 See [docs/security-model.md](docs/security-model.md) for the full map of
-trust boundaries and past hardening work.
+trust boundaries, the listener's rules and past hardening work.
 
 ## Supported versions
 

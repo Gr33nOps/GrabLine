@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "QA-40: fetch by path instead of job id.",
+  "state": "authed",
+  "message": {
+    "id": "x-11",
+    "type": "fetch",
+    "path": "C:\\Users\\me\\Documents\\taxes.pdf"
+  },
+  "expectError": "forbidden"
+}

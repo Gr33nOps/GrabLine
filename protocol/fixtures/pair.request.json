@@ -1,0 +1,14 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Pairing request. publicKey is a TEST-ONLY P-256 key (see vectors.json); codeProof is the real HMAC for code 7K3M9QX2RTBW.",
+  "state": "preauth",
+  "message": {
+    "id": "r-1",
+    "type": "pair",
+    "protocolVersion": 6,
+    "deviceName": "Pixel 8",
+    "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJKgUzqYhvEgwmzQQEvg2ssxBRuKPwgQnQocViZyaHoUo8afbboXhTc-SDGQtWKSeiZY0jKbSOS2iUuCG0VwXIQ",
+    "codeProof": "Smf4OozxeARyGSFxpYre8dXqDe8DFizLRu1JIcYkVaQ",
+    "appVersion": "1.0.0"
+  }
+}

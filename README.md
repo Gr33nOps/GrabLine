@@ -73,6 +73,9 @@ and Deno are downloaded separately when needed; RAR/7Z extraction needs 7-Zip.
   difference between an unpaired host and an app that is closed.
 
 The extension communicates over local stdio pipes, with no listening web server.
+GrabLine opens no network port except the optional phone-remote listener, which
+is off until you pair a phone and listens only on your local network. See the
+[security model](docs/security-model.md#phone-remote-listener).
 Download takeover can be disabled in its popup. Generated browser files and POST
 exports stay in the browser; Firefox and Chromium use different takeover paths.
 

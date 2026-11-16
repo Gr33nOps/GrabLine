@@ -1,0 +1,9 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Queues and destination folders the phone may choose from.",
+  "state": "authed",
+  "message": {
+    "id": "r-26",
+    "type": "queues"
+  }
+}

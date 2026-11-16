@@ -1,0 +1,14 @@
+{
+  "direction": "phone-to-pc",
+  "description": "QA-10: 100 pings a second for 3 seconds from one paired device. At least the first 40 succeed; the rest get rateLimited; the listener and window stay responsive.",
+  "state": "authed",
+  "message": {
+    "id": "x-22",
+    "type": "ping"
+  },
+  "expectError": "rateLimited",
+  "generate": {
+    "repeatPerSecond": 100,
+    "seconds": 3
+  }
+}

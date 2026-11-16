@@ -1,0 +1,17 @@
+{
+  "direction": "phone-to-pc",
+  "description": "301 links in one message. The test builds the list from the template.",
+  "state": "authed",
+  "message": {
+    "id": "x-21",
+    "type": "links",
+    "requestId": "req-bad-0000000000000003",
+    "urls": []
+  },
+  "expectError": "tooLarge",
+  "generate": {
+    "listField": "urls",
+    "count": 301,
+    "template": "https://example.com/file-{n}.bin"
+  }
+}

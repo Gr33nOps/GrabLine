@@ -1,0 +1,13 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Per-connection login. signature is a DER ECDSA-SHA256 signature over the auth transcript (see vectors.json); it verifies against pair.request.json's publicKey.",
+  "state": "preauth",
+  "message": {
+    "id": "r-2",
+    "type": "auth",
+    "protocolVersion": 6,
+    "deviceId": "KsucBZHeyJguN6H0BzJQiw",
+    "signature": "MEUCIQDEkNVli0ImyofhN_Wu6-4n3CBTJwbf9PLA_GpHelIhsAIgGE-UGdJQPUyd2T_zsX1zDXFD6yn-mSsGqKBL67H4TCM",
+    "appVersion": "1.0.0"
+  }
+}
