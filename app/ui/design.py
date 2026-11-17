@@ -530,6 +530,7 @@ def stylesheet(p: Palette) -> str:
     QLabel[role="value"] {{ color: {p.text}; }}
     QLabel[role="strong"] {{ color: {p.text}; font-weight: 600; }}
     QLabel[role="accent"] {{ color: {p.accent_text}; font-weight: 600; }}
+    QLabel[role="warn"] {{ color: {p.warn}; }}
     QLabel[role="ok"] {{ color: {p.ok}; }}
     QLabel[chip="true"] {{
         color: {p.text2}; background: {p.surface2}; border: 1px solid {p.border};

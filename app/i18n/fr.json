@@ -956,5 +956,12 @@
   "Unknown": "Inconnu",
   "Update GrabLine on the phone to see its downloads here.": "Mettez à jour GrabLine sur le téléphone pour voir ses téléchargements ici.",
   "Waiting": "En attente",
-  "{action}: {result}": "{action} : {result}"
+  "{action}: {result}": "{action} : {result}",
+  "{done} of {total}": "{done} sur {total}",
+  "Paused on the phone": "Mis en pause sur le téléphone",
+  "Resumed on the phone": "Repris sur le téléphone",
+  "Cancelled on the phone": "Annulé sur le téléphone",
+  "Retrying on the phone": "Nouvelle tentative sur le téléphone",
+  "Removed from the phone": "Retiré du téléphone",
+  "Sent to this PC to download": "Envoyé à ce PC pour téléchargement"
 }

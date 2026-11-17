@@ -59,12 +59,20 @@ def make(
 
 
 def row_buttons(page: DevicesPage, row: int) -> dict[str, QAbstractButton]:
-    holder = page.table.cellWidget(row, 6)
+    holder = page.table.cellWidget(row, 5)
     assert holder is not None
     return {
-        b.toolTip(): b
+        action_label(str(b.property("action"))): b
         for b in holder.findChildren(QAbstractButton)  # tooltip is the label
     }
+
+
+def done_text(page: DevicesPage, row: int) -> str:
+    holder = page.table.cellWidget(row, 2)
+    assert holder is not None
+    label = holder.findChild(QLabel, "DoneText")
+    assert label is not None
+    return label.text()
 
 
 def cell(page: DevicesPage, row: int, column: int) -> str:
@@ -124,9 +132,10 @@ def test_phone_online_with_jobs_fills_the_table() -> None:
     assert page.jobs_stack.currentIndex() == 1
     assert page.table.rowCount() == 3
     assert [cell(page, r, 0) for r in range(3)] == ["ubuntu.iso", "zoo.mp4", "report.pdf"]
-    assert cell(page, 0, 3) == "5.7 GB"
-    assert cell(page, 0, 4) == "1.00 MB/s" and cell(page, 0, 5) == "1m 15s"
-    assert cell(page, 1, 4) == "" and cell(page, 1, 5) == ""  # only while downloading
+    assert done_text(page, 0) == "700.0 MB of 5.7 GB"  # how much is done, always
+    assert done_text(page, 1) == "537.0 KB"  # finished: the total
+    assert cell(page, 0, 3) == "1.00 MB/s" and cell(page, 0, 4) == "1m 15s"
+    assert cell(page, 1, 3) == "" and cell(page, 1, 4) == ""  # only while downloading
     assert page.banner_label.isHidden()
     assert not page._dim.isEnabled()
     assert page.table.accessibleName() == "Downloads on this phone"
@@ -135,13 +144,13 @@ def test_phone_online_with_jobs_fills_the_table() -> None:
         header = page.table.horizontalHeaderItem(column)
         assert header is not None
         headers.append(header.text())
-    assert headers[:6] == ["Name", "Status", "Progress", "Size", "Speed", "Time left"]
+    assert headers == ["Name", "Status", "Progress", "Speed", "Time left", ""]
     # Buttons are named after the action and the download.
-    names = {b.accessibleName() for b in page.table.cellWidget(0, 6).findChildren(QPushButton)}
+    names = {b.accessibleName() for b in page.table.cellWidget(0, 5).findChildren(QPushButton)}
     assert names == {
-        "Pause: ubuntu.iso",
-        "Cancel: ubuntu.iso",
-        "Download on this PC instead: ubuntu.iso",
+        "Pause ubuntu.iso",
+        "Cancel ubuntu.iso",
+        "Download on this PC instead ubuntu.iso",
     }
     assert service.names() == []  # showing the list sends nothing
 
@@ -259,9 +268,9 @@ def test_the_table_follows_phone_jobs_changed() -> None:
         ]
     )
     service.phoneJobsChanged.emit("d1")
-    assert cell(page, 0, 4) == ""  # paused: no speed
+    assert cell(page, 0, 3) == ""  # paused: no speed
     assert set(row_buttons(page, 0)) == {"Resume", "Cancel", "Download on this PC instead"}
-    assert cell(page, 1, 4) == "1.00 MB/s"
+    assert cell(page, 1, 3) == "1.00 MB/s"
     # A different list replaces the rows.
     service.lists["d1"] = snapshot([phone_job(9, name="new.bin")])
     service.phoneJobsChanged.emit("d1")
@@ -319,11 +328,16 @@ def test_narrow_windows_drop_size_and_time_left() -> None:
     _service, page = make(jobs=[phone_job(1)])
     page.resize(1300, 560)
     ensure_app().processEvents()
-    assert not page.table.isColumnHidden(3) and not page.table.isColumnHidden(5)
+    assert not page.table.isColumnHidden(3) and not page.table.isColumnHidden(4)
     page.resize(900, 560)
     ensure_app().processEvents()
-    assert page.table.isColumnHidden(3) and page.table.isColumnHidden(5)
-    assert not page.table.isColumnHidden(0) and not page.table.isColumnHidden(6)
+    assert page.table.isColumnHidden(4) and not page.table.isColumnHidden(3)  # time left first
+    page.resize(760, 560)
+    ensure_app().processEvents()
+    assert page.table.isColumnHidden(3) and page.table.isColumnHidden(4)
+    # How much is done always stays, with the name and the actions.
+    for column in (0, 1, 2, 5):
+        assert not page.table.isColumnHidden(column)
 
 
 # ---------------------------------------------------------------- commands
@@ -358,8 +372,9 @@ def test_a_command_disables_that_row_until_the_phone_answers() -> None:
 @pytest.mark.parametrize(
     ("result", "message", "shown"),
     [
-        ("ok", "", "Pause: Done"),
+        ("ok", "", "Paused on the phone"),
         ("ok", "Paused it", "Pause: Paused it"),
+        ("ok", "", "Paused on the phone"),
         ("timeout", "", "Pause: The phone did not answer"),
         ("offline", "", "Pause: The phone is not connected"),
         ("busy", "", "Pause: Too many commands at once. Try again in a moment."),
@@ -372,12 +387,11 @@ def test_a_command_disables_that_row_until_the_phone_answers() -> None:
 )
 def test_the_result_of_each_command_is_shown(result: str, message: str, shown: str) -> None:
     service, page = make(jobs=[phone_job(1)])
-    heard: list[str] = []
-    page.status.connect(heard.append)
     row_buttons(page, 0)["Pause"].click()
     service.commandFinished.emit(1, result, message)
     assert page.result_label.text() == shown
-    assert heard == [shown]
+    # Failures are coloured so they are seen; success is not.
+    assert page.result_label.property("role") == ("ok" if result == "ok" else "warn")
     assert page.result_label.textFormat() == Qt.TextFormat.PlainText
 
 
@@ -463,7 +477,7 @@ def test_enter_sends_and_a_bad_link_is_explained() -> None:
     page.link_edit.returnPressed.emit()
     assert page.send_note.text() == "This link cannot be sent to a phone"
     assert page.link_edit.text() == "not a link"  # kept so it can be fixed
-    assert heard == ["This link cannot be sent to a phone"]
+    assert heard == []  # shown once, inline: not on the status bar too
 
 
 def test_a_link_goes_to_the_phone_that_is_selected() -> None:
@@ -702,3 +716,80 @@ def test_bidi_in_a_device_name_cannot_reorder_it() -> None:
     from app.remote.phonejobs import neutralise
 
     assert neutralise("photo\u202egpj.exe") == "photo\ufffdgpj.exe"
+
+
+# ---------------------------------------------- polish: size, names, notes
+
+
+def test_unknown_total_and_early_states_still_say_how_much() -> None:
+    jobs = [
+        phone_job(1, total=None, downloaded=34_000_000),
+        phone_job(2, status="queued", downloaded=0, total=None),
+        phone_job(3, status="paused", downloaded=34_000_000, total=793_000_000),
+    ]
+    _service, page = make(jobs=jobs)
+    assert done_text(page, 0) == "32.4 MB"
+    assert done_text(page, 1) == ""
+    assert done_text(page, 2) == "32.4 MB of 756.3 MB"
+
+
+def test_the_name_takes_the_remaining_width() -> None:
+    from PySide6.QtWidgets import QHeaderView
+
+    _service, page = make(jobs=[phone_job(1)])
+    header = page.table.horizontalHeader()
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
+
+
+def test_action_buttons_are_named_with_the_job_and_tabbable() -> None:
+    _service, page = make(jobs=[phone_job(1, name="debian-13.7.0-amd64-netinst.iso")])
+    row = page.table.cellWidget(0, 5)
+    assert row is not None
+    buttons = row.findChildren(QPushButton)
+    assert buttons
+    for button in buttons:
+        assert button.accessibleName().endswith(" debian-13.7.0-amd64-netinst.iso")
+        assert button.toolTip().startswith("<p style='white-space:pre-wrap'>")
+        assert button.focusPolicy() == Qt.FocusPolicy.StrongFocus
+    assert "Pause debian-13.7.0-amd64-netinst.iso" in {b.accessibleName() for b in buttons}
+
+
+def test_the_selected_download_has_real_buttons_outside_the_table() -> None:
+    """UI Automation cannot see widgets inside table cells; this bar is the
+    accessible path and does the same commands."""
+    service, page = make(
+        jobs=[phone_job(7, name="a.iso"), phone_job(8, name="b.iso", status="paused")]
+    )
+    assert not page.action_bar.isHidden()
+    bar = {b.accessibleName(): b for b in page.action_bar.findChildren(QPushButton)}
+    assert set(bar) == {"Pause a.iso", "Cancel a.iso", "Download on this PC instead a.iso"}
+    assert all(b.focusPolicy() == Qt.FocusPolicy.StrongFocus for b in bar.values())
+    bar["Pause a.iso"].click()
+    assert service.calls == [("command", ("d1", 7, "pause"))]
+    page.table.setCurrentCell(1, 0)
+    names = {b.accessibleName() for b in page.action_bar.findChildren(QPushButton)}
+    assert "Resume b.iso" in names and "Pause a.iso" not in names
+
+
+def test_the_action_bar_is_hidden_when_there_is_no_list() -> None:
+    _service, page = make(shared=False, jobs=[])
+    assert page.action_bar.isHidden()
+
+
+def test_sent_note_shows_inline_only_and_clears_itself_or_on_typing() -> None:
+    service, page = make(jobs=[])
+    heard: list[str] = []
+    page.status.connect(heard.append)
+    page.link_edit.setText("https://example.com/a.zip")
+    page.send_button.click()
+    assert page.send_note.text() == "Sent to your phone" and heard == []
+    assert page._note_timer.isActive()
+    page._note_timer.stop()
+    page._note_timer.timeout.emit()
+    assert page.send_note.isHidden() and page.send_note.text() == ""
+    page.link_edit.setText("https://example.com/b.zip")
+    page.send_button.click()
+    assert not page.send_note.isHidden()
+    page.link_edit.setText("h")  # typing again
+    assert page.send_note.isHidden()
+    assert service.queued

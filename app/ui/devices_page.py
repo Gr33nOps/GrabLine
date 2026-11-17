@@ -50,13 +50,17 @@ from app.ui.phone_page import PairingDialog
 LIST_GRACE_S = 4.0
 #: How long a command result stays under the table.
 RESULT_SHOWN_MS = 8000
+#: How long "Sent to your phone" stays under the send box.
+NOTE_SHOWN_MS = 4000
 #: Phone list updates redraw the page at most this often (seconds).
 RENDER_MIN_INTERVAL_S = 0.25
 #: Below this table width the size and time-left columns are hidden.
 _NARROW_PX = 700
+#: Below this the speed goes too (the time left goes first, then the speed).
+_VERY_NARROW_PX = 600
 
-_COLUMNS = (N_("Name"), N_("Status"), N_("Progress"), N_("Size"), N_("Speed"), N_("Time left"), "")
-_C_NAME, _C_STATUS, _C_PROGRESS, _C_SIZE, _C_SPEED, _C_ETA, _C_ACTIONS = range(7)
+_COLUMNS = (N_("Name"), N_("Status"), N_("Progress"), N_("Speed"), N_("Time left"), "")
+_C_NAME, _C_STATUS, _C_PROGRESS, _C_SPEED, _C_ETA, _C_ACTIONS = range(6)
 
 #: action -> (label, icon, danger)
 _ACTIONS: dict[str, tuple[str, str, bool]] = {
@@ -69,6 +73,14 @@ _ACTIONS: dict[str, tuple[str, str, bool]] = {
 }
 
 #: What a command's outcome says when the phone gave no words of its own.
+_OK_TEXT = {
+    "pause": N_("Paused on the phone"),
+    "resume": N_("Resumed on the phone"),
+    "cancel": N_("Cancelled on the phone"),
+    "retry": N_("Retrying on the phone"),
+    "remove": N_("Removed from the phone"),
+    "moveToPc": N_("Sent to this PC to download"),
+}
 _RESULT_TEXT = {
     "ok": N_("Done"),
     "notFound": N_("The phone no longer has that download"),
@@ -125,7 +137,8 @@ def _format_time(unix: int) -> str:
 class DevicesPage(QWidget):
     """Sidebar page "Devices"."""
 
-    #: A line for the main window's status bar.
+    #: Kept for callers that want a status-bar line; the page itself shows
+    #: everything inline and does not emit it.
     status = Signal(str)
 
     def __init__(self, service: Any, parent: QWidget | None = None) -> None:
@@ -160,6 +173,9 @@ class DevicesPage(QWidget):
         self._result_timer = QTimer(self)
         self._result_timer.setSingleShot(True)
         self._result_timer.timeout.connect(lambda: self.result_label.setText(""))
+        self._note_timer = QTimer(self)
+        self._note_timer.setSingleShot(True)
+        self._note_timer.timeout.connect(self._clear_note)
 
         service.devicesChanged.connect(self.refresh)
         service.deviceOnlineChanged.connect(self._on_presence)
@@ -311,6 +327,15 @@ class DevicesPage(QWidget):
         self.jobs_stack.addWidget(self._build_table())  # 1
         col.addWidget(self.jobs_stack, 1)
 
+        self.action_bar = QWidget()
+        self.action_bar.setObjectName("BareContainer")
+        self.action_bar.setAccessibleName(t("Downloads on this phone"))
+        self.action_layout = QHBoxLayout(self.action_bar)
+        self.action_layout.setContentsMargins(4, 0, 4, 0)
+        self.action_layout.setSpacing(4)
+        self.action_bar.hide()
+        col.addWidget(self.action_bar)
+
         self.result_label = _wrapping(components.role_label("", "dim"))
         self.result_label.setAccessibleName(t("Downloads on this phone"))
         col.addWidget(self.result_label)
@@ -331,14 +356,14 @@ class DevicesPage(QWidget):
         table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         table.customContextMenuRequested.connect(self._show_row_menu)
+        table.currentCellChanged.connect(lambda *_: self._refresh_action_bar())
         header = table.horizontalHeader()
         header.setHighlightSections(False)
         header.setStretchLastSection(False)
         header.setSectionResizeMode(_C_NAME, QHeaderView.ResizeMode.Stretch)
         for column, width in (
             (_C_STATUS, 118),
-            (_C_PROGRESS, 72),
-            (_C_SIZE, 80),
+            (_C_PROGRESS, 172),
             (_C_SPEED, 96),
             (_C_ETA, 76),
             (_C_ACTIONS, 108),
@@ -346,7 +371,7 @@ class DevicesPage(QWidget):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
             table.setColumnWidth(column, width)
         right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        for column in (_C_SIZE, _C_SPEED, _C_ETA):
+        for column in (_C_SPEED, _C_ETA):
             item = table.horizontalHeaderItem(column)
             if item is not None:
                 item.setTextAlignment(right)
@@ -365,11 +390,12 @@ class DevicesPage(QWidget):
         return super().eventFilter(watched, event)
 
     def _fit_columns(self) -> None:
-        """Narrow windows drop the figures that can wait (size, time left) so
-        the name always has room; the same rule as the downloads table."""
-        narrow = self.table.viewport().width() < _NARROW_PX
-        self.table.setColumnHidden(_C_SIZE, narrow)
-        self.table.setColumnHidden(_C_ETA, narrow)
+        """Narrow windows drop the figures that can wait, the time left first and
+        then the speed, so the name has room. How much is done always stays,
+        under the progress bar."""
+        width = self.table.viewport().width()
+        self.table.setColumnHidden(_C_ETA, width < _NARROW_PX)
+        self.table.setColumnHidden(_C_SPEED, width < _VERY_NARROW_PX)
 
     # ------------------------------------------------------------- the list
 
@@ -499,6 +525,7 @@ class DevicesPage(QWidget):
             self.message_label.setAccessibleName(text)
             self.jobs_stack.setCurrentIndex(0)
             self._clear_rows()
+            self._refresh_action_bar()
             return
         assert snapshot is not None
         self.jobs_stack.setCurrentIndex(1)
@@ -537,6 +564,11 @@ class DevicesPage(QWidget):
             self._rebuild_rows(snapshot)
         for row, job in enumerate(snapshot.jobs):
             self._update_row(row, device_id, job, online)
+        if self.table.currentRow() < 0 and snapshot.jobs:
+            self.table.blockSignals(True)
+            self.table.setCurrentCell(0, _C_NAME)
+            self.table.blockSignals(False)
+        self._refresh_action_bar()
 
     def _rebuild_rows(self, snapshot: PhoneSnapshot) -> None:
         self._clear_rows()
@@ -544,7 +576,7 @@ class DevicesPage(QWidget):
         num_font = design.numeric_font(self.table.font())
         right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         for row, job in enumerate(snapshot.jobs):
-            for column in (_C_NAME, _C_SIZE, _C_SPEED, _C_ETA):
+            for column in (_C_NAME, _C_SPEED, _C_ETA):
                 item = QTableWidgetItem("")
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 if column != _C_NAME:
@@ -555,7 +587,19 @@ class DevicesPage(QWidget):
             self.table.setCellWidget(row, _C_STATUS, self._pad(pill))
             bar = motion.SmoothProgressBar()
             self._bars.append(bar)
-            self.table.setCellWidget(row, _C_PROGRESS, self._pad(bar))
+            done = components.role_label("", "dim", size=design.FONT["small"])
+            done.setObjectName("DoneText")
+            done.setTextFormat(Qt.TextFormat.PlainText)
+            cell = QWidget()
+            cell.setObjectName("BareContainer")
+            box = QVBoxLayout(cell)
+            box.setContentsMargins(6, 0, 6, 0)
+            box.setSpacing(3)
+            box.addStretch(1)
+            box.addWidget(bar)
+            box.addWidget(done)
+            box.addStretch(1)
+            self.table.setCellWidget(row, _C_PROGRESS, cell)
         self._row_ids = [job.id for job in snapshot.jobs]
         self._row_sigs = {}
 
@@ -579,8 +623,10 @@ class DevicesPage(QWidget):
         name_item.setText(job.name)
         name_item.setToolTip(plain_tooltip(job.name))
         downloading = job.status == "downloading"
-        size = job.total if job.total else job.downloaded
-        self._cell(row, _C_SIZE).setText(human_bytes(size) if size else "")
+        holder_done = self.table.cellWidget(row, _C_PROGRESS)
+        done = holder_done.findChild(QLabel, "DoneText") if holder_done is not None else None
+        if done is not None:
+            done.setText(self._done_text(job))
         self._cell(row, _C_SPEED).setText(motion.fmt_speed(job.speed) if downloading else "")
         self._cell(row, _C_ETA).setText(motion.fmt_eta(job.eta) if downloading else "")
         holder = self.table.cellWidget(row, _C_STATUS)
@@ -605,6 +651,73 @@ class DevicesPage(QWidget):
                 row, _C_ACTIONS, self._actions_cell(device_id, job, actions, online and not busy)
             )
 
+    @staticmethod
+    def _done_text(job: PhoneJob) -> str:
+        """How much is done: "34 MB of 793 MB", the total for a finished
+        download, or what has arrived when the size is not known."""
+        if job.status == "completed":
+            return human_bytes(job.total or job.downloaded) if (job.total or job.downloaded) else ""
+        if job.total:
+            return t(
+                "{done} of {total}", done=human_bytes(job.downloaded), total=human_bytes(job.total)
+            )
+        return human_bytes(job.downloaded) if job.downloaded else ""
+
+    def _action_buttons(
+        self, device_id: str, job: PhoneJob, actions: tuple[str, ...], enabled: bool
+    ) -> list[QPushButton]:
+        """One button per action that fits, each with the download's name in
+        its accessible name, a plain-text tooltip and keyboard focus."""
+        buttons: list[QPushButton] = []
+        for action in actions:
+            label, icon, danger = _ACTIONS[action]
+            button = components.IconButton(icon, danger=danger)
+            button.setToolTip(plain_tooltip(t(label)))
+            button.setAccessibleName(f"{t(label)} {job.name}")
+            button.setProperty("action", action)
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            button.setFixedSize(30, 28)
+            button.setStyleSheet("QPushButton { padding: 0px; }")
+            button.setEnabled(enabled)
+            button.clicked.connect(
+                lambda _checked=False, a=action, j=job.id: self._command(device_id, j, a)
+            )
+            buttons.append(button)
+        return buttons
+
+    def _refresh_action_bar(self) -> None:
+        """The actions for the selected download as a real row of buttons under
+        the table. Windows UI Automation does not expose widgets placed inside
+        table cells, so this is the path screen readers and keyboards use; the
+        buttons in the row are the mouse shortcut for the same commands."""
+        while self.action_layout.count():
+            item = self.action_layout.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+        device_id = self._selected
+        snapshot = self._service.phone_jobs(device_id) if device_id else None
+        row = self.table.currentRow()
+        if (
+            device_id is None
+            or snapshot is None
+            or self.jobs_stack.currentIndex() != 1
+            or not 0 <= row < len(snapshot.jobs)
+        ):
+            self.action_bar.hide()
+            return
+        job = snapshot.jobs[row]
+        online = bool(self._service.is_online(device_id))
+        enabled = online and (device_id, job.id) not in self._busy
+        caption = _elided(job.name, "dim")
+        caption.setAccessibleName(job.name)
+        self.action_layout.addWidget(caption, 1)
+        for button in self._action_buttons(device_id, job, job.actions(), enabled):
+            self.action_layout.addWidget(button)
+        self.action_bar.show()
+
     def _actions_cell(
         self, device_id: str, job: PhoneJob, actions: tuple[str, ...], enabled: bool
     ) -> QWidget:
@@ -614,16 +727,7 @@ class DevicesPage(QWidget):
         lay.setContentsMargins(4, 0, 4, 0)
         lay.setSpacing(2)
         lay.addStretch(1)
-        for action in actions:
-            label, icon, danger = _ACTIONS[action]
-            button = components.IconButton(icon, danger=danger, tooltip=t(label))
-            button.setAccessibleName(f"{t(label)}: {job.name}")
-            button.setFixedSize(30, 28)
-            button.setStyleSheet("QPushButton { padding: 0px; }")
-            button.setEnabled(enabled)
-            button.clicked.connect(
-                lambda _checked=False, a=action, j=job.id: self._command(device_id, j, a)
-            )
+        for button in self._action_buttons(device_id, job, actions, enabled):
             lay.addWidget(button)
         return holder
 
@@ -677,16 +781,27 @@ class DevicesPage(QWidget):
             self._render_right()
 
     def _show_result(self, action: str, result: str, message: str) -> None:
-        text = t(
-            "{action}: {result}", action=action_label(action), result=result_text(result, message)
-        )
+        """Inline, under the table: what happened, in words. A failure is
+        coloured so it cannot be missed."""
+        if result == "ok" and not message and action in _OK_TEXT:
+            text = t(_OK_TEXT[action])
+        else:
+            text = t(
+                "{action}: {result}",
+                action=action_label(action),
+                result=result_text(result, message),
+            )
         self.result_label.setText(text)
+        self.result_label.setProperty("role", "ok" if result == "ok" else "warn")
+        _repolish(self.result_label)
         self._result_timer.start(RESULT_SHOWN_MS)
-        self.status.emit(text)
 
     # -------------------------------------------------------------- sending
 
     def _update_send_enabled(self) -> None:
+        if self.link_edit.text():
+            self._note_timer.stop()
+            self._clear_note()  # typing again: the last answer is old news
         self.send_button.setEnabled(bool(self.link_edit.text().strip()))
 
     def _send_link(self) -> None:
@@ -702,7 +817,11 @@ class DevicesPage(QWidget):
             text = t("This link cannot be sent to a phone")
         self.send_note.setText(text)
         self.send_note.show()
-        self.status.emit(text)
+        self._note_timer.start(NOTE_SHOWN_MS)
+
+    def _clear_note(self) -> None:
+        self.send_note.setText("")
+        self.send_note.hide()
 
     # ------------------------------------------------------------- removing
 

@@ -956,5 +956,12 @@
   "Unknown": "Bilinmiyor",
   "Update GrabLine on the phone to see its downloads here.": "İndirmelerini burada görmek için telefondaki GrabLine'ı güncelleyin.",
   "Waiting": "Bekliyor",
-  "{action}: {result}": "{action}: {result}"
+  "{action}: {result}": "{action}: {result}",
+  "{done} of {total}": "{done} / {total}",
+  "Paused on the phone": "Telefonda duraklatıldı",
+  "Resumed on the phone": "Telefonda sürdürüldü",
+  "Cancelled on the phone": "Telefonda iptal edildi",
+  "Retrying on the phone": "Telefonda yeniden deneniyor",
+  "Removed from the phone": "Telefondan kaldırıldı",
+  "Sent to this PC to download": "İndirmek için bu bilgisayara gönderildi"
 }

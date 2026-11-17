@@ -956,5 +956,12 @@
   "Unknown": "Неизвестно",
   "Update GrabLine on the phone to see its downloads here.": "Обновите GrabLine на телефоне, чтобы видеть его загрузки здесь.",
   "Waiting": "Ожидание",
-  "{action}: {result}": "{action}: {result}"
+  "{action}: {result}": "{action}: {result}",
+  "{done} of {total}": "{done} из {total}",
+  "Paused on the phone": "Приостановлено на телефоне",
+  "Resumed on the phone": "Возобновлено на телефоне",
+  "Cancelled on the phone": "Отменено на телефоне",
+  "Retrying on the phone": "Повтор на телефоне",
+  "Removed from the phone": "Удалено с телефона",
+  "Sent to this PC to download": "Отправлено на этот ПК для скачивания"
 }

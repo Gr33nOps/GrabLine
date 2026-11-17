@@ -956,5 +956,12 @@
   "Unknown": "نامعلوم",
   "Update GrabLine on the phone to see its downloads here.": "یہاں اس کی ڈاؤن لوڈز دیکھنے کے لیے فون پر GrabLine اپ ڈیٹ کریں۔",
   "Waiting": "انتظار میں",
-  "{action}: {result}": "{action}: {result}"
+  "{action}: {result}": "{action}: {result}",
+  "{done} of {total}": "{total} میں سے {done}",
+  "Paused on the phone": "فون پر روک دیا گیا",
+  "Resumed on the phone": "فون پر دوبارہ شروع کیا گیا",
+  "Cancelled on the phone": "فون پر منسوخ کیا گیا",
+  "Retrying on the phone": "فون پر دوبارہ کوشش ہو رہی ہے",
+  "Removed from the phone": "فون سے ہٹا دیا گیا",
+  "Sent to this PC to download": "ڈاؤن لوڈ کے لیے اس PC کو بھیجا گیا"
 }

@@ -956,5 +956,12 @@
   "Unknown": "未知",
   "Update GrabLine on the phone to see its downloads here.": "请更新手机上的 GrabLine,以便在这里查看它的下载。",
   "Waiting": "等待中",
-  "{action}: {result}": "{action}:{result}"
+  "{action}: {result}": "{action}:{result}",
+  "{done} of {total}": "{done} / {total}",
+  "Paused on the phone": "已在手机上暂停",
+  "Resumed on the phone": "已在手机上继续",
+  "Cancelled on the phone": "已在手机上取消",
+  "Retrying on the phone": "正在手机上重试",
+  "Removed from the phone": "已从手机移除",
+  "Sent to this PC to download": "已发送到此电脑下载"
 }

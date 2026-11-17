@@ -956,5 +956,12 @@
   "Unknown": "不明",
   "Update GrabLine on the phone to see its downloads here.": "ここでダウンロードを見るには、スマートフォンの GrabLine を更新してください。",
   "Waiting": "待機中",
-  "{action}: {result}": "{action}:{result}"
+  "{action}: {result}": "{action}:{result}",
+  "{done} of {total}": "{done} / {total}",
+  "Paused on the phone": "スマートフォンで一時停止しました",
+  "Resumed on the phone": "スマートフォンで再開しました",
+  "Cancelled on the phone": "スマートフォンでキャンセルしました",
+  "Retrying on the phone": "スマートフォンで再試行しています",
+  "Removed from the phone": "スマートフォンから削除しました",
+  "Sent to this PC to download": "ダウンロードのためこの PC に送信しました"
 }
