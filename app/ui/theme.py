@@ -9,7 +9,7 @@ the app is visually consistent everywhere).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette
+from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.ui import design
@@ -46,7 +46,7 @@ def remember_default(app: QApplication) -> None:
 _system_family_cache: list[str] | None = None
 
 
-def _system_families(font) -> list[str]:
+def _system_families(font: QFont) -> list[str]:
     """The font families in use before Plex was applied (remembered once)."""
     global _system_family_cache
     if _system_family_cache is None:

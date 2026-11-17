@@ -240,6 +240,27 @@ def test_expired_shows_new_code_button(service: FakeService) -> None:
     assert service.names() == ["start_pairing"]
 
 
+@pytest.mark.parametrize("outcome", ["approved", "denied", "expired", "failed"])
+def test_end_states_shrink_the_dialog_to_fit(service: FakeService, outcome: str) -> None:
+    dialog = PairingDialog(service)
+    dialog.show_code(QR_URI, MANUAL, int(time.time()) + 100)
+    dialog.show()
+    dialog.resize(dialog.width(), 850)
+    tall = dialog.height()
+    dialog.finished_with(outcome)
+    assert dialog.qr_frame.isHidden()
+    assert dialog.height() < tall - 200
+    assert dialog.height() <= dialog.sizeHint().height() + 20
+    dialog.close()
+
+
+def test_phone_intro_does_not_repeat_the_status_line(service: FakeService) -> None:
+    page = PhonePage(service)
+    texts = [label.text() for label in page.findChildren(QLabel)]
+    intro = [text for text in texts if text.startswith("Control GrabLine")]
+    assert intro == ["Control GrabLine from your Android phone on the same Wi-Fi."]
+
+
 def test_countdown_reaching_zero_expires(service: FakeService) -> None:
     dialog = PairingDialog(service)
     dialog.show_code(QR_URI, MANUAL, int(time.time()) - 1)
@@ -346,8 +367,45 @@ def test_settings_view_hosts_phone_page(
         view = SettingsView(Settings(db), lambda: None, remote_service=service)
         titles = [view._list.item(i).text() for i in range(view._list.count())]
         assert "Phone" in titles
+        # Second section, right after General, so it is easy to find.
+        assert titles.index("Phone") == 1
         assert titles[-1] == "About"
         without = SettingsView(Settings(db), lambda: None)
         assert without._list.count() == view._list.count() - 1
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_disclosure_toggle_is_flat_with_visible_focus(service: FakeService, mode: str) -> None:
+    from app.ui import theme
+
+    app = ensure_app()
+    theme.apply_theme(app, mode)
+    try:
+        sheet = app.styleSheet()
+        assert "QToolButton {" in sheet
+        block = sheet.split("QToolButton {", 1)[1].split("}", 1)[0]
+        assert "border: 1px solid transparent" in block  # no native frame
+        assert "QToolButton:hover" in sheet and "QToolButton:focus" in sheet
+    finally:
+        theme.apply_theme(app, "light")
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_port_value_is_not_clipped(service: FakeService, mode: str) -> None:
+    from app.ui import theme
+
+    app = ensure_app()
+    theme.apply_theme(app, mode)
+    try:
+        page = PhonePage(service)
+        spin = page.port_spin
+        assert spin.buttonSymbols() != spin.ButtonSymbols.NoButtons
+        text_width = spin.fontMetrics().horizontalAdvance("65535")
+        assert spin.minimumWidth() >= text_width + 40
+        assert spin.sizeHint().width() >= text_width + 40
+        # The inner line edit must not inherit the framed QLineEdit padding.
+        assert "QAbstractSpinBox QLineEdit" in app.styleSheet()
+    finally:
+        theme.apply_theme(app, "light")

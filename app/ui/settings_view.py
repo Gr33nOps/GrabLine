@@ -92,8 +92,9 @@ class SettingsView(QWidget):
         if remote_service is not None:
             from app.ui.phone_page import PhonePage
 
-            # Just before About, which stays last.
-            pages.insert(max(0, len(pages) - 1), (t("Phone"), PhonePage(remote_service)))
+            # Second, right after General: the Android app tells people to
+            # "go to the Phone page", so it must be easy to find.
+            pages.insert(min(1, len(pages)), (t("Phone"), PhonePage(remote_service)))
         self._pending_pages: dict[int, QWidget] = {}
         for title, page in pages:
             if page is None:

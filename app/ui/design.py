@@ -3,11 +3,11 @@ type, and the global Qt stylesheet.
 
 The accent is the GrabLine brand blue from the app logo (`#2563EB`, shared with
 the website and the Android app), a touch brighter in dark mode so it pops.
-Dark surfaces follow the website's blue-tinted neutrals; type is IBM Plex. Every screen and dialog reads its look from here: change a
-token and the whole app follows. ``stylesheet(theme)`` returns a QSS string
-that restyles the standard Qt widgets (buttons, inputs, tabs, tables, menus,
-scrollbars, dialogs) to match, so even screens we haven't hand-built yet look
-right.
+Dark surfaces follow the website's blue-tinted neutrals; type is IBM Plex.
+Every screen and dialog reads its look from here: change a token and the whole
+app follows. ``stylesheet(theme)`` returns a QSS string that restyles the
+standard Qt widgets (buttons, inputs, tabs, tables, menus, scrollbars,
+dialogs) to match, so even screens we haven't hand-built yet look right.
 """
 
 from __future__ import annotations
@@ -317,6 +317,15 @@ def stylesheet(p: Palette) -> str:
         background: transparent; border: none; color: {p.text2}; padding: 5px 9px;
     }}
     QPushButton[flat="true"]:hover {{ background: {p.row_hover}; color: {p.text}; }}
+    /* flat disclosure buttons (the Phone page's Advanced toggle): no native
+       frame, a hover wash like flat push buttons, and a visible focus ring */
+    QToolButton {{
+        background: transparent; border: 1px solid transparent; color: {p.text2};
+        border-radius: {RADIUS["md"]}px; padding: 3px 8px;
+    }}
+    QToolButton:hover {{ background: {p.row_hover}; color: {p.text}; }}
+    QToolButton:focus {{ border: 1px solid {p.accent}; }}
+    QToolButton:disabled {{ color: {p.text3}; }}
     QPushButton[danger="true"]:hover {{ border-color: {p.warn}; color: {p.warn}; }}
     /* the detail drawer's tab strip + its in-tab action buttons */
     QPushButton[role="tab"] {{
@@ -324,7 +333,9 @@ def stylesheet(p: Palette) -> str:
         color: {p.text3}; padding: 6px 8px; font-weight: 600;
     }}
     QPushButton[role="tab"]:hover {{ color: {p.text}; }}
-    QPushButton[role="tab"]:checked {{ color: {p.accent_text}; border-bottom: 2px solid {p.accent}; }}
+    QPushButton[role="tab"]:checked {{
+        color: {p.accent_text}; border-bottom: 2px solid {p.accent};
+    }}
 
     /* --- inputs --- */
     QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox,
@@ -340,6 +351,13 @@ def stylesheet(p: Palette) -> str:
     QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus,
     QDoubleSpinBox:focus, QComboBox:focus, QTimeEdit:focus, QDateTimeEdit:focus {{
         border-color: {p.accent};
+    }}
+    /* A spin box owns an inner QLineEdit that would otherwise pick up the
+       QLineEdit frame and padding above, double-padding the value and clipping
+       it in narrow fields (the Phone page's port). */
+    QAbstractSpinBox QLineEdit {{
+        background: transparent; border: none; padding: 0; margin: 0;
+        border-radius: 0;
     }}
     QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {{ color: {p.text3}; }}
     QComboBox:drop-down {{ border: none; width: 18px; }}
