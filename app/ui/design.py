@@ -114,12 +114,12 @@ DARK = Palette(
     text="#e8eef8",
     text2="#a4b0c4",
     text3="#7f8ba0",
-    accent="#3b82f6",
-    accent_h="#60a5fa",
-    accent_dim="rgba(59,130,246,0.18)",
+    accent="#2563eb",
+    accent_h="#1d4ed8",
+    accent_dim="rgba(37,99,235,0.18)",
     accent_text="#86aaff",
     accent_on="#ffffff",
-    st_downloading="#3b82f6",
+    st_downloading="#2563eb",
     st_queued="#6b93e8",
     st_paused="#6b7280",
     st_done="#3fb950",
@@ -127,7 +127,7 @@ DARK = Palette(
     st_cancelled="#6b7280",
     ok="#3fb950",
     warn="#f85149",
-    g_dl="#3b82f6",
+    g_dl="#2563eb",
     g_ul="#db6d28",
     g_ndown="#38bdf8",
     g_nup="#bc8cff",
@@ -449,6 +449,8 @@ def stylesheet(p: Palette) -> str:
     QFrame#FilterBar {{ background: {p.surface}; border-bottom: 1px solid {p.border}; }}
     QFrame#Separator {{ background: {p.border}; }}
     QFrame#Drawer {{ background: {p.surface}; border-left: 1px solid {p.border}; }}
+    QFrame#Drawer QStackedWidget, QFrame#Drawer QScrollArea,
+    QFrame#Drawer QScrollArea > QWidget, QFrame#DrawerTabs {{ background: {p.surface}; }}
     QFrame#DrawerHeader {{ background: transparent; border-bottom: 1px solid {p.border}; }}
     QFrame#DrawerFooter {{ background: transparent; border-top: 1px solid {p.border}; }}
     QFrame#SettingsNav {{ background: {p.surface2}; border-right: 1px solid {p.border}; }}

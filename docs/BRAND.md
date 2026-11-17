@@ -6,8 +6,8 @@ In code they live in `app/ui/design.py`.
 
 | Token | Light | Dark |
 | --- | --- | --- |
-| Brand blue (fills, buttons) | `#2563EB` | `#3B82F6` |
-| Hover / pressed | `#1D4ED8` | `#60A5FA` |
+| Brand blue (fills, buttons) | `#2563EB` | `#2563EB` |
+| Hover / pressed | `#1D4ED8` | `#1D4ED8` |
 | Accent text (links, selected tab) | `#1D4ED8` | `#86AAFF` |
 | Background | `#F3F5F9` | `#07090E` |
 | Surface / panel | `#FFFFFF` | `#121821` |
