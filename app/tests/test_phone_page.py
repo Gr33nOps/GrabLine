@@ -240,6 +240,26 @@ def test_expired_shows_new_code_button(service: FakeService) -> None:
     assert service.names() == ["start_pairing"]
 
 
+@pytest.mark.parametrize("outcome", ["approved", "denied", "expired", "failed"])
+def test_end_states_shrink_the_dialog_to_fit(service: FakeService, outcome: str) -> None:
+    dialog = PairingDialog(service)
+    dialog.show_code(QR_URI, MANUAL, int(time.time()) + 100)
+    dialog.show()
+    dialog.resize(dialog.width(), 850)
+    tall = dialog.height()
+    dialog.finished_with(outcome)
+    assert dialog.qr_frame.isHidden()
+    assert dialog.height() < tall - 200
+    assert dialog.height() <= dialog.sizeHint().height() + 20
+    dialog.close()
+
+
+def test_phone_intro_does_not_repeat_the_status_line(service: FakeService) -> None:
+    page = PhonePage(service)
+    intro = [text for text in (l.text() for l in page.findChildren(QLabel)) if text.startswith("Control GrabLine")]
+    assert intro == ["Control GrabLine from your Android phone on the same Wi-Fi."]
+
+
 def test_countdown_reaching_zero_expires(service: FakeService) -> None:
     dialog = PairingDialog(service)
     dialog.show_code(QR_URI, MANUAL, int(time.time()) - 1)
@@ -346,6 +366,8 @@ def test_settings_view_hosts_phone_page(
         view = SettingsView(Settings(db), lambda: None, remote_service=service)
         titles = [view._list.item(i).text() for i in range(view._list.count())]
         assert "Phone" in titles
+        # Second section, right after General, so it is easy to find.
+        assert titles.index("Phone") == 1
         assert titles[-1] == "About"
         without = SettingsView(Settings(db), lambda: None)
         assert without._list.count() == view._list.count() - 1

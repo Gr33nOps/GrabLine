@@ -194,6 +194,7 @@ class PairingDialog(chrome.Dialog):
         else:
             self._set_status(t("Pairing failed. Try again."))
             self.new_code_button.show()
+        self._fit_to_content()
 
     # ------------------------------------------------------------- internal
 
@@ -205,6 +206,14 @@ class PairingDialog(chrome.Dialog):
         self.manual_caption.hide()
         self.manual_label.hide()
         self.countdown_label.hide()
+
+    def _fit_to_content(self) -> None:
+        """Shrink to the remaining widgets once the QR area is hidden, so an end
+        state is a small message rather than a tall empty dialog."""
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        self.adjustSize()
 
     def _set_status(self, text: str) -> None:
         self.banner.hide()
@@ -259,10 +268,7 @@ class PhonePage(QWidget):
         layout.addWidget(
             _wrapping(
                 components.role_label(
-                    t(
-                        "Control GrabLine from your Android phone on the same Wi-Fi. "
-                        "Nothing listens until you pair a phone."
-                    ),
+                    t("Control GrabLine from your Android phone on the same Wi-Fi."),
                     "muted",
                 )
             )

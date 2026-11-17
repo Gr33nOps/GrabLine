@@ -3441,12 +3441,20 @@ class MainWindow(QMainWindow):
     def _update_status_info(self, views: list[JobView]) -> None:
         active = sum(1 for v in views if v.status is JobStatus.DOWNLOADING)
         done = sum(1 for v in views if v.status is JobStatus.COMPLETED)
-        counts = t(
-            "{total} items · {active} active · {done} completed",
-            total=len(views),
-            active=active,
-            done=done,
-        )
+        if len(views) == 1:
+            counts = t(
+                "{total} item · {active} active · {done} completed",
+                total=len(views),
+                active=active,
+                done=done,
+            )
+        else:
+            counts = t(
+                "{total} items · {active} active · {done} completed",
+                total=len(views),
+                active=active,
+                done=done,
+            )
         self._status_info.setText(f"{counts}     GrabLine v{__version__} · " + t("No telemetry"))
 
     def _restore_selection(self) -> None:
