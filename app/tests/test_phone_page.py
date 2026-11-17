@@ -389,3 +389,22 @@ def test_disclosure_toggle_is_flat_with_visible_focus(service: FakeService, mode
         assert "QToolButton:hover" in sheet and "QToolButton:focus" in sheet
     finally:
         theme.apply_theme(app, "light")
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_port_value_is_not_clipped(service: FakeService, mode: str) -> None:
+    from app.ui import theme
+
+    app = ensure_app()
+    theme.apply_theme(app, mode)
+    try:
+        page = PhonePage(service)
+        spin = page.port_spin
+        assert spin.buttonSymbols() != spin.ButtonSymbols.NoButtons
+        text_width = spin.fontMetrics().horizontalAdvance("65535")
+        assert spin.minimumWidth() >= text_width + 40
+        assert spin.sizeHint().width() >= text_width + 40
+        # The inner line edit must not inherit the framed QLineEdit padding.
+        assert "QAbstractSpinBox QLineEdit" in app.styleSheet()
+    finally:
+        theme.apply_theme(app, "light")

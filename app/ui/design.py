@@ -350,6 +350,13 @@ def stylesheet(p: Palette) -> str:
     QDoubleSpinBox:focus, QComboBox:focus, QTimeEdit:focus, QDateTimeEdit:focus {{
         border-color: {p.accent};
     }}
+    /* A spin box owns an inner QLineEdit that would otherwise pick up the
+       QLineEdit frame and padding above, double-padding the value and clipping
+       it in narrow fields (the Phone page's port). */
+    QAbstractSpinBox QLineEdit {{
+        background: transparent; border: none; padding: 0; margin: 0;
+        border-radius: 0;
+    }}
     QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {{ color: {p.text3}; }}
     QComboBox:drop-down {{ border: none; width: 18px; }}
     QComboBox QAbstractItemView {{
