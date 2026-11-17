@@ -1,6 +1,6 @@
 {
   "protocolVersion": 6,
-  "count": 134,
+  "count": 138,
   "fixtures": [
     {
       "file": "analyze.reply.json",
@@ -22,6 +22,12 @@
     },
     {
       "file": "auth.request.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "auth"
+    },
+    {
+      "file": "auth.request.pc.json",
       "direction": "phone-to-pc",
       "state": "preauth",
       "type": "auth"
@@ -383,6 +389,13 @@
       "expectClose": 4401
     },
     {
+      "file": "invalid/auth.deviceKind.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "auth",
+      "expectError": "badRequest"
+    },
+    {
       "file": "invalid/auth.oldClient.json",
       "direction": "phone-to-pc",
       "state": "preauth",
@@ -588,6 +601,13 @@
       "expectError": "badRequest"
     },
     {
+      "file": "invalid/pair.deviceKind.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "pair",
+      "expectError": "badRequest"
+    },
+    {
       "file": "invalid/pair.expired.json",
       "direction": "phone-to-pc",
       "state": "preauth",
@@ -698,6 +718,12 @@
     },
     {
       "file": "pair.request.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "pair"
+    },
+    {
+      "file": "pair.request.pc.json",
       "direction": "phone-to-pc",
       "state": "preauth",
       "type": "pair"

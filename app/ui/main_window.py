@@ -1117,7 +1117,11 @@ class MainWindow(QMainWindow):
         """A "Send to phone" submenu: one entry per paired phone plus "Any
         phone". Returns action -> device id (None = any phone)."""
         service = self._remote_service
-        phones = service.store.list() if service is not None else []
+        phones = (
+            [d for d in service.store.list() if getattr(d, "kind", "phone") == "phone"]
+            if service is not None
+            else []
+        )
         send_menu = menu.addMenu(t("Send to phone"))
         send_menu.setEnabled(bool(phones))
         actions: dict[QAction, str | None] = {}

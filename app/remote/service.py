@@ -230,6 +230,10 @@ class RemoteService(QObject):
         if self._listener is not None:
             self._listener.cancel_pairing()
 
+    def pending_kind(self) -> str:
+        """``phone`` or ``pc``: what the device behind the Allow prompt is."""
+        return self._listener.pending_kind if self._listener is not None else "phone"
+
     def approve_pairing(self) -> None:
         if self._listener is not None:
             self._listener.approve_pairing()
@@ -376,8 +380,11 @@ class RemoteService(QObject):
         outbox = self.handlers.outbox
         item_id = outbox.add(device_id, clean, title[:512] if title else None, quality)
         if self._listener is not None:
+            # Only phones pull the outbox; a linked PC never asks for it.
             targets = (
-                [device_id] if device_id is not None else [d.device_id for d in self.store.list()]
+                [device_id]
+                if device_id is not None
+                else [d.device_id for d in self.store.list() if d.kind == "phone"]
             )
             for target in targets:
                 self._listener.broadcast(

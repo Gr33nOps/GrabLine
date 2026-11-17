@@ -30,6 +30,9 @@ MAX_DEVICES = 8
 DEVICE_ID_BYTES = 16
 DEVICE_ID_LENGTH = 22
 DEVICE_NAME_MAX = 64
+#: PROTOCOL.md section 21: what a paired device is. A device that does not say is a phone.
+DEVICE_KINDS = ("phone", "pc")
+DEFAULT_DEVICE_KIND = "phone"
 NONCE_BYTES = 32
 PIN_BYTES = 32
 PUBLIC_KEY_DER_BYTES = 91
@@ -134,13 +137,14 @@ def clean_device_name(name: object) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class Device:
-    """One paired phone. ``public_key`` is P-256 SubjectPublicKeyInfo DER."""
+    """One paired phone or PC. ``public_key`` is P-256 SubjectPublicKeyInfo DER."""
 
     device_id: str
     name: str
     public_key: bytes
     created_at: int
     last_seen_at: int
+    kind: str = DEFAULT_DEVICE_KIND
 
 
 def auth_transcript(nonce: bytes, pin: bytes | str, device_id: str) -> bytes:
@@ -245,8 +249,15 @@ class DeviceStore:
         """A fresh deviceId: 16 random bytes as 22 base64url characters."""
         return self._new_id()
 
-    def add(self, name: str, public_key: bytes, *, device_id: str | None = None) -> Device:
-        """Store a newly paired phone and return its row.
+    def add(
+        self,
+        name: str,
+        public_key: bytes,
+        *,
+        device_id: str | None = None,
+        kind: str = DEFAULT_DEVICE_KIND,
+    ) -> Device:
+        """Store a newly paired phone or PC and return its row.
 
         Raises ``ValueError`` for a bad name, key or id, and
         ``DeviceLimitError`` when 8 devices are already paired (or the id is
@@ -255,16 +266,18 @@ class DeviceStore:
         cleaned = clean_device_name(name)
         if cleaned is None:
             raise ValueError("invalid device name")
+        if kind not in DEVICE_KINDS:
+            raise ValueError("invalid device kind")
         load_public_key(public_key)
         new_id = self._new_id() if device_id is None else device_id
         if not is_valid_id(new_id):
             raise ValueError("invalid device id")
         now = self._now()
         if not self._db.add_remote_device(
-            new_id, cleaned, bytes(public_key), now, limit=MAX_DEVICES
+            new_id, cleaned, bytes(public_key), now, limit=MAX_DEVICES, kind=kind
         ):
             raise DeviceLimitError("device list is full")
-        return Device(new_id, cleaned, bytes(public_key), now, now)
+        return Device(new_id, cleaned, bytes(public_key), now, now, kind)
 
     def get(self, device_id: str) -> Device | None:
         if not is_valid_id(device_id):
@@ -273,7 +286,7 @@ class DeviceStore:
         return Device(*row) if row is not None else None
 
     def list(self) -> list[Device]:
-        """Paired phones, oldest pairing first."""
+        """Paired phones and PCs, oldest pairing first."""
         return [Device(*row) for row in self._db.list_remote_devices()]
 
     def touch(self, device_id: str) -> bool:
