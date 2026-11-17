@@ -64,6 +64,8 @@ def test_happy_paths_for_every_type():
         "fileHash": {"jobId": 1},
         "outbox": {},
         "outboxAck": {"itemIds": [1]},
+        "phoneJobs": {"shared": True, "jobs": []},
+        "phoneCommandResult": {"commandId": 1, "result": "ok", "message": None},
     }
     assert set(cases) == set(schema.VALIDATORS)
     for kind, fields in cases.items():
@@ -457,3 +459,133 @@ def test_cursor_in_jobs_and_files_messages():
     assert code_of(msg("jobs", cursor="zzz!")) == "badRequest"
     assert code_of(msg("files", cursor=39)) == "badRequest"
     assert validate(msg("jobs", cursor=None)).fields["after"] is None
+
+
+# ------------------------------------------------- phoneJobs (section 20)
+
+
+def phone_job(job_id: int = 12, **changes: Any) -> dict[str, Any]:
+    job: dict[str, Any] = {
+        "id": job_id,
+        "name": "ubuntu.iso",
+        "url": "https://example.org/ubuntu.iso",
+        "status": "downloading",
+        "kind": "direct",
+        "downloaded": 10,
+        "total": 100,
+        "speed": 5,
+        "eta": 18,
+        "createdAt": 1794700100,
+        "error": None,
+    }
+    job.update(changes)
+    return job
+
+
+def test_phone_jobs_happy_path_and_unknown_words():
+    fields = validate(
+        msg(
+            "phoneJobs",
+            shared=True,
+            jobs=[
+                phone_job(1, name="  a.iso  ", futureField=1),
+                phone_job(2, status="stuck", kind="smoke signal"),
+                phone_job(3, total=None, eta=None, error="  It failed  ", status="failed"),
+            ],
+        )
+    ).fields
+    first, second, third = fields["jobs"]
+    assert first["name"] == "a.iso" and "futureField" not in first
+    assert second["status"] == "unknown" and second["kind"] == "direct"
+    assert third["total"] is None and third["error"] == "It failed"
+    assert validate(msg("phoneJobs", shared=False, jobs=[])).fields == {"shared": False, "jobs": []}
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"id": 0},
+        {"id": True},
+        {"id": "1"},
+        {"name": ""},
+        {"name": " "},
+        {"name": "x" * 257},
+        {"name": None},
+        {"url": "x" * 2049},
+        {"url": None},
+        {"status": 5},
+        {"status": ""},
+        {"kind": None},
+        {"downloaded": -1},
+        {"downloaded": 1.5},
+        {"total": -1},
+        {"total": "5"},
+        {"speed": -1},
+        {"eta": -3},
+        {"createdAt": None},
+        {"error": 5},
+        {"error": "x" * 513},
+    ],
+)
+def test_phone_jobs_rejects_bad_job_fields(changes: dict[str, Any]):
+    assert code_of(msg("phoneJobs", shared=True, jobs=[phone_job(**changes)])) == "badRequest"
+
+
+@pytest.mark.parametrize("name", ["name", "total", "eta", "error", "createdAt", "speed", "url"])
+def test_phone_jobs_rejects_a_missing_field(name: str):
+    job = phone_job()
+    del job[name]
+    assert code_of(msg("phoneJobs", shared=True, jobs=[job])) == "badRequest"
+
+
+def test_phone_jobs_rejects_bad_lists():
+    assert code_of(msg("phoneJobs", jobs=[])) == "badRequest"  # shared missing
+    assert code_of(msg("phoneJobs", shared="yes", jobs=[])) == "badRequest"
+    assert code_of(msg("phoneJobs", shared=1, jobs=[])) == "badRequest"
+    assert code_of(msg("phoneJobs", shared=True)) == "badRequest"
+    assert code_of(msg("phoneJobs", shared=True, jobs={})) == "badRequest"
+    assert code_of(msg("phoneJobs", shared=True, jobs=[5])) == "badRequest"
+    assert code_of(msg("phoneJobs", shared=True, jobs=[phone_job(1), phone_job(1)])) == "badRequest"
+    # Not shared, so the list must be empty.
+    assert code_of(msg("phoneJobs", shared=False, jobs=[phone_job()])) == "badRequest"
+    # At most 100 jobs.
+    assert len(validate(msg("phoneJobs", shared=True, jobs=many(100))).fields["jobs"]) == 100
+    assert code_of(msg("phoneJobs", shared=True, jobs=many(101))) == "badRequest"
+
+
+def many(count: int) -> list[dict[str, Any]]:
+    return [phone_job(n) for n in range(1, count + 1)]
+
+
+def test_phone_jobs_and_results_cost_one_token():
+    assert validate(msg("phoneJobs", shared=True, jobs=[])).cost == 1
+    assert validate(msg("phoneCommandResult", commandId=1, result="ok", message=None)).cost == 1
+
+
+def test_phone_command_result_validation():
+    ok = validate(
+        msg("phoneCommandResult", commandId=2**31 - 1, result="refused", message=" no ")
+    ).fields
+    assert ok == {"commandId": 2**31 - 1, "result": "refused", "message": "no"}
+    base: dict[str, Any] = {"commandId": 3, "result": "ok", "message": None}
+    for changes in (
+        {"commandId": 0},
+        {"commandId": 2**31},
+        {"commandId": True},
+        {"commandId": "3"},
+        {"result": "done"},
+        {"result": None},
+        {"message": 5},
+        {"message": "x" * 257},
+    ):
+        assert code_of(msg("phoneCommandResult", **{**base, **changes})) == "badRequest", changes
+    missing = dict(base)
+    del missing["message"]
+    assert code_of(msg("phoneCommandResult", **missing)) == "badRequest"
+    assert validate(msg("phoneCommandResult", **{**base, "message": "x" * 256})).fields["message"]
+
+
+def test_subscribe_knows_the_phone_topic():
+    fields = validate(msg("subscribe", topics=["phone", "jobs", "nope"])).fields
+    assert fields["topics"] == ["jobs", "phone"]
+    assert validate(msg("subscribe")).fields["topics"] == ["jobs", "global"]

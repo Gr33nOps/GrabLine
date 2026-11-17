@@ -84,6 +84,34 @@ class DeviceLimiter:
         return max(1, math.ceil(left * 1000)) if left > 0 else 0
 
 
+COMMANDS_PER_SECOND = 10  # PROTOCOL.md section 20: phone.command, per device
+
+
+class CommandLimiter:
+    """At most ``per_second`` ``phone.command`` events a second to one device
+    (a sliding one-second window). Only counts commands that were allowed."""
+
+    def __init__(
+        self, per_second: int = COMMANDS_PER_SECOND, clock: Clock = time.monotonic
+    ) -> None:
+        self._per_second = per_second
+        self._clock = clock
+        self._sent: dict[str, deque[float]] = {}
+
+    def allow(self, device_id: str) -> bool:
+        now = self._clock()
+        times = self._sent.setdefault(device_id, deque())
+        while times and now - times[0] >= 1.0:
+            times.popleft()
+        if len(times) >= self._per_second:
+            return False
+        times.append(now)
+        return True
+
+    def forget(self, device_id: str) -> None:
+        self._sent.pop(device_id, None)
+
+
 class FailureTracker:
     """Failed ``pair``/``auth`` attempts per remote address (section 6):
     ten in a minute and the address is refused at accept for a minute."""

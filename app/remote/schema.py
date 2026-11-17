@@ -292,7 +292,7 @@ def _analyze(msg: dict[str, Any]) -> dict[str, Any]:
     return {"url": _url(msg, "url", required=True, allow_magnet=False)}
 
 
-_TOPICS = ("jobs", "global", "outbox")
+_TOPICS = ("jobs", "global", "outbox", "phone")
 
 
 def _subscribe(msg: dict[str, Any]) -> dict[str, Any]:
@@ -307,6 +307,84 @@ def _subscribe(msg: dict[str, Any]) -> dict[str, Any]:
 
 def _empty(_msg: dict[str, Any]) -> dict[str, Any]:
     return {}
+
+
+# ------------------------------------------------- phone jobs (section 20)
+
+MAX_PHONE_JOBS = 100
+MAX_COMMAND_ID = 2**31 - 1
+PHONE_STATUSES = frozenset(
+    {"queued", "downloading", "paused", "waiting", "completed", "failed", "cancelled"}
+)
+PHONE_KINDS = frozenset({"direct", "video", "torrent", "cloud", "transfer"})
+_COMMAND_RESULTS = ("ok", "notFound", "refused", "failed")
+
+
+def _present(msg: dict[str, Any], name: str) -> Any:
+    """A field that may be null but must be there (section 20 types)."""
+    if name not in msg:
+        raise _bad(name, "required")
+    return msg[name]
+
+
+def _nullable_int(msg: dict[str, Any], name: str) -> int | None:
+    if _present(msg, name) is None:
+        return None
+    return _int(msg, name, 0, MAX_SAFE_INT, required=True)
+
+
+def _nullable_str(msg: dict[str, Any], name: str, hi: int) -> str | None:
+    if _present(msg, name) is None:
+        return None
+    return _str(msg, name, 0, hi, required=True) or None
+
+
+def _phone_job(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise _bad("jobs")
+    status = _str(raw, "status", 1, 32, required=True)
+    kind = _str(raw, "kind", 1, 32, required=True)
+    return {
+        "id": _int(raw, "id", 1, MAX_SAFE_INT, required=True),
+        "name": _str(raw, "name", 1, 256, required=True),
+        "url": _str(raw, "url", 0, 2048, required=True),
+        # Anything unknown is kept as a harmless word: the PC shows a status
+        # it does not know as "Unknown" and a kind it does not know as direct.
+        "status": status if status in PHONE_STATUSES else "unknown",
+        "kind": kind if kind in PHONE_KINDS else "direct",
+        "downloaded": _int(raw, "downloaded", 0, MAX_SAFE_INT, required=True),
+        "total": _nullable_int(raw, "total"),
+        "speed": _int(raw, "speed", 0, MAX_SAFE_INT, required=True),
+        "eta": _nullable_int(raw, "eta"),
+        "createdAt": _int(raw, "createdAt", 0, MAX_SAFE_INT, required=True),
+        "error": _nullable_str(raw, "error", 512),
+    }
+
+
+def _phone_jobs(msg: dict[str, Any]) -> dict[str, Any]:
+    shared = msg.get("shared")
+    if type(shared) is not bool:
+        raise _bad("shared")
+    raw = msg.get("jobs")
+    if not isinstance(raw, list) or len(raw) > MAX_PHONE_JOBS:
+        raise _bad("jobs")
+    if not shared and raw:
+        raise _bad("jobs", "must be empty when not shared")
+    jobs = [_phone_job(item) for item in raw]
+    if len({job["id"] for job in jobs}) != len(jobs):
+        raise _bad("jobs", "duplicate id")
+    return {"shared": shared, "jobs": jobs}
+
+
+def _phone_command_result(msg: dict[str, Any]) -> dict[str, Any]:
+    result = msg.get("result")
+    if not isinstance(result, str) or result not in _COMMAND_RESULTS:
+        raise _bad("result")
+    return {
+        "commandId": _int(msg, "commandId", 1, MAX_COMMAND_ID, required=True),
+        "result": result,
+        "message": _nullable_str(msg, "message", 256),
+    }
 
 
 def _files(msg: dict[str, Any]) -> dict[str, Any]:
@@ -387,9 +465,11 @@ VALIDATORS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "fileHash": _file_hash,
     "outbox": _empty,
     "outboxAck": _outbox_ack,
+    "phoneJobs": _phone_jobs,
+    "phoneCommandResult": _phone_command_result,
 }
 
-COSTS = {"analyze": 5, "links": 5, "fileHash": 5}
+COSTS = {"analyze": 5, "links": 5, "fileHash": 5, "phoneJobs": 1, "phoneCommandResult": 1}
 
 #: Phase-4 message groups; served only when the listener enables them.
 PHASE4_TYPES = frozenset({"files", "fetch", "fetchCancel", "fileHash", "outbox", "outboxAck"})

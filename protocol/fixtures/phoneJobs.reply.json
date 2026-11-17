@@ -1,0 +1,10 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The PC stored the phone's newest list.",
+  "state": "authed",
+  "message": {
+    "id": "r-30",
+    "type": "ok",
+    "protocolVersion": 6
+  }
+}

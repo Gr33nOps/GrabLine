@@ -45,6 +45,12 @@ GUI-facing API (every method is thread-safe; call them from the GUI thread)
                                 ``id`` and ``protocolVersion`` and drops the
                                 answer if the connection or device is gone.
 ``broadcast(event)``            one event dict from ``EventTracker``.
+``send_phone_command(device_id, command_id, action, job_id)``
+                                one ``phone.command`` event (section 20) to
+                                the device's newest connection that
+                                subscribed to the ``phone`` topic; returns
+                                ``sent``, ``offline``, ``busy`` or ``failed``.
+``online_devices()``            ids of devices with an open connection.
 ``running``, ``port``, ``pc_id``, ``pc_name``, ``bound_addresses()``
 
 Signals (emitted on the listener thread; connect them to slots of QObjects
@@ -62,6 +68,8 @@ would run on the listener thread):
 ``pairingLockedWarning()``, ``pairingFinished(str outcome)`` with
     ``approved``, ``denied``, ``expired``, ``locked``, ``cancelled``, ``failed``
 ``devicesChanged()``            a device was paired, removed or seen
+``presenceChanged(str device_id)``  that device got its first connection or
+                                lost its last one
 ``subscribersChanged(int)``     connections subscribed to events right now
 
 Nothing here logs codes, nonces, proofs, signatures, keys or device ids.
@@ -97,7 +105,7 @@ from app.remote.pairing import (
     PairingState,
     ProofOutcome,
 )
-from app.remote.ratelimit import DeviceLimiter, FailureTracker
+from app.remote.ratelimit import CommandLimiter, DeviceLimiter, FailureTracker
 
 log = logging.getLogger(__name__)
 
@@ -130,6 +138,7 @@ DEFAULT_FEATURES = (
     "files",
     "fetch",
     "outbox",
+    "phoneJobs",
 )
 
 CLOSE_MALFORMED = 4400
@@ -140,8 +149,8 @@ CLOSE_REPLACED = 4409
 CLOSE_TOO_OLD = 4426
 CLOSE_FLOOD = 4429
 
-_TOPICS = ("jobs", "global", "outbox")
-_EVENT_TOPICS = {"job": "jobs", "global": "global", "outbox": "outbox"}
+_TOPICS = ("jobs", "global", "outbox", "phone")
+_EVENT_TOPICS = {"job": "jobs", "global": "global", "outbox": "outbox", "phone": "phone"}
 _COALESCED = ("job.updated", "global.updated", "outbox.added")
 _FEATURE_OF = {
     "analyze": "analyze",
@@ -151,6 +160,8 @@ _FEATURE_OF = {
     "fileHash": "fetch",
     "outbox": "outbox",
     "outboxAck": "outbox",
+    "phoneJobs": "phoneJobs",
+    "phoneCommandResult": "phoneJobs",
 }
 # Before login nothing about the request is echoed back (QA-05).
 _PREAUTH_MESSAGE = "bad request"
@@ -407,6 +418,7 @@ class RemoteListener(QObject):
     pairingLockedWarning = Signal()
     pairingFinished = Signal(str)
     devicesChanged = Signal()
+    presenceChanged = Signal(str)
     subscribersChanged = Signal(int)
     _invoke = Signal(object)
 
@@ -447,6 +459,10 @@ class RemoteListener(QObject):
         self._lingering: set[_Channel] = set()
         self._by_device: dict[str, list[_Channel]] = {}
         self._limiters: dict[str, DeviceLimiter] = {}
+        self._commands = CommandLimiter()
+        #: Devices with an open connection; replaced whole so the GUI thread
+        #: can read it without a lock.
+        self._online: frozenset[str] = frozenset()
         self._failures = FailureTracker()
         self._tokens: dict[int, tuple[_Channel, str, str]] = {}
         self._next_token = 1
@@ -592,6 +608,18 @@ class RemoteListener(QObject):
     @Slot(object)
     def broadcast(self, event: dict[str, Any]) -> None:
         self._post(lambda: self._broadcast(event))
+
+    def online_devices(self) -> frozenset[str]:
+        """Devices with at least one open, logged-in connection right now."""
+        return self._online
+
+    def send_phone_command(self, device_id: str, command_id: int, action: str, job_id: int) -> str:
+        """Section 20: one ``phone.command`` to the device's newest connection
+        that subscribed to ``phone``. Returns ``sent``, ``offline`` (no such
+        connection), ``busy`` (over 10 a second to this device) or ``failed``
+        (it could not be written)."""
+        result = self._post_wait(lambda: self._phone_command(device_id, command_id, action, job_id))
+        return result if isinstance(result, str) else "failed"
 
     # ------------------------------------------------------------ on and off
 
@@ -797,6 +825,10 @@ class RemoteListener(QObject):
                 peers.remove(channel)
             if not peers:
                 self._by_device.pop(device_id, None)
+                # "Last seen" is when the last connection went away.
+                with contextlib.suppress(Exception):
+                    self._store.touch(device_id)
+            self._sync_presence(device_id)
         for token in channel.pending.values():
             self._tokens.pop(token, None)
         channel.pending.clear()
@@ -941,6 +973,7 @@ class RemoteListener(QObject):
                 peers.remove(oldest)
         with contextlib.suppress(Exception):
             self._store.touch(device_id)
+        self._sync_presence(device_id)
         self._send(
             channel,
             {
@@ -1364,6 +1397,37 @@ class RemoteListener(QObject):
         finally:
             channel.pumping = False
 
+    def _sync_presence(self, device_id: str) -> None:
+        """Keep ``online_devices()`` in step with the connection table."""
+        was = device_id in self._online
+        now = bool(self._by_device.get(device_id))
+        if was == now:
+            return
+        self._online = self._online | {device_id} if now else self._online - {device_id}
+        self.presenceChanged.emit(device_id)
+
+    def _phone_command(self, device_id: str, command_id: int, action: str, job_id: int) -> str:
+        """On the listener thread. Commands are never coalesced or dropped
+        for load: the caller asked for this one and gets a clear answer."""
+        target = None
+        for channel in reversed(self._by_device.get(device_id, [])):
+            if channel.stage == "open" and "phone" in channel.topics:
+                target = channel
+                break
+        if target is None:
+            return "offline"
+        if not self._commands.allow(device_id):
+            return "busy"
+        if target.backlog() > EVENT_BACKLOG_BYTES:
+            return "failed"
+        event = {
+            "event": "phone.command",
+            "commandId": command_id,
+            "action": action,
+            "jobId": job_id,
+        }
+        return "sent" if self._emit_event(target, event, time.monotonic()) else "failed"
+
     def _count_subscribers(self) -> None:
         count = sum(1 for channel in self._channels if channel.topics)
         if count != self._subscribers:
@@ -1381,6 +1445,7 @@ class RemoteListener(QObject):
         for peer in list(self._by_device.get(device_id, [])):
             peer.close(CLOSE_REMOVED)
         self._limiters.pop(device_id, None)
+        self._commands.forget(device_id)
         self.devicesChanged.emit()
         self._evaluate()
 
@@ -1394,6 +1459,7 @@ class RemoteListener(QObject):
         for channel in list(self._by_device.get(device_id, [])):
             channel.close(CLOSE_REMOVED)  # also drops its unanswered requests
         self._limiters.pop(device_id, None)
+        self._commands.forget(device_id)
         self.devicesChanged.emit()
         self._evaluate()
         return existed
@@ -1516,7 +1582,7 @@ class RemoteListener(QObject):
             return
         self._emit_event(channel, event, now)
 
-    def _emit_event(self, channel: _Channel, event: dict[str, Any], now: float) -> None:
+    def _emit_event(self, channel: _Channel, event: dict[str, Any], now: float) -> bool:
         seq = channel.seq + (2 if channel.gap else 1)
         frame: dict[str, Any] = {
             "type": "event",
@@ -1531,8 +1597,10 @@ class RemoteListener(QObject):
             channel.seq = seq
             channel.gap = False
             channel.sent_at.append(now)
-        elif channel.stage == "open":
+            return True
+        if channel.stage == "open":
             channel.gap = True  # it could not be encoded: make the phone reload
+        return False
 
     def _flush_deferred(self, channel: _Channel, now: float) -> None:
         sent = channel.sent_at
@@ -1596,6 +1664,7 @@ class RemoteListener(QObject):
             for channel in list(self._by_device.get(device_id, [])):
                 channel.close(CLOSE_REMOVED)
             self._limiters.pop(device_id, None)
+            self._commands.forget(device_id)
 
     def _shutdown_in_thread(self) -> None:
         self._enabled = False

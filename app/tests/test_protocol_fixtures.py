@@ -238,6 +238,14 @@ def test_reply_shapes_match_the_fixtures(env: Env):
             "control.reply.removed.json",
             env.run({"id": "r", "type": "control", "jobId": job.id, "action": "remove"}),
         ),
+        (
+            "phoneJobs.reply.json",
+            env.run(load("phoneJobs.request.json")["message"]),
+        ),
+        (
+            "phoneCommandResult.reply.json",
+            env.run(load("phoneCommandResult.request.json")["message"]),
+        ),
     ]
     for name, reply in pairs:
         expected = load(name)["message"]
@@ -273,3 +281,45 @@ def test_error_fixtures_are_well_formed():
             continue
         message = load(name)["message"]
         assert message["type"] == "error" and message["code"] and message["message"]
+
+
+# ------------------------------------------------ phoneJobs (section 20)
+
+
+def test_phone_jobs_fixtures_are_stored_by_the_handlers(env: Env):
+    env.run(load("phoneJobs.request.json")["message"])
+    snapshot = env.handlers.phone.get(DEVICE)
+    assert snapshot is not None and snapshot.shared is True
+    assert [job.id for job in snapshot.jobs] == [12, 11, 10]
+    assert snapshot.jobs[2].kind == "transfer" and snapshot.jobs[2].url == ""
+    env.run(load("phoneJobs.request.notShared.json")["message"])
+    snapshot = env.handlers.phone.get(DEVICE)
+    assert snapshot is not None and snapshot.shared is False and snapshot.jobs == ()
+
+
+def test_the_command_event_fixture_has_the_documented_shape():
+    event = load("event.phone.command.json")["message"]
+    assert event["type"] == "event" and event["event"] == "phone.command"
+    assert set(event) == {
+        "type",
+        "protocolVersion",
+        "event",
+        "seq",
+        "ts",
+        "commandId",
+        "action",
+        "jobId",
+    }
+    from app.remote import phonejobs
+
+    assert event["action"] in phonejobs.ACTIONS
+
+
+def test_auth_ok_fixture_lists_the_features_the_listener_serves():
+    from app.remote.listener import DEFAULT_FEATURES
+
+    features = load("auth.reply.ok.json")["message"]["features"]
+    assert "phoneJobs" in features
+    # The listener also serves "events"-style groups the fixture lists in the
+    # same order; neither may drift from the other.
+    assert tuple(features) == DEFAULT_FEATURES

@@ -1,0 +1,51 @@
+{
+  "direction": "phone-to-pc",
+  "description": "The phone's downloads, newest first (feature phoneJobs). Sent after authOk and when they change, at most once per second.",
+  "state": "authed",
+  "message": {
+    "id": "r-30",
+    "type": "phoneJobs",
+    "shared": true,
+    "jobs": [
+      {
+        "id": 12,
+        "name": "ubuntu-24.04-desktop-amd64.iso",
+        "url": "https://releases.example.org/ubuntu-24.04-desktop-amd64.iso",
+        "status": "downloading",
+        "kind": "direct",
+        "downloaded": 734003200,
+        "total": 6114656256,
+        "speed": 5242880,
+        "eta": 1026,
+        "createdAt": 1794700100,
+        "error": null
+      },
+      {
+        "id": 11,
+        "name": "Me at the zoo.mp4",
+        "url": "https://video.example.com/watch?v=abc123",
+        "status": "completed",
+        "kind": "video",
+        "downloaded": 549921,
+        "total": 549921,
+        "speed": 0,
+        "eta": null,
+        "createdAt": 1794700050,
+        "error": null
+      },
+      {
+        "id": 10,
+        "name": "report.pdf",
+        "url": "",
+        "status": "failed",
+        "kind": "transfer",
+        "downloaded": 0,
+        "total": 120000,
+        "speed": 0,
+        "eta": null,
+        "createdAt": 1794700010,
+        "error": "Your PC is off or on another network"
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The PC user asked the phone to pause its job 12 (feature phoneJobs, topic phone).",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "phone.command",
+    "seq": 9,
+    "ts": 1794700120,
+    "commandId": 3,
+    "action": "pause",
+    "jobId": 12
+  }
+}
