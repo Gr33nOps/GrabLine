@@ -608,7 +608,7 @@ class MainWindow(QMainWindow):
         p = theme.current()
         for key, btn in self._filter_buttons.items():
             active = key == self._filter
-            color = p.accent if active else p.text2
+            color = p.accent_text if active else p.text2
             border = p.accent if active else "transparent"
             weight = 600 if active else 400
             btn.setStyleSheet(

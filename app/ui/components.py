@@ -120,6 +120,8 @@ class StatusPill(ElidingLabel):
     def set_status(self, status: str, queue_name: str | None = None) -> None:
         p = theme.current()
         color = design.status_color(p, status)
+        if status == "downloading":
+            color = p.accent_text  # as text it needs more contrast than the fill blue
         # setStyleSheet re-polishes the widget on every call, identical string
         # or not. The download list re-sends each row's status twice a second,
         # so skipping the unchanged ones is the difference between a quiet list
@@ -266,7 +268,7 @@ class SidebarButton(QPushButton):
 
     def retint(self) -> None:
         p = theme.current()
-        color = p.accent if self._active else p.text3
+        color = p.accent_text if self._active else p.text3
         self.setIcon(svg_icon(self._icon_name, color))
         bg = p.accent_dim if self._active else "transparent"
         self.setStyleSheet(

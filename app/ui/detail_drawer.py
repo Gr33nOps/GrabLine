@@ -180,6 +180,7 @@ class _StatGrid(QWidget):
 
     def __init__(self, keys: Sequence[str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("BareContainer")  # transparent: sit on the drawer surface
         grid = QGridLayout(self)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(10)
@@ -352,6 +353,7 @@ class DetailDrawer(QFrame):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         body = QWidget()
+        body.setObjectName("BareContainer")
         lay = QVBoxLayout(body)
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(12)
@@ -484,6 +486,7 @@ class DetailDrawer(QFrame):
     def _long_block(self, layout: QVBoxLayout, caption: str) -> QLabel:
         """A full-width caption + wrapping value, for URL / location / errors."""
         box = QWidget()
+        box.setObjectName("BareContainer")
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(2)

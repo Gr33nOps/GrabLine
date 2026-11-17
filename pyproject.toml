@@ -51,7 +51,7 @@ grabline = "app.__main__:main"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-"app.ui" = ["assets/*.png"]
+"app.ui" = ["assets/*.png", "assets/check.svg", "assets/fonts/*.ttf", "assets/fonts/OFL.txt"]
 "app" = ["i18n/*.json"]
 
 [tool.ruff]
