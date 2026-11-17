@@ -626,10 +626,12 @@ class RemoteListener(QObject):
         done = threading.Event()
 
         def run() -> None:
-            with lock:
-                if not state["cancelled"]:
-                    state["result"] = self._phone_command(device_id, command_id, action, job_id)
-            done.set()
+            try:
+                with lock:
+                    if not state["cancelled"]:
+                        state["result"] = self._phone_command(device_id, command_id, action, job_id)
+            finally:
+                done.set()  # the waiting GUI thread is released even if this raised
 
         if threading.get_ident() == self._ident:
             run()

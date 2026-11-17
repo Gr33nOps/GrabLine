@@ -793,3 +793,70 @@ def test_sent_note_shows_inline_only_and_clears_itself_or_on_typing() -> None:
     page.link_edit.setText("h")  # typing again
     assert page.send_note.isHidden()
     assert service.queued
+
+
+# ------------------------------------------- re-review: selection, focus, text
+
+
+def bar_buttons(page: DevicesPage) -> dict[str, QPushButton]:
+    return {b.accessibleName(): b for b in page.action_bar.findChildren(QPushButton)}
+
+
+def test_the_selected_download_survives_a_rebuild_by_id() -> None:
+    service, page = make(jobs=[phone_job(1, name="a.iso"), phone_job(2, name="b.iso")])
+    page.table.setCurrentCell(1, 0)  # the user picks b.iso
+    # A new download arrives at the top: rows shift, b.iso is now row 2.
+    service.lists["d1"] = snapshot(
+        [phone_job(3, name="new.iso"), phone_job(1, name="a.iso"), phone_job(2, name="b.iso")]
+    )
+    service.phoneJobsChanged.emit("d1")
+    assert page.table.currentRow() == 2
+    names = set(bar_buttons(page))
+    assert "Pause b.iso" in names and "Pause new.iso" not in names
+    # b.iso goes away: fall back to the first row, never to a stale index.
+    service.lists["d1"] = snapshot([phone_job(3, name="new.iso")])
+    service.phoneJobsChanged.emit("d1")
+    assert page.table.currentRow() == 0 and "Pause new.iso" in bar_buttons(page)
+
+
+def test_the_action_row_acts_on_the_job_it_shows_not_on_a_newer_list() -> None:
+    service, page = make(jobs=[phone_job(1, name="a.iso", status="completed")])
+    buttons = bar_buttons(page)
+    assert "Remove a.iso" in buttons
+    # A newer list reaches the service (not yet drawn); the row on screen still
+    # means job 1, so a click must be a command for job 1.
+    service.lists["d1"] = snapshot(
+        [phone_job(9, name="fresh.iso"), phone_job(1, status="completed")]
+    )
+    buttons["Remove a.iso"].click()
+    assert service.calls == [("command", ("d1", 1, "remove"))]
+
+
+def test_the_action_row_keeps_its_buttons_and_focus_across_redraws() -> None:
+    service, page = make(jobs=[phone_job(1, name="a.iso")])
+    page.show()
+    pause = bar_buttons(page)["Pause a.iso"]
+    pause.setFocus()
+    for n in range(5):  # live progress: same job, same actions
+        service.lists["d1"] = snapshot([phone_job(1, name="a.iso", downloaded=100 * (n + 1))])
+        service.phoneJobsChanged.emit("d1")
+    assert bar_buttons(page)["Pause a.iso"] is pause
+    # A real change (the download paused) does rebuild it.
+    service.lists["d1"] = snapshot([phone_job(1, name="a.iso", status="paused")])
+    service.phoneJobsChanged.emit("d1")
+    assert "Resume a.iso" in bar_buttons(page)
+
+
+def test_the_phones_words_in_a_result_have_no_bidi_marks() -> None:
+    service, page = make(jobs=[phone_job(1)])
+    row_buttons(page, 0)["Pause"].click()
+    service.commandFinished.emit(1, "refused", "no\u202ekcab\u200f\u061c")
+    assert page.result_label.text() == "Pause: no\ufffdkcab\ufffd\ufffd"
+
+
+def test_elided_labels_default_to_plain_text() -> None:
+    from app.ui import components
+
+    label = components.ElidingLabel("<b>x</b>", "muted")
+    assert label.textFormat() == Qt.TextFormat.PlainText
+    assert label.full_text() == "<b>x</b>"

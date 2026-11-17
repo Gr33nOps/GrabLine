@@ -837,7 +837,7 @@ something.
 | No new files or paths | Nothing here reads or writes a file on the PC, opens a path, or starts a download on the PC except `moveToPc`, which reaches the PC through the normal `download` request and its rules (section 7). |
 | Bounded | List size, string lengths, rate (the device's token bucket) and the 1 MiB frame limit apply. A device's list is replaced, never merged, so it cannot grow memory. |
 | Phone in control | The phone setting turns the whole feature off; the phone refuses commands for jobs it does not have or states that do not fit. |
-| Display | The PC shows phone strings as plain text and never logs URLs (as for jobs today). |
+| Display | The PC shows phone strings as plain text, replaces bidirectional control characters (U+061C, U+200E, U+200F, U+202A-202E, U+2066-2069) in names, links, errors and command messages with U+FFFD, and never logs URLs (as for jobs today). |
 
 Fixtures (protocol/fixtures): `phoneJobs.request.json`, `phoneJobs.request.notShared.json`,
 `event.phone.command.json`, `phoneCommandResult.request.json`, and `authOk` with `phoneJobs` in `features`.

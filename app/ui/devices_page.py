@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.i18n import N_, t
-from app.remote.phonejobs import PhoneJob, PhoneSnapshot
+from app.remote.phonejobs import PhoneJob, PhoneSnapshot, neutralise
 from app.ui import components, design, motion, theme
 from app.ui.format import human_bytes, plain_tooltip
 from app.ui.phone_page import PairingDialog
@@ -100,7 +100,7 @@ def result_text(result: str, message: str) -> str:
     """The words for a command outcome. The phone's own note wins for the
     answers the phone gave; the PC's conclusions use fixed sentences."""
     if message and result in ("ok", "notFound", "refused", "failed"):
-        return message
+        return neutralise(message)
     return t(_RESULT_TEXT.get(result, "The phone could not do that"))
 
 
@@ -146,6 +146,12 @@ class DevicesPage(QWidget):
         self._service = service
         self._selected: str | None = None
         self._row_ids: list[int] = []
+        #: the job the user picked, by id, so a rebuild keeps it
+        self._selected_job: int | None = None
+        #: the snapshot the table was last drawn from; the action row resolves
+        #: its job from this, never from a newer one
+        self._rendered: PhoneSnapshot | None = None
+        self._bar_sig: tuple[Any, ...] | None = None
         self._row_sigs: dict[int, tuple[Any, ...]] = {}
         self._bars: list[motion.SmoothProgressBar] = []
         self._online_since: dict[str, float] = {}
@@ -356,7 +362,7 @@ class DevicesPage(QWidget):
         table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         table.customContextMenuRequested.connect(self._show_row_menu)
-        table.currentCellChanged.connect(lambda *_: self._refresh_action_bar())
+        table.currentCellChanged.connect(self._on_current_cell)
         header = table.horizontalHeader()
         header.setHighlightSections(False)
         header.setStretchLastSection(False)
@@ -447,6 +453,7 @@ class DevicesPage(QWidget):
         device_id = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
         if device_id != self._selected:
             self._selected = device_id
+            self._selected_job = None
             self.link_edit.clear()
             self.send_note.setText("")
             self.send_note.hide()
@@ -554,7 +561,9 @@ class DevicesPage(QWidget):
         for bar in self._bars:
             bar.release()
         self._bars = []
+        blocked = self.table.blockSignals(True)
         self.table.setRowCount(0)
+        self.table.blockSignals(blocked)
         self._row_ids = []
         self._row_sigs = {}
 
@@ -564,10 +573,23 @@ class DevicesPage(QWidget):
             self._rebuild_rows(snapshot)
         for row, job in enumerate(snapshot.jobs):
             self._update_row(row, device_id, job, online)
-        if self.table.currentRow() < 0 and snapshot.jobs:
-            self.table.blockSignals(True)
-            self.table.setCurrentCell(0, _C_NAME)
-            self.table.blockSignals(False)
+        self._rendered = snapshot
+        # Keep the job the user picked (by id) across rebuilds; fall back to the
+        # first row only when it is gone.
+        wanted = (
+            self._row_ids.index(self._selected_job) if self._selected_job in self._row_ids else 0
+        )
+        if snapshot.jobs and self.table.currentRow() != wanted:
+            blocked = self.table.blockSignals(True)
+            self.table.setCurrentCell(wanted, _C_NAME)
+            self.table.blockSignals(blocked)
+        if snapshot.jobs:
+            self._selected_job = self._row_ids[wanted]
+        self._refresh_action_bar()
+
+    def _on_current_cell(self, row: int, _column: int, _prev_row: int, _prev_col: int) -> None:
+        if 0 <= row < len(self._row_ids):
+            self._selected_job = self._row_ids[row]
         self._refresh_action_bar()
 
     def _rebuild_rows(self, snapshot: PhoneSnapshot) -> None:
@@ -690,6 +712,39 @@ class DevicesPage(QWidget):
         the table. Windows UI Automation does not expose widgets placed inside
         table cells, so this is the path screen readers and keyboards use; the
         buttons in the row are the mouse shortcut for the same commands."""
+        device_id = self._selected
+        snapshot = self._rendered
+        row = self.table.currentRow()
+        if (
+            device_id is None
+            or snapshot is None
+            or self.jobs_stack.currentIndex() != 1
+            or not 0 <= row < len(self._row_ids)
+            or self._row_ids[row] not in {j.id for j in snapshot.jobs}
+        ):
+            self._clear_action_bar()
+            self.action_bar.hide()
+            return
+        # The job comes from the rows on screen (by id), against the snapshot
+        # they were drawn from: never from whatever list arrived since.
+        job = snapshot.job(self._row_ids[row])
+        assert job is not None
+        online = bool(self._service.is_online(device_id))
+        enabled = online and (device_id, job.id) not in self._busy
+        sig = (device_id, job.id, job.name, job.actions(), enabled, theme.current().text2)
+        if sig == self._bar_sig and not self.action_bar.isHidden():
+            return  # unchanged: keep the buttons, and the focus on them
+        self._clear_action_bar()
+        self._bar_sig = sig
+        caption = _elided(job.name, "dim")
+        caption.setAccessibleName(job.name)
+        self.action_layout.addWidget(caption, 1)
+        for button in self._action_buttons(device_id, job, job.actions(), enabled):
+            self.action_layout.addWidget(button)
+        self.action_bar.show()
+
+    def _clear_action_bar(self) -> None:
+        self._bar_sig = None
         while self.action_layout.count():
             item = self.action_layout.takeAt(0)
             widget = item.widget() if item is not None else None
@@ -697,26 +752,6 @@ class DevicesPage(QWidget):
                 widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
-        device_id = self._selected
-        snapshot = self._service.phone_jobs(device_id) if device_id else None
-        row = self.table.currentRow()
-        if (
-            device_id is None
-            or snapshot is None
-            or self.jobs_stack.currentIndex() != 1
-            or not 0 <= row < len(snapshot.jobs)
-        ):
-            self.action_bar.hide()
-            return
-        job = snapshot.jobs[row]
-        online = bool(self._service.is_online(device_id))
-        enabled = online and (device_id, job.id) not in self._busy
-        caption = _elided(job.name, "dim")
-        caption.setAccessibleName(job.name)
-        self.action_layout.addWidget(caption, 1)
-        for button in self._action_buttons(device_id, job, job.actions(), enabled):
-            self.action_layout.addWidget(button)
-        self.action_bar.show()
 
     def _actions_cell(
         self, device_id: str, job: PhoneJob, actions: tuple[str, ...], enabled: bool

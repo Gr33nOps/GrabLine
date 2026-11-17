@@ -26,9 +26,10 @@ RESULT_BUSY = "busy"  # more than 10 commands a second to that device
 PHONE_RESULTS = ("ok", "notFound", "refused", "failed")
 
 #: Bidirectional override, embedding and isolate controls (U+202A-202E,
-#: U+2066-2069). In a name they can reverse the text after them, so that
-#: "photo<RLO>gpj.exe" reads as "photoexe.jpg". They are shown as U+FFFD.
-_BIDI = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
+#: U+2066-2069) and the implicit marks U+061C, U+200E, U+200F. In a name they
+#: can reverse the text after them, so that "photo<RLO>gpj.exe" reads as
+#: "photoexe.jpg". They are shown as U+FFFD.
+_BIDI = re.compile(r"[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def neutralise(text: str) -> str:

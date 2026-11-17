@@ -658,3 +658,47 @@ def test_bidi_controls_in_phone_text_are_shown_as_a_marker() -> None:
     assert shown.error == "x\ufffdy\ufffdz"
     for code in [*range(0x202A, 0x202F), *range(0x2066, 0x206A)]:
         assert chr(code) not in PhoneJob.from_fields({**fields, "name": f"a{chr(code)}b"}).name
+
+
+def test_the_service_neutralises_the_phones_result_message(env: Env) -> None:
+    rig = Rig(env)
+    client = rig.login(["phone"])
+    rig.seed()
+    command = env.service.send_phone_command(rig.device, 12, "pause")
+    command_event(client)
+    env.ask(
+        client,
+        {
+            "id": "n-1",
+            "type": "phoneCommandResult",
+            "commandId": command,
+            "result": "refused",
+            "message": "a\u202eb\u200ec\u061cd",
+        },
+    )
+    assert rig.finished == [(command, "refused", "a\ufffdb\ufffdc\ufffdd")]
+
+
+def test_the_implicit_direction_marks_are_covered_too() -> None:
+    from app.remote.phonejobs import neutralise
+
+    assert neutralise("x\u200ey\u200fz\u061c") == "x\ufffdy\ufffdz\ufffd"
+
+
+def test_a_failing_command_run_releases_the_waiting_caller_at_once(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time as _time
+
+    rig = Rig(env)
+    rig.login(["phone"])
+    rig.seed()
+    queue = env.service.listener
+
+    def boom(*_a: Any) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(queue, "_phone_command", boom)
+    started = _time.monotonic()
+    assert queue.send_phone_command(rig.device, 1, "pause", 12) == "failed"
+    assert _time.monotonic() - started < 2.0  # not the 5 s wait

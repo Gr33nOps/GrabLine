@@ -347,7 +347,8 @@ class RemoteService(QObject):
         if pending is None or pending.device_id != device_id:
             return
         self._untrack_command(command_id)
-        self.commandFinished.emit(command_id, result, message or "")
+        # The phone's words are shown to the user: no bidi tricks in them.
+        self.commandFinished.emit(command_id, result, phonejobs.neutralise(message or ""))
 
     def _drop_commands(self, device_id: str | None, result: str) -> None:
         """End every waiting command of one device (or of all) at once."""

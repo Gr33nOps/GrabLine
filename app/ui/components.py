@@ -88,6 +88,9 @@ class ElidingLabel(QLabel):
             self.setFont(font)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)
+        # Plain text unless a caller opts in: these labels show names that come
+        # from files, phones and the network.
+        self.setTextFormat(Qt.TextFormat.PlainText)
         self.setText(text)
 
     def setText(self, text: str) -> None:
