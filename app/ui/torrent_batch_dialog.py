@@ -43,7 +43,7 @@ from app.core import torrentbatch
 from app.core.i18n import t
 from app.core.torrentbatch import TorrentCandidate
 from app.ui import chrome, design, threads
-from app.ui.format import human_bytes
+from app.ui.format import human_bytes, plain_tooltip
 
 
 class TorrentScanThread(QThread):
@@ -311,12 +311,14 @@ class TorrentBatchDialog(chrome.Dialog):
                     ]
                 )
                 item.setData(0, Qt.ItemDataRole.UserRole, candidate.source)
-                item.setToolTip(0, candidate.source)
+                item.setToolTip(0, plain_tooltip(candidate.source))
                 for column in (1, 2):  # numbers: right-aligned, tabular digits
                     item.setTextAlignment(column, right)
                     item.setFont(column, numbers)
                 if not candidate.ok:
-                    item.setToolTip(self._STATUS_COLUMN, candidate.error or candidate.duplicate)
+                    item.setToolTip(
+                        self._STATUS_COLUMN, plain_tooltip(candidate.error or candidate.duplicate)
+                    )
                 items.append(item)
             self.tree.addTopLevelItems(items)
         finally:

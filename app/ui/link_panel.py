@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from app.core.i18n import N_, t
 from app.ui import chrome
+from app.ui.format import plain_tooltip
 
 #: Quick filters: label -> file extensions it selects.
 _TYPE_FILTERS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -87,7 +88,7 @@ class LinkPanel(chrome.Dialog):
             item = QListWidgetItem(_short(url))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
-            item.setToolTip(url)
+            item.setToolTip(plain_tooltip(url))
             self.list.addItem(item)
         self.list.itemChanged.connect(lambda _i: self._update_count())
         layout.addWidget(self.list)

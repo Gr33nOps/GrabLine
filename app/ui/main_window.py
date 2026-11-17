@@ -117,7 +117,7 @@ from app.ui.cloud_dialog import CloudFolderDialog, prompt_cloud_url
 from app.ui.dashboard_view import DashboardView
 from app.ui.detail_drawer import DetailDrawer
 from app.ui.dupes_dialog import DupesDialog
-from app.ui.format import human_bytes
+from app.ui.format import human_bytes, plain_tooltip
 from app.ui.gallery_panel import GalleryPanel
 from app.ui.gif_dialog import GifDialog
 from app.ui.inspector_dialog import InspectorDialog
@@ -3714,7 +3714,7 @@ class MainWindow(QMainWindow):
         if pill is not None:
             previous = pill.full_text()
             pill.set_status(view.status.value, view.queue_name)
-            pill.setToolTip(view.error or pill.full_text())
+            pill.setToolTip(plain_tooltip(view.error or pill.full_text()))
             if pill.full_text() != previous:
                 self._status_width_dirty = True
 

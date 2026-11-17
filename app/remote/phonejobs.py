@@ -11,6 +11,7 @@ them as plain text only.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +24,17 @@ RESULT_OFFLINE = "offline"  # no connection of that device is listening
 RESULT_BUSY = "busy"  # more than 10 commands a second to that device
 #: What the phone reports (section 20 ``phoneCommandResult``).
 PHONE_RESULTS = ("ok", "notFound", "refused", "failed")
+
+#: Bidirectional override, embedding and isolate controls (U+202A-202E,
+#: U+2066-2069). In a name they can reverse the text after them, so that
+#: "photo<RLO>gpj.exe" reads as "photoexe.jpg". They are shown as U+FFFD.
+_BIDI = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
+
+
+def neutralise(text: str) -> str:
+    """``text`` with bidi controls replaced by a visible marker."""
+    return _BIDI.sub("\ufffd", text)
+
 
 _FINAL = ("completed", "failed", "cancelled")
 
@@ -46,8 +58,8 @@ class PhoneJob:
         """From one job dict that ``schema`` already validated."""
         return cls(
             id=int(fields["id"]),
-            name=str(fields["name"]),
-            url=str(fields["url"]),
+            name=neutralise(str(fields["name"])),
+            url=neutralise(str(fields["url"])),
             status=str(fields["status"]),
             kind=str(fields["kind"]),
             downloaded=int(fields["downloaded"]),
@@ -55,7 +67,7 @@ class PhoneJob:
             speed=int(fields["speed"]),
             eta=None if fields["eta"] is None else int(fields["eta"]),
             created_at=int(fields["createdAt"]),
-            error=None if fields["error"] is None else str(fields["error"]),
+            error=None if fields["error"] is None else neutralise(str(fields["error"])),
         )
 
     @property

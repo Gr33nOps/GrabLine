@@ -33,6 +33,7 @@ ALL_STATUSES = ["queued", "downloading", "paused", "waiting", "completed", "fail
 
 @pytest.fixture(autouse=True)
 def _profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.ui.devices_page.RENDER_MIN_INTERVAL_S", 0.0)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     ensure_app()
 
@@ -615,3 +616,89 @@ def test_main_window_has_devices_after_queue_and_settings_opens_it(db: Any, tmp_
     finally:
         window.shutdown()
         manager.shutdown()
+
+
+# ------------------------------------------------ review: tooltips, throttle
+
+
+EVIL = '<img src="//evil-host/s/x.png"><b>x</b>'
+ESCAPED = "&lt;img src=&quot;//evil-host/s/x.png&quot;&gt;&lt;b&gt;x&lt;/b&gt;"
+
+
+def pill_label(page: DevicesPage) -> QLabel:
+    holder = page.table.cellWidget(0, 1)
+    assert holder is not None
+    label = holder.findChild(QLabel)
+    assert label is not None
+    return label
+
+
+def test_plain_tooltip_escapes_markup_and_keeps_line_breaks() -> None:
+    from app.ui.format import plain_tooltip
+
+    tip = plain_tooltip(EVIL + "\nline two")
+    assert "<img" not in tip and "<b>" not in tip and ESCAPED in tip
+    assert tip.startswith("<p style='white-space:pre-wrap'>") and "\nline two" in tip
+    assert plain_tooltip("") == "" and plain_tooltip(None) == ""
+
+
+def test_phone_text_never_reaches_a_tooltip_as_markup() -> None:
+    service = FakeService([device("d1", EVIL)])
+    service.online = {"d1"}
+    service.lists["d1"] = snapshot([phone_job(1, name=EVIL, status="failed", error=EVIL)])
+    page = DevicesPage(service)
+    page.show()
+    item = page.table.item(0, 0)
+    pill = pill_label(page)
+    assert item is not None
+    carrying = [page.name_label.toolTip(), item.toolTip(), pill.toolTip()]
+    titles = [lbl.toolTip() for lbl in page.device_list.findChildren(QLabel) if lbl.toolTip()]
+    assert all(carrying) and titles
+    for tip in [*carrying, *titles]:
+        assert "<img" not in tip and "<b>" not in tip, tip
+    for tip in [*carrying, titles[0]]:
+        assert ESCAPED in tip
+
+
+def test_an_error_tooltip_goes_away_with_the_error() -> None:
+    service, page = make(jobs=[phone_job(1, status="failed", error="Boom")])
+    pill = pill_label(page)
+    assert "Boom" in pill.toolTip()
+    service.lists["d1"] = snapshot([phone_job(1, status="failed", error=None)])
+    service.phoneJobsChanged.emit("d1")
+    assert "Boom" not in pill.toolTip()
+
+
+def test_phone_list_updates_redraw_at_most_once_per_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.ui.devices_page.RENDER_MIN_INTERVAL_S", 0.25)
+    service, page = make(jobs=[phone_job(1)])
+    renders: list[int] = []
+    real = page._render_right
+
+    def counted() -> None:
+        renders.append(1)
+        real()
+
+    page._render_right = counted  # type: ignore[method-assign]
+    page._last_render = time.monotonic()
+    for n in range(50):  # a flood of reports
+        service.lists["d1"] = snapshot([phone_job(1, name=f"v{n}.bin")])
+        service.phoneJobsChanged.emit("d1")
+    assert renders == []  # inside the interval: nothing drawn yet
+    assert page._render_timer.isActive()
+    page._render_timer.stop()
+    page._render_timer.timeout.emit()
+    assert len(renders) == 1
+    assert cell(page, 0, 0) == "v49.bin"  # the newest list won
+    # Past the interval the next report draws at once.
+    page._last_render = time.monotonic() - 1.0
+    service.phoneJobsChanged.emit("d1")
+    assert len(renders) == 2
+
+
+def test_bidi_in_a_device_name_cannot_reorder_it() -> None:
+    from app.remote.phonejobs import neutralise
+
+    assert neutralise("photo\u202egpj.exe") == "photo\ufffdgpj.exe"

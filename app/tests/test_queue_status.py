@@ -6,6 +6,7 @@ from app.core.manager import DownloadManager
 from app.core.models import JobStatus
 from app.core.settings import Settings
 from app.tests.qt_app import ensure_app
+from app.ui.format import plain_tooltip
 from app.ui.main_window import _COL_STATUS, MainWindow
 from scripts.package_extension import _manifest_for
 
@@ -39,7 +40,7 @@ def test_waiting_status_shows_queue_and_updates_after_rename_or_move(db, tmp_pat
         app.processEvents()
         assert pill.full_text() == f"●  Queued: {renamed.name}"
         assert "…" in pill.text()
-        assert pill.toolTip() == pill.full_text()
+        assert pill.toolTip() == plain_tooltip(pill.full_text())
         assert window.table.columnWidth(_COL_STATUS) <= 240
         assert window._drawer._source_grid._rows["Queue"][1].text() == renamed.name
 

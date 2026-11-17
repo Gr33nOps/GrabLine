@@ -372,7 +372,7 @@ Step 3 is what meets QA-12 (new DHCP lease, found within 10 s) without a discove
 | `fileHash` | `fileHash` | 4 | 5 | `notFound`, `conflict` |
 | `outbox` | `outbox` | 4 | 1 | - |
 | `outboxAck` | `ok` | 4 | 1 | `tooLarge` |
-| `phoneJobs` | `ok` | `phoneJobs` feature | 1 | - |
+| `phoneJobs` | `ok` | `phoneJobs` feature | 3 | - |
 | `phoneCommandResult` | `ok` | `phoneJobs` feature | 1 | - |
 
 Common errors for every request: `badRequest`, `rateLimited`, `unsupported`, `internal`, and `unauthorized` before `authOk`. The extension's `gallery` message is not served to phones (`unsupported`).
@@ -773,7 +773,7 @@ Request fields:
 | `shared` | bool | `false` when the phone setting is off; then `jobs` MUST be empty |
 | `jobs` | list, at most 100 | The phone's downloads, newest first (section 20 phone-job object) |
 
-Reply `ok`. Cost 1. The phone sends a full list right after `authOk` (when the feature is listed) and again
+Reply `ok`. Cost 3 (the phone reports at most once a second; the PC does not rely on it). The phone sends a full list right after `authOk` (when the feature is listed) and again
 whenever its downloads change, at most once per second per connection (coalesced: the newest list wins). Only
 one connection per phone needs to send it (the first, "control" connection).
 

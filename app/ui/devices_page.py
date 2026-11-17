@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 from app.core.i18n import N_, t
 from app.remote.phonejobs import PhoneJob, PhoneSnapshot
 from app.ui import components, design, motion, theme
-from app.ui.format import human_bytes
+from app.ui.format import human_bytes, plain_tooltip
 from app.ui.phone_page import PairingDialog
 
 #: How long a phone may be connected without sending a list before the PC
@@ -50,6 +50,8 @@ from app.ui.phone_page import PairingDialog
 LIST_GRACE_S = 4.0
 #: How long a command result stays under the table.
 RESULT_SHOWN_MS = 8000
+#: Phone list updates redraw the page at most this often (seconds).
+RENDER_MIN_INTERVAL_S = 0.25
 #: Below this table width the size and time-left columns are hidden.
 _NARROW_PX = 700
 
@@ -138,6 +140,7 @@ class DevicesPage(QWidget):
         self._commands: dict[int, tuple[str, int, str]] = {}
         #: (device id, job id) with a command waiting for its answer
         self._busy: set[tuple[str, int]] = set()
+        self._last_render = 0.0
         self.pairing_dialog: PairingDialog | None = None
         self.allow_box: QMessageBox | None = None
         self._allow_button: QPushButton | None = None
@@ -151,6 +154,9 @@ class DevicesPage(QWidget):
         self._grace_timer = QTimer(self)
         self._grace_timer.setSingleShot(True)
         self._grace_timer.timeout.connect(self._render_right)
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.timeout.connect(self._render_throttled)
         self._result_timer = QTimer(self)
         self._result_timer.setSingleShot(True)
         self._result_timer.timeout.connect(lambda: self.result_label.setText(""))
@@ -437,6 +443,7 @@ class DevicesPage(QWidget):
     # ------------------------------------------------------- the right side
 
     def _render_right(self) -> None:
+        self._last_render = time.monotonic()
         device = self.selected_device()
         if device is None:
             self.right_stack.setCurrentIndex(0)
@@ -444,7 +451,6 @@ class DevicesPage(QWidget):
         self.right_stack.setCurrentIndex(1)
         online = bool(self._service.is_online(device.device_id))
         self.name_label.setText(str(device.name))
-        self.name_label.setToolTip(str(device.name))
         paired = t("Paired {date}", date=_format_time(device.created_at))
         seen = self._seen_text(device, online)
         self.state_label.setText(f"{seen}  ·  {paired}")
@@ -500,7 +506,19 @@ class DevicesPage(QWidget):
         self._dim.setEnabled(not online)
 
     def _on_jobs_changed(self, device_id: str) -> None:
-        if device_id == self._selected:
+        """A phone reports at most once a second by its own rule, but the PC
+        does not rely on that: re-drawing is limited to one per interval and
+        the newest list wins."""
+        if device_id != self._selected:
+            return
+        wait = RENDER_MIN_INTERVAL_S - (time.monotonic() - self._last_render)
+        if wait <= 0 and not self._render_timer.isActive():
+            self._render_right()
+        elif not self._render_timer.isActive():
+            self._render_timer.start(max(1, int(wait * 1000) + 1))
+
+    def _render_throttled(self) -> None:
+        if self._selected is not None:
             self._render_right()
 
     # ------------------------------------------------------------ the table
@@ -559,7 +577,7 @@ class DevicesPage(QWidget):
         p = theme.current()
         name_item = self._cell(row, _C_NAME)
         name_item.setText(job.name)
-        name_item.setToolTip(job.name)
+        name_item.setToolTip(plain_tooltip(job.name))
         downloading = job.status == "downloading"
         size = job.total if job.total else job.downloaded
         self._cell(row, _C_SIZE).setText(human_bytes(size) if size else "")
@@ -569,8 +587,9 @@ class DevicesPage(QWidget):
         pill = holder.findChild(components.StatusPill) if holder is not None else None
         if pill is not None:
             pill.set_status(job.status)
-            if job.error:
-                pill.setToolTip(f"{pill.full_text()}\n{job.error}")
+            # Always reset: an error that went away must not linger.
+            tip = f"{pill.full_text()}\n{job.error}" if job.error else pill.full_text()
+            pill.setToolTip(plain_tooltip(tip))
         bar = self._bars[row]
         fraction = job.fraction
         if job.status == "completed":

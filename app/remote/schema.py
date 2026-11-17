@@ -469,7 +469,7 @@ VALIDATORS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "phoneCommandResult": _phone_command_result,
 }
 
-COSTS = {"analyze": 5, "links": 5, "fileHash": 5, "phoneJobs": 1, "phoneCommandResult": 1}
+COSTS = {"analyze": 5, "links": 5, "fileHash": 5, "phoneJobs": 3, "phoneCommandResult": 1}
 
 #: Phase-4 message groups; served only when the listener enables them.
 PHASE4_TYPES = frozenset({"files", "fetch", "fetchCancel", "fileHash", "outbox", "outboxAck"})

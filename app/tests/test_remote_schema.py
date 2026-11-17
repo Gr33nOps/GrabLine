@@ -557,8 +557,8 @@ def many(count: int) -> list[dict[str, Any]]:
     return [phone_job(n) for n in range(1, count + 1)]
 
 
-def test_phone_jobs_and_results_cost_one_token():
-    assert validate(msg("phoneJobs", shared=True, jobs=[])).cost == 1
+def test_phone_jobs_costs_three_tokens_and_a_result_one():
+    assert validate(msg("phoneJobs", shared=True, jobs=[])).cost == 3
     assert validate(msg("phoneCommandResult", commandId=1, result="ok", message=None)).cost == 1
 
 

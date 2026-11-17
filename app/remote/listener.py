@@ -126,6 +126,7 @@ REFRESH_INTERVAL_MS = 5000
 TICK_MS = 250
 LINGER_S = 1.0  # how long a closed connection may take to go away
 MAX_TLS_HANDSHAKE_BYTES = 65536
+COMMAND_WAIT_S = 5.0  # how long send_phone_command waits for the listener thread
 EVENT_BACKLOG_BYTES = 1_048_576  # unsent bytes above which events are skipped
 MAX_BACKLOG_BYTES = 8 * 1_048_576  # unsent bytes above which the peer is dropped
 DEFAULT_FEATURES = (
@@ -618,7 +619,27 @@ class RemoteListener(QObject):
         that subscribed to ``phone``. Returns ``sent``, ``offline`` (no such
         connection), ``busy`` (over 10 a second to this device) or ``failed``
         (it could not be written)."""
-        result = self._post_wait(lambda: self._phone_command(device_id, command_id, action, job_id))
+        if not self._alive:
+            return "failed"
+        lock = threading.Lock()
+        state: dict[str, Any] = {"cancelled": False, "result": None}
+        done = threading.Event()
+
+        def run() -> None:
+            with lock:
+                if not state["cancelled"]:
+                    state["result"] = self._phone_command(device_id, command_id, action, job_id)
+            done.set()
+
+        if threading.get_ident() == self._ident:
+            run()
+        else:
+            self._invoke.emit(run)
+            if not done.wait(COMMAND_WAIT_S):
+                # Giving up must also stop the command from being sent later.
+                with lock:
+                    state["cancelled"] = True
+        result = state["result"]
         return result if isinstance(result, str) else "failed"
 
     # ------------------------------------------------------------ on and off

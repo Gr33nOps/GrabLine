@@ -8,6 +8,7 @@ WebSocket "phone", the way test_remote_service.py does.
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -240,8 +241,9 @@ def test_a_full_list_of_longest_strings_fits_one_frame(env: Env) -> None:
     assert snapshot is not None and len(snapshot.jobs) == 100
 
 
-def test_phone_jobs_costs_one_token_each(env: Env) -> None:
-    """Section 9: 20 tokens a second, burst 40, shared with every other request."""
+def test_phone_jobs_costs_three_tokens_each(env: Env) -> None:
+    """Section 9: 20 tokens a second, burst 40, so the PC itself holds a phone to
+    about 7 lists a second at the most, not only the phone's own 1 a second."""
     rig = Rig(env)
     client = rig.login()
     replies: list[dict[str, Any]] = []
@@ -252,7 +254,7 @@ def test_phone_jobs_costs_one_token_each(env: Env) -> None:
     limited = [r for r in replies if r.get("code") == "rateLimited"]
     accepted = [r for r in replies if r["type"] == "ok"]
     assert len(accepted) + len(limited) == 100
-    assert 40 <= len(accepted) <= 60 and limited
+    assert 13 <= len(accepted) <= 25 and limited
     assert all(r["retryAfterMs"] >= 1 for r in limited)
 
 
@@ -601,3 +603,58 @@ def test_a_command_event_keeps_the_event_sequence(env: Env) -> None:
     first = command_event(client)
     second = command_event(client)
     assert second["seq"] == first["seq"] + 1
+
+
+# ------------------------------------------------ late commands, bidi (review)
+
+
+def test_a_command_that_gave_up_waiting_is_never_sent_later(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.remote import listener as listener_module
+
+    rig = Rig(env)
+    client = rig.login(["phone"])
+    rig.seed()
+    queue = env.service.listener
+    monkeypatch.setattr(listener_module, "COMMAND_WAIT_S", 0.05)
+    # The listener thread is busy: the command waits behind this.
+    gate = threading.Event()
+
+    def block() -> None:
+        gate.wait(5)
+
+    queue._post(block)
+    result = queue.send_phone_command(rig.device, 1, "pause", 12)
+    assert result == "failed"
+    # Now the thread catches up and runs the old work: it must do nothing.
+    gate.set()
+    settle(0.3)
+    with pytest.raises(AssertionError):
+        _wait_event(client, lambda e: e["event"] == "phone.command", timeout=0.3)
+
+
+def test_the_service_reports_a_command_that_could_not_be_queued_once(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rig = Rig(env)
+    rig.login(["phone"])
+    rig.seed()
+    monkeypatch.setattr(env.service.listener, "send_phone_command", lambda *a: "failed")
+    command = env.service.send_phone_command(rig.device, 12, "pause")
+    assert pump(lambda: rig.finished == [(command, "offline", "")])
+    env.service.command_timeout_ms = 50
+    settle(0.2)
+    assert rig.finished == [(command, "offline", "")]  # untracked: no timeout later
+
+
+def test_bidi_controls_in_phone_text_are_shown_as_a_marker() -> None:
+    fields = {
+        **job(1, name="photo\u202egpj.exe", error="x\u2066y\u2069z"),
+        "createdAt": 1,
+    }
+    shown = PhoneJob.from_fields(fields)
+    assert shown.name == "photo\ufffdgpj.exe"
+    assert shown.error == "x\ufffdy\ufffdz"
+    for code in [*range(0x202A, 0x202F), *range(0x2066, 0x206A)]:
+        assert chr(code) not in PhoneJob.from_fields({**fields, "name": f"a{chr(code)}b"}).name
