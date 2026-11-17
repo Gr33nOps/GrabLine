@@ -257,6 +257,21 @@ def qpalette(p: Palette) -> QPalette:
     return pal
 
 
+def asset_path(name: str) -> str:
+    """Absolute, forward-slashed path of a file under ``app/ui/assets`` (source
+    tree first, then the PyInstaller bundle) for use in a QSS ``url()``."""
+    import sys
+    from pathlib import Path
+
+    for base in (
+        Path(__file__).resolve().parent / "assets",
+        Path(getattr(sys, "_MEIPASS", "")) / "app" / "ui" / "assets",
+    ):
+        if (base / name).is_file():
+            return (base / name).as_posix()
+    return (Path(__file__).resolve().parent / "assets" / name).as_posix()
+
+
 def stylesheet(p: Palette) -> str:
     """The global QSS. Kept flat and calm (borders over shadows) so it reads
     the same on Windows, macOS and Linux."""
@@ -341,7 +356,7 @@ def stylesheet(p: Palette) -> str:
     QCheckBox, QRadioButton {{ spacing: 8px; color: {p.text}; }}
     QCheckBox:indicator, QRadioButton:indicator {{
         width: 15px; height: 15px;
-        border: 1px solid {p.border}; background: {p.surface};
+        border: 1px solid {p.text3}; background: {p.surface};
     }}
     QCheckBox:indicator {{ border-radius: 3px; }}
     QRadioButton:indicator {{ border-radius: 8px; }}
@@ -349,6 +364,7 @@ def stylesheet(p: Palette) -> str:
     QCheckBox:indicator:checked, QRadioButton:indicator:checked {{
         background: {p.accent}; border-color: {p.accent};
     }}
+    QCheckBox:indicator:checked {{ image: url("{asset_path("check.svg")}"); }}
 
     /* --- tabs --- */
     QTabWidget:pane {{ border: 1px solid {p.border}; border-radius: {RADIUS["md"]}px; top: -1px; }}
