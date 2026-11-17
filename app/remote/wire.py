@@ -11,6 +11,11 @@ section 2):
 * a data frame is refused from its header alone when it (or the message it
   continues) is over the limit: the payload is never buffered or parsed;
 * phone frames must be masked text; a binary frame or bad UTF-8 is malformed.
+
+The client side (a PC linked to another PC, PROTOCOL.md section 21) uses the
+same module: ``build_upgrade_request`` / ``check_upgrade_response`` for the
+handshake, ``encode_client_frame`` for masked frames, and ``FrameParser`` with
+``masked=False`` for the unmasked frames a server sends.
 """
 
 from __future__ import annotations
@@ -18,6 +23,8 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import hmac
+import os
 import struct
 
 _GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -127,6 +134,77 @@ def encode_close(code: int, reason: str = "") -> bytes:
     return encode_frame(OP_CLOSE, struct.pack(">H", code) + reason.encode("utf-8")[:123])
 
 
+def encode_client_frame(opcode: int, payload: bytes = b"", mask: bytes | None = None) -> bytes:
+    """One masked, final frame (what a client sends, RFC 6455 section 5.3).
+
+    ``mask`` is 4 random bytes, chosen here unless a test passes one."""
+    key = os.urandom(4) if mask is None else mask
+    if len(key) != 4:
+        raise ValueError("a masking key is 4 bytes")
+    size = len(payload)
+    if size < 126:
+        head = bytes((0x80 | opcode, 0x80 | size))
+    elif size < 65536:
+        head = bytes((0x80 | opcode, 0x80 | 126)) + struct.pack(">H", size)
+    else:
+        head = bytes((0x80 | opcode, 0x80 | 127)) + struct.pack(">Q", size)
+    return head + key + _unmask(payload, key)
+
+
+def encode_client_close(code: int, reason: str = "") -> bytes:
+    return encode_client_frame(OP_CLOSE, struct.pack(">H", code) + reason.encode("utf-8")[:123])
+
+
+def new_key() -> str:
+    """A fresh ``Sec-WebSocket-Key`` (16 random bytes, base64)."""
+    return base64.b64encode(os.urandom(16)).decode("ascii")
+
+
+def build_upgrade_request(host_header: str, key: str) -> bytes:
+    """The client's handshake. No ``Origin`` (the server refuses one) and no
+    extension offered, so nothing like ``permessage-deflate`` can be on."""
+    if not host_header or "\r" in host_header or "\n" in host_header:
+        raise ValueError("bad host header")
+    return (
+        f"GET {PATH} HTTP/1.1\r\n"
+        f"Host: {host_header}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n"
+    ).encode("ascii")
+
+
+def check_upgrade_response(head: bytes, key: str) -> bool:
+    """True only for a 101 whose ``Sec-WebSocket-Accept`` is the one for
+    ``key`` and that negotiated no extension or sub-protocol."""
+    try:
+        lines = head.decode("ascii").split("\r\n")
+    except UnicodeDecodeError:
+        return False
+    status = lines[0].split(" ", 2)
+    if len(status) < 2 or status[0] != "HTTP/1.1" or status[1] != "101":
+        return False
+    headers: dict[str, list[str]] = {}
+    for line in lines[1:]:
+        name, sep, value = line.partition(":")
+        if not sep or not name:
+            return False
+        headers.setdefault(name.strip().lower(), []).append(value.strip())
+    if "sec-websocket-extensions" in headers or "sec-websocket-protocol" in headers:
+        return False
+    accept = headers.get("sec-websocket-accept", [])
+    connection = [t.strip().lower() for v in headers.get("connection", []) for t in v.split(",")]
+    upgrade = headers.get("upgrade", [])
+    return (
+        len(accept) == 1
+        and hmac.compare_digest(accept[0].encode("ascii", "replace"), accept_key(key).encode())
+        and len(upgrade) == 1
+        and upgrade[0].lower() == "websocket"
+        and "upgrade" in connection
+    )
+
+
 def _unmask(data: bytes, mask: bytes) -> bytes:
     size = len(data)
     if not size:
@@ -144,9 +222,14 @@ class FrameParser:
     is dead and ignores further input.
     """
 
-    def __init__(self, max_message: int, malformed_code: int = 1003) -> None:
+    def __init__(
+        self, max_message: int, malformed_code: int = 1003, *, masked: bool = True
+    ) -> None:
         self.max_message = max_message
         self._malformed = malformed_code
+        #: True for what a client sends (the server's side); False for what a
+        #: server sends (the client's side): RFC 6455 forbids masking those.
+        self._masked = masked
         self._buffer = bytearray()
         self._message: bytearray | None = None
         self._dead = False
@@ -178,8 +261,8 @@ class FrameParser:
         opcode = first & 0x0F
         final = bool(first & 0x80)
         size = second & 0x7F
-        if first & 0x70 or not second & 0x80:
-            return "fail", CLOSE_PROTOCOL_ERROR  # an extension bit, or not masked
+        if first & 0x70 or bool(second & 0x80) != self._masked:
+            return "fail", CLOSE_PROTOCOL_ERROR  # an extension bit, or the wrong masking
         offset = 2
         if size == 126:
             if len(buf) < 4:
@@ -210,10 +293,12 @@ class FrameParser:
             so_far = len(self._message) if self._message is not None else 0
             if size > self.max_message or so_far + size > self.max_message:
                 return "fail", CLOSE_TOO_BIG
-        end = offset + 4 + size
+        key_size = 4 if self._masked else 0
+        end = offset + key_size + size
         if len(buf) < end:
             return None
-        payload = _unmask(bytes(buf[offset + 4 : end]), bytes(buf[offset : offset + 4]))
+        body = bytes(buf[offset + key_size : end])
+        payload = _unmask(body, bytes(buf[offset : offset + 4])) if self._masked else body
         del buf[:end]
         if opcode == OP_PING:
             return "ping", payload
