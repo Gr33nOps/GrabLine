@@ -3,11 +3,11 @@ type, and the global Qt stylesheet.
 
 The accent is the GrabLine brand blue from the app logo (`#2563EB`, shared with
 the website and the Android app), a touch brighter in dark mode so it pops.
-Dark surfaces follow the website's blue-tinted neutrals; type is IBM Plex. Every screen and dialog reads its look from here: change a
-token and the whole app follows. ``stylesheet(theme)`` returns a QSS string
-that restyles the standard Qt widgets (buttons, inputs, tabs, tables, menus,
-scrollbars, dialogs) to match, so even screens we haven't hand-built yet look
-right.
+Dark surfaces follow the website's blue-tinted neutrals; type is IBM Plex.
+Every screen and dialog reads its look from here: change a token and the whole
+app follows. ``stylesheet(theme)`` returns a QSS string that restyles the
+standard Qt widgets (buttons, inputs, tabs, tables, menus, scrollbars,
+dialogs) to match, so even screens we haven't hand-built yet look right.
 """
 
 from __future__ import annotations
@@ -333,7 +333,9 @@ def stylesheet(p: Palette) -> str:
         color: {p.text3}; padding: 6px 8px; font-weight: 600;
     }}
     QPushButton[role="tab"]:hover {{ color: {p.text}; }}
-    QPushButton[role="tab"]:checked {{ color: {p.accent_text}; border-bottom: 2px solid {p.accent}; }}
+    QPushButton[role="tab"]:checked {{
+        color: {p.accent_text}; border-bottom: 2px solid {p.accent};
+    }}
 
     /* --- inputs --- */
     QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox,

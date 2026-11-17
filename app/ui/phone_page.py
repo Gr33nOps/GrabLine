@@ -318,9 +318,7 @@ class PhonePage(QWidget):
         self.port_spin.setValue(int(service.port_setting()))
         self.port_spin.setAccessibleName(t("Port:"))
         # Room for five digits plus the field padding and the step buttons.
-        self.port_spin.setMinimumWidth(
-            self.port_spin.fontMetrics().horizontalAdvance("65535") + 64
-        )
+        self.port_spin.setMinimumWidth(self.port_spin.fontMetrics().horizontalAdvance("65535") + 64)
         self.port_spin.setMaximumWidth(140)
         self.port_spin.editingFinished.connect(self._apply_port)
         port_label.setBuddy(self.port_spin)

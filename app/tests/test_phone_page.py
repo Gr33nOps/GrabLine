@@ -256,7 +256,8 @@ def test_end_states_shrink_the_dialog_to_fit(service: FakeService, outcome: str)
 
 def test_phone_intro_does_not_repeat_the_status_line(service: FakeService) -> None:
     page = PhonePage(service)
-    intro = [text for text in (l.text() for l in page.findChildren(QLabel)) if text.startswith("Control GrabLine")]
+    texts = [label.text() for label in page.findChildren(QLabel)]
+    intro = [text for text in texts if text.startswith("Control GrabLine")]
     assert intro == ["Control GrabLine from your Android phone on the same Wi-Fi."]
 
 
