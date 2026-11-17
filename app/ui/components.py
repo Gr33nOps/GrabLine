@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from app.core.i18n import N_, t
 from app.ui import design, theme
+from app.ui.format import plain_tooltip
 from app.ui.icons import svg_icon
 
 _GRAPH_HISTORY = 120
@@ -33,6 +34,9 @@ _STATUS_LABEL = {
     "completed": N_("Completed"),
     "failed": N_("Failed"),
     "cancelled": N_("Cancelled"),
+    # A phone's download (the Devices page) can also be waiting or unknown.
+    "waiting": N_("Waiting"),
+    "unknown": N_("Unknown"),
 }
 
 
@@ -84,12 +88,15 @@ class ElidingLabel(QLabel):
             self.setFont(font)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)
+        # Plain text unless a caller opts in: these labels show names that come
+        # from files, phones and the network.
+        self.setTextFormat(Qt.TextFormat.PlainText)
         self.setText(text)
 
     def setText(self, text: str) -> None:
         self._full = text or ""
         # Only offer a tooltip when there is something the elision hides.
-        self.setToolTip(self._full if self._full else "")
+        self.setToolTip(plain_tooltip(self._full))
         self._render()
 
     def full_text(self) -> str:

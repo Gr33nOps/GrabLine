@@ -25,6 +25,7 @@ from app.core.models import Job, JobStatus, Queue
 from app.db.database import Database
 from app.tests.conftest import wait_for
 from app.tests.media_server import MediaServer, payload
+from app.ui.format import plain_tooltip
 
 #: A download slow enough that a second one starting alongside it is visible.
 _SLOW = {"chunk_size": 32 * 1024, "delay_per_chunk": 0.04}
@@ -985,7 +986,7 @@ def test_a_long_job_name_never_widens_the_queue_page(db: Database, dest: Path):
         QApplication.processEvents()
         assert widgets.active.full_text() == enormous
         assert widgets.active.text() != enormous  # painted elided at 420px
-        assert widgets.active.toolTip() == enormous
+        assert widgets.active.toolTip() == plain_tooltip(enormous)
         assert not widgets.bar.isTextVisible()  # a 6px bar has no room for text
         assert widgets.readout.isVisible()  # the figures get their own line
 

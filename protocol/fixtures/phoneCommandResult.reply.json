@@ -1,0 +1,10 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The PC noted the result.",
+  "state": "authed",
+  "message": {
+    "id": "r-32",
+    "type": "ok",
+    "protocolVersion": 6
+  }
+}

@@ -335,7 +335,7 @@ def test_main_window_sidebar_is_pure_navigation(db: Database, tmp_path: Path):
         window.show()  # refresh() only updates a window a user can see
         # The rail is navigation only; every tool moved to the downloads
         # toolbar, so there is no Tools page and no overflow menu.
-        assert set(window._nav) == {"downloads", "dashboard", "queue", "settings"}
+        assert set(window._nav) == {"downloads", "dashboard", "queue", "devices", "settings"}
         assert not hasattr(window, "_overflow_menu")
         assert not hasattr(window, "_tools_view")
         window._switch_view("settings")

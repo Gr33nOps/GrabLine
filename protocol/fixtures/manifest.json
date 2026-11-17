@@ -1,6 +1,6 @@
 {
   "protocolVersion": 6,
-  "count": 127,
+  "count": 134,
   "fixtures": [
     {
       "file": "analyze.reply.json",
@@ -238,6 +238,12 @@
     },
     {
       "file": "event.outbox.added.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "event"
+    },
+    {
+      "file": "event.phone.command.json",
       "direction": "pc-to-phone",
       "state": "authed",
       "type": "event"
@@ -695,6 +701,42 @@
       "direction": "phone-to-pc",
       "state": "preauth",
       "type": "pair"
+    },
+    {
+      "file": "phoneCommandResult.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "ok"
+    },
+    {
+      "file": "phoneCommandResult.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "phoneCommandResult"
+    },
+    {
+      "file": "phoneCommandResult.request.refused.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "phoneCommandResult"
+    },
+    {
+      "file": "phoneJobs.reply.json",
+      "direction": "pc-to-phone",
+      "state": "authed",
+      "type": "ok"
+    },
+    {
+      "file": "phoneJobs.request.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "phoneJobs"
+    },
+    {
+      "file": "phoneJobs.request.notShared.json",
+      "direction": "phone-to-pc",
+      "state": "authed",
+      "type": "phoneJobs"
     },
     {
       "file": "ping.reply.json",

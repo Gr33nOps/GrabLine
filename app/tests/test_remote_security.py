@@ -159,6 +159,8 @@ AUTHED_REQUESTS: dict[str, dict[str, Any]] = {
     "fileHash": {"jobId": 1},
     "outbox": {},
     "outboxAck": {"itemIds": [1]},
+    "phoneJobs": {"shared": True, "jobs": []},
+    "phoneCommandResult": {"commandId": 1, "result": "ok", "message": None},
 }
 
 

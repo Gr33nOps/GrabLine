@@ -1,0 +1,12 @@
+{
+  "direction": "phone-to-pc",
+  "description": "The phone does not share its downloads, so it refused the command.",
+  "state": "authed",
+  "message": {
+    "id": "r-33",
+    "type": "phoneCommandResult",
+    "commandId": 4,
+    "result": "refused",
+    "message": "This phone doesn't let PCs control its downloads"
+  }
+}

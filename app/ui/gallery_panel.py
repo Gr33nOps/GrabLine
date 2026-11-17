@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from app.core.i18n import t
 from app.ui import chrome, threads
+from app.ui.format import plain_tooltip
 
 _THUMB_SIZE = 128
 _MAX_THUMB_BYTES = 10 * 1024 * 1024
@@ -102,7 +103,7 @@ class GalleryPanel(chrome.Dialog):
             item = QListWidgetItem(_short_name(url))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
-            item.setToolTip(url)
+            item.setToolTip(plain_tooltip(url))
             self.grid.addItem(item)
         self.grid.itemChanged.connect(lambda _item: self._update_count())
         layout.addWidget(self.grid)

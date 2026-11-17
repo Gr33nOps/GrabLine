@@ -226,6 +226,7 @@ def status_color(palette: Palette, status: str) -> str:
     return {
         "downloading": palette.st_downloading,
         "queued": palette.st_queued,
+        "waiting": palette.st_queued,
         "paused": palette.st_paused,
         "completed": palette.st_done,
         "failed": palette.st_failed,
@@ -489,6 +490,14 @@ def stylesheet(p: Palette) -> str:
     QFrame#DrawerFooter {{ background: transparent; border-top: 1px solid {p.border}; }}
     QFrame#SettingsNav {{ background: {p.surface2}; border-right: 1px solid {p.border}; }}
     QFrame#SettingsFooter {{ background: transparent; border-top: 1px solid {p.border}; }}
+    QFrame#DevicesNav {{ background: {p.surface2}; border-right: 1px solid {p.border}; }}
+    QListWidget#DevicesList {{ border: none; background: transparent; }}
+    QListWidget#DevicesList:item {{ border-radius: {RADIUS["md"]}px; margin: 1px 0; }}
+    QListWidget#DevicesList:item:selected {{ background: {p.accent_dim}; }}
+    QListWidget#DevicesList:item:hover {{ background: {p.row_hover}; }}
+    QListWidget#DevicesList:focus {{
+        border: 1px solid {p.accent}; border-radius: {RADIUS["md"]}px;
+    }}
     QListWidget#SettingsList {{ border: none; background: transparent; }}
     QListWidget#SettingsList:item {{
         padding: 8px 10px; border-radius: {RADIUS["sm"]}px; color: {p.text2}; margin: 1px 0;
@@ -521,6 +530,7 @@ def stylesheet(p: Palette) -> str:
     QLabel[role="value"] {{ color: {p.text}; }}
     QLabel[role="strong"] {{ color: {p.text}; font-weight: 600; }}
     QLabel[role="accent"] {{ color: {p.accent_text}; font-weight: 600; }}
+    QLabel[role="warn"] {{ color: {p.warn}; }}
     QLabel[role="ok"] {{ color: {p.ok}; }}
     QLabel[chip="true"] {{
         color: {p.text2}; background: {p.surface2}; border: 1px solid {p.border};

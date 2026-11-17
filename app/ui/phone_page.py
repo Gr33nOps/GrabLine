@@ -1,5 +1,5 @@
-"""Settings -> Phone: pair Android phones, list and remove them, turn the phone
-remote on or off.
+"""Settings -> Phone: turn the phone remote on or off and set its port, and the
+pairing dialog the Devices page opens.
 
 The page talks to ``app.remote.service.RemoteService`` only through its public
 API and Qt signals. The pairing code lives in the pairing dialog and nowhere
@@ -10,16 +10,16 @@ from __future__ import annotations
 
 import io
 import time
+from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QDateTime, QLocale, Qt, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -247,17 +247,20 @@ class PairingDialog(chrome.Dialog):
 
 
 class PhonePage(QWidget):
-    """The Settings "Phone" page."""
+    """The Settings "Phone" page: the phone-remote switch and its port. Pairing
+    and the paired phones live on the Devices page (``app.ui.devices_page``)."""
 
-    def __init__(self, service: Any, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        service: Any,
+        parent: QWidget | None = None,
+        *,
+        open_devices: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._service = service
         self._error: str | None = None
         self._listening = False
-        self.pairing_dialog: PairingDialog | None = None
-        self.allow_box: QMessageBox | None = None
-        self._allow_button: QPushButton | None = None
-        self._announced_pairing = False
 
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.setMinimumWidth(0)
@@ -274,21 +277,20 @@ class PhonePage(QWidget):
             )
         )
 
-        pair_row = QHBoxLayout()
-        self.pair_button = components.accent_button(t("Pair a phone"))
-        self.pair_button.setAccessibleName(t("Pair a phone"))
-        self.pair_button.clicked.connect(self._pair)
-        pair_row.addWidget(self.pair_button)
-        pair_row.addStretch(1)
-        layout.addLayout(pair_row)
-
-        layout.addWidget(components.SectionLabel(t("Paired phones")))
-        self.devices_box = QWidget()
-        self.devices_box.setAccessibleName(t("Paired phones"))
-        self._devices_layout = QVBoxLayout(self.devices_box)
-        self._devices_layout.setContentsMargins(0, 0, 0, 0)
-        self._devices_layout.setSpacing(8)
-        layout.addWidget(self.devices_box)
+        self.devices_hint = _wrapping(
+            components.role_label(t("Paired phones are listed in Devices."), "muted")
+        )
+        layout.addWidget(self.devices_hint)
+        devices_row = QHBoxLayout()
+        self.devices_button = components.accent_button(t("Pair and manage phones in Devices"))
+        self.devices_button.setAccessibleName(t("Pair and manage phones in Devices"))
+        if open_devices is not None:
+            self.devices_button.clicked.connect(lambda _checked=False: open_devices())
+        else:
+            self.devices_button.setEnabled(False)
+        devices_row.addWidget(self.devices_button)
+        devices_row.addStretch(1)
+        layout.addLayout(devices_row)
 
         self.enabled_check = QCheckBox(t("Phone remote"))
         self.enabled_check.setAccessibleName(t("Phone remote"))
@@ -329,16 +331,11 @@ class PhonePage(QWidget):
         layout.addWidget(self.advanced_box)
         layout.addStretch(1)
 
-        service.devicesChanged.connect(self.refresh)
         service.stateChanged.connect(self._on_state)
         service.errorOccurred.connect(self._on_error)
-        service.pairingStarted.connect(self._on_pairing_started)
-        service.pairingPending.connect(self._on_pairing_pending)
-        service.pairingLockedWarning.connect(self._on_locked_warning)
-        service.pairingFinished.connect(self._on_pairing_finished)
 
         self._listening = self._read_listening()
-        self.refresh()
+        self._update_status()
 
     # --------------------------------------------------------------- state
 
@@ -357,48 +354,8 @@ class PhonePage(QWidget):
             return 0
 
     def refresh(self) -> None:
-        """Rebuild the paired-phone list and the status line."""
-        while self._devices_layout.count():
-            item = self._devices_layout.takeAt(0)
-            widget = item.widget() if item is not None else None
-            if widget is not None:
-                widget.hide()
-                widget.setParent(None)
-                widget.deleteLater()
-        devices = list(self._service.store.list())
-        if not devices:
-            empty = _wrapping(components.role_label(t("No phones are paired."), "muted"))
-            self._devices_layout.addWidget(empty)
-        for device in devices:
-            self._devices_layout.addWidget(self._device_row(device))
+        """Re-read the switch and the status line."""
         self._update_status()
-
-    def _format_time(self, unix: int) -> str:
-        return QLocale().toString(
-            QDateTime.fromSecsSinceEpoch(int(unix)), QLocale.FormatType.ShortFormat
-        )
-
-    def _device_row(self, device: Any) -> QWidget:
-        card = components.card_frame()
-        row = QHBoxLayout(card)
-        row.setContentsMargins(12, 8, 12, 8)
-        text = QVBoxLayout()
-        text.setSpacing(2)
-        name = _wrapping(components.role_label(str(device.name), "strong", bold=True))
-        text.addWidget(name)
-        seen = (
-            t("Last seen {when}", when=self._format_time(device.last_seen_at))
-            if device.last_seen_at
-            else t("Not connected yet")
-        )
-        detail = f"{t('Paired {date}', date=self._format_time(device.created_at))}  ·  {seen}"
-        text.addWidget(_wrapping(components.role_label(detail, "muted", size=design.FONT["small"])))
-        row.addLayout(text, 1)
-        remove = QPushButton(t("Remove"))
-        remove.setAccessibleName(f"{t('Remove')} {device.name}")
-        remove.clicked.connect(lambda _checked=False, d=device: self._remove(d))
-        row.addWidget(remove, 0, Qt.AlignmentFlag.AlignVCenter)
-        return card
 
     def _update_status(self) -> None:
         if self._error == "portInUse":
@@ -452,106 +409,6 @@ class PhonePage(QWidget):
         self._error = None
         self._service.set_port(port)
         self._update_status()
-
-    def _confirm_remove(self, name: str) -> bool:
-        box = QMessageBox(self.window())
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle(t("Remove"))
-        box.setTextFormat(Qt.TextFormat.PlainText)
-        box.setText(t("Remove {name}? It will stop working at once.", name=name))
-        remove = box.addButton(t("Remove"), QMessageBox.ButtonRole.DestructiveRole)
-        cancel = box.addButton(t("Cancel"), QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(cancel)
-        box.setEscapeButton(cancel)
-        box.exec()
-        return box.clickedButton() is remove
-
-    def _remove(self, device: Any) -> None:
-        if not self._confirm_remove(str(device.name)):
-            return
-        self._service.remove_device(device.device_id)
-        self.refresh()
-
-    # ------------------------------------------------------------- pairing
-
-    def _pair(self) -> None:
-        self._error = None
-        dialog = self.pairing_dialog
-        if dialog is None:
-            dialog = PairingDialog(self._service, self.window())
-            dialog.finished.connect(self._on_dialog_closed)
-            self.pairing_dialog = dialog
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
-        self._service.start_pairing()
-
-    def _on_dialog_closed(self, _result: int) -> None:
-        self.pairing_dialog = None
-        self._dismiss_allow_box()
-
-    def _on_pairing_started(self, qr_uri: str, manual_text: str, expires_at: int) -> None:
-        dialog = self.pairing_dialog
-        if dialog is not None:
-            dialog.show_code(qr_uri, manual_text, int(expires_at))
-
-    def _on_locked_warning(self) -> None:
-        if self.pairing_dialog is not None:
-            self.pairing_dialog.show_locked_warning()
-
-    def _on_pairing_pending(self, device_name: str) -> None:
-        self._dismiss_allow_box()
-        box = QMessageBox(self.window())
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle(t("Pair a phone"))
-        box.setTextFormat(Qt.TextFormat.PlainText)
-        box.setText(t('Allow "{name}" to control GrabLine?', name=device_name))
-        allow = box.addButton(t("Allow"), QMessageBox.ButtonRole.AcceptRole)
-        deny = box.addButton(t("Deny"), QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(deny)
-        box.setEscapeButton(deny)
-        allow.setAccessibleName(t("Allow"))
-        deny.setAccessibleName(t("Deny"))
-        box.setWindowModality(Qt.WindowModality.WindowModal)
-        box.finished.connect(lambda _result, b=box: self._on_allow_answer(b))
-        self.allow_box = box
-        self._allow_button = allow
-        box.open()
-
-    def _on_allow_answer(self, box: QMessageBox) -> None:
-        if self.allow_box is not box:
-            return  # dismissed because the pairing ended on its own
-        allowed = box.clickedButton() is self._allow_button
-        self.allow_box = None
-        self._allow_button = None
-        box.deleteLater()
-        if allowed:
-            self._service.approve_pairing()
-        else:
-            self._service.deny_pairing()
-
-    def _dismiss_allow_box(self) -> None:
-        box = self.allow_box
-        if box is None:
-            return
-        self.allow_box = None
-        self._allow_button = None
-        box.done(0)
-        box.deleteLater()
-
-    def _on_pairing_finished(self, outcome: str) -> None:
-        if outcome not in ("approved", "denied"):
-            self._dismiss_allow_box()
-        dialog = self.pairing_dialog
-        if dialog is not None:
-            dialog.finished_with(outcome)
-        if outcome == "approved":
-            self.refresh()
-
-    def closeEvent(self, event: Any) -> None:  # pragma: no cover - widget teardown
-        if self.pairing_dialog is not None:
-            self.pairing_dialog.close()
-        super().closeEvent(event)
 
 
 __all__ = ["PairingDialog", "PhonePage", "qr_pixmap"]

@@ -19,16 +19,18 @@ import atexit
 import logging
 import time
 import weakref
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal, Slot
 
-from app.remote import folders, schema
+from app.remote import folders, phonejobs, schema
 from app.remote.devices import DeviceStore
 from app.remote.events import EventTracker
 from app.remote.handlers import RemoteHandlers, analysis_reply
 from app.remote.listener import DEFAULT_PORT, RemoteListener, default_pc_name
+from app.remote.phonejobs import PhoneSnapshot
 from app.remote.requests_log import RequestLog
 from app.remote.schema import Request, RequestError
 
@@ -42,10 +44,18 @@ log = logging.getLogger(__name__)
 
 POLL_MS = 500
 ANALYZE_TIMEOUT_MS = 30_000
+#: PROTOCOL.md section 20: a command the phone has not answered in 15 s.
+COMMAND_TIMEOUT_MS = 15_000
 
 KEY_ON = "remote_listener_on"
 KEY_PORT = "remote_port"
 KEY_LOOPBACK = "remote_loopback_test"
+
+
+@dataclass
+class _PendingCommand:
+    device_id: str
+    timer: QTimer
 
 
 class RemoteService(QObject):
@@ -59,6 +69,17 @@ class RemoteService(QObject):
     devicesChanged = Signal()
     stateChanged = Signal(bool)
     errorOccurred = Signal(str)
+    #: Section 20: a phone reported its downloads (``deviceId``); read them
+    #: with ``phone_jobs()``.
+    phoneJobsChanged = Signal(str)
+    #: A command sent with ``send_phone_command`` has its outcome:
+    #: ``(commandId, result, message)``. ``result`` is what the phone said
+    #: (``ok``, ``notFound``, ``refused``, ``failed``) or what the PC
+    #: concluded (``timeout``, ``offline``, ``busy``); ``message`` is the
+    #: phone's plain-words note or "".
+    commandFinished = Signal(int, str, str)
+    #: A device got its first connection or lost its last one (``deviceId``).
+    deviceOnlineChanged = Signal(str)
 
     def __init__(
         self,
@@ -87,6 +108,12 @@ class RemoteService(QObject):
             live=lambda job_id: self.tracker.live(job_id),
             analyze=self._analyze,
         )
+        self.handlers.on_phone_jobs = self.phoneJobsChanged.emit
+        self.handlers.on_phone_result = self._on_phone_result
+        self._commands: dict[int, _PendingCommand] = {}
+        self._next_command_id = 1
+        #: Milliseconds a command may wait for its result (tests shorten it).
+        self.command_timeout_ms = COMMAND_TIMEOUT_MS
         self.tracker = EventTracker(self._job_object, self.handlers.global_state)
         self._timer = QTimer(self)
         self._timer.setInterval(POLL_MS)
@@ -121,7 +148,8 @@ class RemoteService(QObject):
             listener.pairingPending.connect(self.pairingPending)
             listener.pairingLockedWarning.connect(self.pairingLockedWarning)
             listener.pairingFinished.connect(self.pairingFinished)
-            listener.devicesChanged.connect(self.devicesChanged)
+            listener.devicesChanged.connect(self._on_devices_changed)
+            listener.presenceChanged.connect(self.deviceOnlineChanged)
             listener.stateChanged.connect(self.stateChanged)
             listener.errorOccurred.connect(self.errorOccurred)
             self._listener = listener
@@ -183,6 +211,7 @@ class RemoteService(QObject):
             return
         self._shut = True
         self._timer.stop()
+        self._drop_commands(None, phonejobs.RESULT_OFFLINE)
         for thread in list(self._analyze_threads):
             thread.wait(2000)
         self.handlers.close()
@@ -219,7 +248,115 @@ class RemoteService(QObject):
         )
         self.requests.forget_device(device_id)
         self.handlers.outbox.forget_device(device_id)
+        self._forget_phone(device_id)
         return removed
+
+    @Slot()
+    def _on_devices_changed(self) -> None:
+        """A device was paired, removed (here or by the phone itself) or seen.
+        A device that is gone loses its list and its waiting commands."""
+        try:
+            known = {device.device_id for device in self.store.list()}
+        except Exception:
+            known = None
+        if known is not None:
+            for device_id in self.handlers.phone.retain(known):
+                self._drop_commands(device_id, phonejobs.RESULT_OFFLINE)
+        self.devicesChanged.emit()
+
+    def _forget_phone(self, device_id: str) -> None:
+        self.handlers.phone.forget(device_id)
+        self._drop_commands(device_id, phonejobs.RESULT_OFFLINE)
+
+    # ---------------------------------------------- the phone's own downloads
+
+    def phone_jobs(self, device_id: str) -> PhoneSnapshot | None:
+        """The newest list this phone reported (``shared``, ``jobs``,
+        ``received_at``), or None if it never sent one (an older app). Memory
+        only: gone when the phone is removed or the app exits."""
+        if self.store.get(device_id) is None:
+            return None
+        return self.handlers.phone.get(device_id)
+
+    def is_online(self, device_id: str) -> bool:
+        """True while the phone has an open connection to this PC."""
+        return self._listener is not None and device_id in self._listener.online_devices()
+
+    def send_phone_command(self, device_id: str, job_id: int, action: str) -> int:
+        """Ask a phone to pause, resume, cancel, retry or remove one of its
+        downloads, or to download it on this PC instead (``moveToPc``). Call it
+        only for a user's action.
+
+        Returns the command id, or 0 if ``action`` or ``device_id`` is not
+        valid (nothing was sent). The outcome always arrives later through
+        ``commandFinished(commandId, result, message)``, also for the cases
+        that fail at once (``offline``, ``busy``, ``notFound``)."""
+        if action not in phonejobs.ACTIONS or device_id in self._removed:
+            return 0
+        if self.store.get(device_id) is None:
+            return 0
+        command_id = self._next_command_id
+        self._next_command_id += 1
+        snapshot = self.handlers.phone.get(device_id)
+        if snapshot is None or snapshot.job(job_id) is None:
+            self._finish_soon(command_id, "notFound")
+            return command_id
+        if self._listener is None:
+            self._finish_soon(command_id, phonejobs.RESULT_OFFLINE)
+            return command_id
+        # Tracked before it is sent, so the timeout covers exactly what was sent.
+        self._track_command(command_id, device_id)
+        outcome = self._listener.send_phone_command(device_id, command_id, action, job_id)
+        if outcome != "sent":
+            self._untrack_command(command_id)
+            self._finish_soon(
+                command_id,
+                phonejobs.RESULT_BUSY if outcome == "busy" else phonejobs.RESULT_OFFLINE,
+            )
+        return command_id
+
+    def _track_command(self, command_id: int, device_id: str) -> None:
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(max(1, int(self.command_timeout_ms)))
+        timer.timeout.connect(lambda cid=command_id: self._command_timed_out(cid))
+        self._commands[command_id] = _PendingCommand(device_id, timer)
+        timer.start()
+
+    def _untrack_command(self, command_id: int) -> _PendingCommand | None:
+        pending = self._commands.pop(command_id, None)
+        if pending is not None:
+            pending.timer.stop()
+            pending.timer.deleteLater()
+        return pending
+
+    def _finish_soon(self, command_id: int, result: str, message: str = "") -> None:
+        """Report an outcome once the caller has the command id in hand."""
+        QTimer.singleShot(0, self, lambda: self.commandFinished.emit(command_id, result, message))
+
+    def _command_timed_out(self, command_id: int) -> None:
+        if self._untrack_command(command_id) is not None:
+            self.commandFinished.emit(command_id, phonejobs.RESULT_TIMEOUT, "")
+
+    def _on_phone_result(
+        self, device_id: str, command_id: int, result: str, message: str | None
+    ) -> None:
+        """``phoneCommandResult``: only the device the command went to may
+        answer it, and once; anything else is ignored (the reply is still ``ok``)."""
+        pending = self._commands.get(command_id)
+        if pending is None or pending.device_id != device_id:
+            return
+        self._untrack_command(command_id)
+        # The phone's words are shown to the user: no bidi tricks in them.
+        self.commandFinished.emit(command_id, result, phonejobs.neutralise(message or ""))
+
+    def _drop_commands(self, device_id: str | None, result: str) -> None:
+        """End every waiting command of one device (or of all) at once."""
+        for command_id in [
+            cid for cid, pending in self._commands.items() if device_id in (None, pending.device_id)
+        ]:
+            if self._untrack_command(command_id) is not None:
+                self.commandFinished.emit(command_id, result, "")
 
     # ---------------------------------------------------------- send to phone
 

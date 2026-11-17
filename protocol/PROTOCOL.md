@@ -150,7 +150,7 @@ During manual pairing only (section 5.4) the trust manager records the presented
 
 | Item | Value |
 | --- | --- |
-| Start | The user opens Settings, Phone, Pair a phone. The listener turns on. |
+| Start | The user opens Devices, Pair a phone. The listener turns on. |
 | Lifetime | 120 s from the moment the QR is shown. One session at a time; opening a new one cancels the old. |
 | Code | 12 characters from the Crockford base32 alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ`, chosen with `secrets.choice`: 60 bits. Shown as `XXXX-XXXX-XXXX`. |
 | Single use | The session ends the moment one correct proof arrives (before the Allow prompt). A second correct proof gets `pairingExpired`. |
@@ -312,6 +312,7 @@ All limits are enforced on the listener thread before any database or UI work, s
 | Flood | More than 200 rate-limited requests in any 10 s | Close `4429`; the device is refused for 30 s |
 | Unanswered requests per connection | 32 | `rateLimited` |
 | Events per connection | At most 20 per second after coalescing (section 15) | Coalesced, never dropped silently for state changes |
+| `phone.command` events per device | At most 10 per second (section 20) | The PC does not send it and shows "busy" to its user |
 
 Phone on `rateLimited`: wait `retryAfterMs` (at least 250 ms), retry up to 3 times, then show "Your PC is busy. Try again in a moment". User-facing actions are never retried in a tight loop.
 
@@ -324,7 +325,7 @@ Phone on `rateLimited`: wait `retryAfterMs` (at least 250 ms), retry up to 3 tim
 | Bump when | A message type, a required field, or a meaning changes. Adding an optional field, an event name or a `features` entry does not need a bump. |
 | Phone constant | `MIN_PC_PROTOCOL = 6`. If `hello.protocolVersion` (or any reply's) is lower or missing, the phone sends nothing more, closes `1000`, and shows "Update GrabLine on your PC" (QA-17). It MUST tolerate every other field being absent. Fixtures: `hello.server.old.json`, `pong.v5.json`. |
 | PC constant | `minClientVersion = 6`, sent in `hello`. A lower `protocolVersion` in `pair` or `auth`: `versionTooOld`, close `4426`; the phone shows "Update GrabLine on this phone". The phone SHOULD check `hello.minClientVersion` itself and not send at all. |
-| Features | `authOk.features` lists optional message groups this PC serves. A missing group, or an `unsupported` reply: the phone hides or blocks only that feature with "Update GrabLine on your PC to use this". |
+| Features | `authOk.features` lists optional message groups this PC serves. A missing group, or an `unsupported` reply: the phone hides or blocks only that feature with "Update GrabLine on your PC to use this". `phoneJobs` (section 20) is such a group: a PC that lists it accepts `phoneJobs` and `phoneCommandResult` and sends `phone.command`; an older PC does not list it and the phone sends none of them. |
 | Newer PC | A phone meeting `protocolVersion` above its own carries on; it ignores what it does not know. |
 
 ## 11. Finding the PC
@@ -371,6 +372,8 @@ Step 3 is what meets QA-12 (new DHCP lease, found within 10 s) without a discove
 | `fileHash` | `fileHash` | 4 | 5 | `notFound`, `conflict` |
 | `outbox` | `outbox` | 4 | 1 | - |
 | `outboxAck` | `ok` | 4 | 1 | `tooLarge` |
+| `phoneJobs` | `ok` | `phoneJobs` feature | 3 | - |
+| `phoneCommandResult` | `ok` | `phoneJobs` feature | 1 | - |
 
 Common errors for every request: `badRequest`, `rateLimited`, `unsupported`, `internal`, and `unauthorized` before `authOk`. The extension's `gallery` message is not served to phones (`unsupported`).
 
@@ -425,7 +428,7 @@ Check order on the PC: schema; session exists and not expired (`pairingExpired`)
 | `serverTime` | time | For clock-skew display only |
 | `addresses` | list of string, at most 8 | Current bound addresses, QR notation without percent-encoding |
 | `port` | int | Current port |
-| `features` | list of string | Subset of `jobs`, `control`, `global`, `queues`, `analyze`, `events`, `files`, `fetch`, `outbox` |
+| `features` | list of string | Subset of `jobs`, `control`, `global`, `queues`, `analyze`, `events`, `files`, `fetch`, `outbox`, `phoneJobs` |
 
 ### `ping`
 
@@ -560,7 +563,7 @@ The PC answers within 30 s or replies `failed` with `reason`: `noMedia` ("This i
 
 ### `subscribe`, `unsubscribe`
 
-Request `subscribe`: `topics` (list of `jobs`, `global`, `outbox`; opt, default `["jobs", "global"]`; unknown names ignored). Reply `subscribed`: `topics` (those now on), `state` (global state object). Subscribing again replaces the topic set. `unsubscribe` has no fields and replies `ok`. Events are described in section 15.
+Request `subscribe`: `topics` (list of `jobs`, `global`, `outbox`, `phone`; opt, default `["jobs", "global"]`; unknown names ignored). Reply `subscribed`: `topics` (those now on), `state` (global state object). Subscribing again replaces the topic set. `unsubscribe` has no fields and replies `ok`. Events are described in section 15.
 
 ### `unpair`
 
@@ -658,6 +661,7 @@ Sent only on connections that subscribed. Shape: `{type: "event", protocolVersio
 | `job.removed` | jobs | `jobId` | The job left the list | None |
 | `global.updated` | global | `state` | Pause-all, speed limit, or counts changed | At most 1 per second |
 | `outbox.added` | outbox | `count` | Phase 4: the PC queued a link for this phone | At most 1 per second |
+| `phone.command` | phone | `commandId`, `action`, `jobId` | Section 20: the PC user asked this phone to act on one of its downloads | Never coalesced; at most 10 per second per device; only on the device's newest connection that subscribed to `phone` |
 
 | Rule | Detail |
 | --- | --- |
@@ -743,3 +747,97 @@ Other QA items: QA-12 section 11; QA-13 and QA-16 section 15; QA-14 and QA-15 `d
 | Multi-file outputs in `files`/`fetch` | Not in version 6. |
 | `finishedAt` | Derived from `jobs.updated_at`; a real `finished_at` column would be more exact. |
 | `speed`/`eta` in the job object | Need a read accessor on the download manager; not stored in the database. |
+
+## 20. The phone's downloads on the PC (feature `phoneJobs`)
+
+Both apps act as remotes: the phone already sees and controls the PC's downloads; with this feature the PC
+sees the phone's downloads and can pause, resume, cancel, retry or remove them, or have one downloaded on the
+PC instead. The phone still connects out and the PC still never connects to the phone: the phone reports its
+downloads with a request, and the PC sends commands as events on the phone's own connection.
+
+This is an optional message group, so `PROTOCOL_VERSION` stays 6 (section 10). A PC that serves it lists
+`"phoneJobs"` in `authOk.features`. A phone that does not see it there sends nothing from this section.
+
+### Phone setting
+
+The phone has a setting "Let paired PCs see and control downloads on this phone", on by default. While it is
+off the phone sends `phoneJobs` with `shared: false` and an empty `jobs` list once per connection, and answers
+every `phone.command` with `result: "refused"` without touching anything.
+
+### `phoneJobs` (phone to PC)
+
+Request fields:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `shared` | bool | `false` when the phone setting is off; then `jobs` MUST be empty |
+| `jobs` | list, at most 100 | The phone's downloads, newest first (section 20 phone-job object) |
+
+Reply `ok`. Cost 3 (the phone reports at most once a second; the PC does not rely on it). The phone sends a full list right after `authOk` (when the feature is listed) and again
+whenever its downloads change, at most once per second per connection (coalesced: the newest list wins). Only
+one connection per phone needs to send it (the first, "control" connection).
+
+The PC keeps only the newest list per device, in memory (never in its database), with the time it arrived.
+When the device has no open connection the PC shows the last list greyed with "Last seen ...". Removing the
+device drops its list.
+
+Validation on the PC (any failure: `badRequest`, the stored list is unchanged): `jobs` is a list of at most
+100 objects; each object has the required fields with the right types and lengths below; `id` values are
+unique. Unknown fields are ignored. The PC shows every string as plain text (no rich text, no links that open
+by themselves).
+
+Phone-job object:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | int, at least 1 | The phone's own job id |
+| `name` | string, 1 to 256 | File or video name; never a path |
+| `url` | string, at most 2048 | Source link with any `user:password@` removed; empty for a copy from a PC |
+| `status` | string | `queued`, `downloading`, `paused`, `waiting`, `completed`, `failed`, `cancelled`. Anything else the PC shows as "Unknown" with no actions |
+| `kind` | string | `direct`, `video`, `torrent`, `cloud`, `transfer` (a copy from a PC). Unknown: shown as `direct` |
+| `downloaded` | int, at least 0 | Bytes |
+| `total` | int or null | null when unknown |
+| `speed` | int, at least 0 | Bytes per second; 0 unless `downloading` |
+| `eta` | int or null | Seconds |
+| `createdAt` | time | |
+| `error` | string or null, at most 512 | Plain words; null unless `failed` |
+
+### `phone.command` (event, PC to phone)
+
+Sent only on a connection of that device that subscribed to the new topic `phone`
+(`subscribe {topics: [..., "phone"]}`), at most one connection per device (the newest). Payload:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `commandId` | int, 1 to 2^31 - 1 | Unique per PC run; the PC matches the result to it |
+| `action` | string | `pause`, `resume`, `cancel`, `retry`, `remove`, `moveToPc` |
+| `jobId` | int | A phone job id from the newest `phoneJobs` list |
+
+The PC sends a command only from its own window (a user action), at most 10 per second per device. A command
+the phone has not answered in 15 s is shown as "The phone did not answer".
+
+The phone checks `jobId` against its own database and that the action fits the job's state, then does what
+its own Downloads screen does for that action. `moveToPc` does what the phone's "Send to PC" does, with the
+commanding PC as the target: the link is sent to that PC with `download` (unattended, quality `best` or the
+job's quality), and only after the PC replied `queued` the phone cancels its own job and removes its partial
+file; a finished phone file is kept. A `transfer` job (a copy from a PC) cannot be moved: `refused`.
+
+### `phoneCommandResult` (phone to PC)
+
+Request fields: `commandId` (int), `result` (string: `ok`, `notFound`, `refused`, `failed`), `message`
+(string or null, at most 256, plain words for the PC to show). Reply `ok`. Cost 1. An unknown or already
+answered `commandId` is ignored (still `ok`). The phone sends a fresh `phoneJobs` list after a command changed
+something.
+
+### Security rules for this section
+
+| Rule | Detail |
+| --- | --- |
+| Same trust | Only an authenticated device sends `phoneJobs` and `phoneCommandResult`; the PC accepts them only for that device. Commands go only to that device's connections. |
+| No new files or paths | Nothing here reads or writes a file on the PC, opens a path, or starts a download on the PC except `moveToPc`, which reaches the PC through the normal `download` request and its rules (section 7). |
+| Bounded | List size, string lengths, rate (the device's token bucket) and the 1 MiB frame limit apply. A device's list is replaced, never merged, so it cannot grow memory. |
+| Phone in control | The phone setting turns the whole feature off; the phone refuses commands for jobs it does not have or states that do not fit. |
+| Display | The PC shows phone strings as plain text, replaces bidirectional control characters (U+061C, U+200E, U+200F, U+202A-202E, U+2066-2069) in names, links, errors and command messages with U+FFFD, and never logs URLs (as for jobs today). |
+
+Fixtures (protocol/fixtures): `phoneJobs.request.json`, `phoneJobs.request.notShared.json`,
+`event.phone.command.json`, `phoneCommandResult.request.json`, and `authOk` with `phoneJobs` in `features`.

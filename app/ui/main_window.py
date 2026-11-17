@@ -117,7 +117,7 @@ from app.ui.cloud_dialog import CloudFolderDialog, prompt_cloud_url
 from app.ui.dashboard_view import DashboardView
 from app.ui.detail_drawer import DetailDrawer
 from app.ui.dupes_dialog import DupesDialog
-from app.ui.format import human_bytes
+from app.ui.format import human_bytes, plain_tooltip
 from app.ui.gallery_panel import GalleryPanel
 from app.ui.gif_dialog import GifDialog
 from app.ui.inspector_dialog import InspectorDialog
@@ -244,6 +244,13 @@ class MainWindow(QMainWindow):
         #: touches the database after it closes.
         self._shutting_down = False
 
+        # Phone remote: the unattended add path and the listener service
+        # (created on demand; the listener stays off until a phone is paired).
+        # Before the shell, because the sidebar only offers Devices with it.
+        self._remote_adder: remote_add.UnattendedAdder | None = None
+        self._remote_service: Any = None
+        self._start_remote_service()
+
         # Shell: a 48px icon rail on the left, the stacked content on the right.
         self._pages = QStackedWidget()
         self._pages.addWidget(self._build_downloads_page())  # index 0
@@ -260,6 +267,9 @@ class MainWindow(QMainWindow):
             "queue": self._make_queue_page,
             "settings": self._make_settings_page,
         }
+        self._devices_page: Any = None
+        if self._remote_service is not None:
+            self._page_factories["devices"] = self._make_devices_page
         shell = QWidget()
         row = QHBoxLayout(shell)
         row.setContentsMargins(0, 0, 0, 0)
@@ -305,11 +315,6 @@ class MainWindow(QMainWindow):
         self._prev_status: dict[int, JobStatus] = {}
         self._was_active = False
         self._resolve_threads: list[work_threads.ResolveThread] = []
-        # Phone remote: the unattended add path and the listener service
-        # (created on demand; the listener stays off until a phone is paired).
-        self._remote_adder: remote_add.UnattendedAdder | None = None
-        self._remote_service: Any = None
-        self._start_remote_service()
         self._file_ops: set[work_threads.FileOpThread] = set()
         # Cancel flags for unbounded file ops (the installer download): set on
         # shutdown so the worker stops promptly and the exit wait doesn't time
@@ -361,9 +366,12 @@ class MainWindow(QMainWindow):
             ("downloads", "download", t("Downloads"), lambda: self._switch_view("downloads")),
             ("dashboard", "dashboard", t("Dashboard"), lambda: self._switch_view("dashboard")),
             ("queue", "queue", t("Queue manager"), lambda: self._switch_view("queue")),
+            ("devices", "phone", t("Devices"), lambda: self._switch_view("devices")),
             ("settings", "settings", t("Settings"), lambda: self._switch_view("settings")),
         )
         for key, icon_name, tip, handler in nav:
+            if key == "devices" and self._remote_service is None:
+                continue  # the phone remote failed to start: nothing to manage
             btn = components.SidebarButton(icon_name, tip)
             btn.clicked.connect(handler)
             self._nav[key] = btn
@@ -723,8 +731,19 @@ class MainWindow(QMainWindow):
         from app.ui.settings_view import SettingsView
 
         return SettingsView(
-            self.settings, self._on_settings_applied, remote_service=self._remote_service
+            self.settings,
+            self._on_settings_applied,
+            remote_service=self._remote_service,
+            open_devices=lambda: self._switch_view("devices"),
         )
+
+    def _make_devices_page(self) -> QWidget:
+        from app.ui.devices_page import DevicesPage
+
+        page = DevicesPage(self._remote_service)
+        page.status.connect(lambda text: self.statusBar().showMessage(text, 6000))
+        self._devices_page = page
+        return page
 
     def _page_for(self, key: str) -> int | None:
         """This page's index in the stack, building it on first use."""
@@ -771,6 +790,8 @@ class MainWindow(QMainWindow):
         for btn in self._retintable:
             btn.retint()
         self._drawer.retint()
+        if self._devices_page is not None:
+            self._devices_page.retint()
         self._style_filter_buttons()
         # Rebuild rows so per-row widgets (pills, bars) repaint in the new theme.
         self._row_job_ids = []
@@ -806,6 +827,7 @@ class MainWindow(QMainWindow):
             "nav.downloads": lambda: self._switch_view("downloads"),
             "nav.dashboard": lambda: self._switch_view("dashboard"),
             "nav.queue": lambda: self._switch_view("queue"),
+            "nav.devices": lambda: self._switch_view("devices"),
             "nav.settings": lambda: self._switch_view("settings"),
             "nav.next": lambda: self._cycle_page(1),
             "nav.prev": lambda: self._cycle_page(-1),
@@ -876,7 +898,11 @@ class MainWindow(QMainWindow):
             ShortcutsDialog(self._shortcuts.effective(), self).exec()
 
     def _cycle_page(self, delta: int) -> None:
-        order = ("downloads", "dashboard", "queue", "settings")
+        order = tuple(
+            key
+            for key in ("downloads", "dashboard", "queue", "devices", "settings")
+            if key in self._nav
+        )
         try:
             index = order.index(self._current_page)
         except ValueError:
@@ -1096,7 +1122,7 @@ class MainWindow(QMainWindow):
         send_menu.setEnabled(bool(phones))
         actions: dict[QAction, str | None] = {}
         if not phones:
-            send_menu.setToolTip(t("Pair a phone in Settings"))
+            send_menu.setToolTip(t("Pair a phone in Devices"))
             return actions
         for device in phones:
             actions[send_menu.addAction(device.name)] = device.device_id
@@ -3688,7 +3714,7 @@ class MainWindow(QMainWindow):
         if pill is not None:
             previous = pill.full_text()
             pill.set_status(view.status.value, view.queue_name)
-            pill.setToolTip(view.error or pill.full_text())
+            pill.setToolTip(plain_tooltip(view.error or pill.full_text()))
             if pill.full_text() != previous:
                 self._status_width_dirty = True
 

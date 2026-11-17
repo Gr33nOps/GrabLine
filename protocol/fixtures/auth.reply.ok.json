@@ -26,7 +26,8 @@
       "events",
       "files",
       "fetch",
-      "outbox"
+      "outbox",
+      "phoneJobs"
     ]
   }
 }

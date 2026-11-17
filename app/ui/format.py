@@ -2,6 +2,18 @@
 
 from __future__ import annotations
 
+import html
+
+
+def plain_tooltip(text: str | None) -> str:
+    """``text`` as a tooltip that Qt shows literally. Qt tooltips switch to rich
+    text when the string merely looks like markup, and rich text can load
+    remote images, so any text a phone or the network supplied goes through
+    here: escaped inside one rich-text paragraph that keeps its line breaks."""
+    if not text:
+        return ""
+    return "<p style='white-space:pre-wrap'>" + html.escape(text, quote=True) + "</p>"
+
 
 def human_bytes(count: float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):

@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "The phone setting 'Let paired PCs see and control downloads on this phone' is off.",
+  "state": "authed",
+  "message": {
+    "id": "r-31",
+    "type": "phoneJobs",
+    "shared": false,
+    "jobs": []
+  }
+}

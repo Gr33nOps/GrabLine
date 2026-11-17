@@ -428,6 +428,7 @@ def test_pair_approve_then_login(rig: Rig) -> None:
         "files",
         "fetch",
         "outbox",
+        "phoneJobs",
     ]
     # The code is single use.
     second, nonce2 = rig.hello(qr["f"])

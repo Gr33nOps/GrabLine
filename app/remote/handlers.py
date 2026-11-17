@@ -30,6 +30,7 @@ from app.core.models import Job, JobKind, JobStatus
 from app.native_host import host
 from app.remote import fetch, folders
 from app.remote.outbox import Outbox
+from app.remote.phonejobs import PhoneJobStore
 from app.remote.schema import QUALITIES, Request, RequestError, encode_cursor
 
 if TYPE_CHECKING:
@@ -166,6 +167,11 @@ class RemoteHandlers:
         self._recent = {}
         self.outbox = Outbox(self._db)
         self._hasher = fetch.FileHasher()
+        #: Section 20: what each phone last said about its own downloads
+        #: (memory only) and who to tell when that or a command result comes in.
+        self.phone = PhoneJobStore()
+        self.on_phone_jobs: Callable[[str], None] | None = None
+        self.on_phone_result: Callable[[str, int, str, str | None], None] | None = None
 
     def close(self) -> None:
         """Stop background hashing (app exit)."""
@@ -428,6 +434,22 @@ class RemoteHandlers:
 
     def _h_outboxAck(self, device: str, f: dict[str, Any]) -> dict[str, Any]:
         return {"type": "ok", "removed": self.outbox.ack(device, f["itemIds"])}
+
+    # --------------------------------------------------- phone's own downloads
+
+    def _h_phoneJobs(self, device: str, f: dict[str, Any]) -> dict[str, Any]:
+        """Section 20: replace (never merge) this device's list."""
+        self.phone.replace(device, f["shared"], f["jobs"], self._clock())
+        if self.on_phone_jobs is not None:
+            self.on_phone_jobs(device)
+        return {"type": "ok"}
+
+    def _h_phoneCommandResult(self, device: str, f: dict[str, Any]) -> dict[str, Any]:
+        """Section 20: the service matches ``commandId`` to a command it sent
+        to this device; an unknown or already answered one is ignored."""
+        if self.on_phone_result is not None:
+            self.on_phone_result(device, f["commandId"], f["result"], f["message"])
+        return {"type": "ok"}
 
     def _h_jobs(self, device: str, f: dict[str, Any]) -> dict[str, Any]:
         statuses = _FILTERS[f["filter"]]
