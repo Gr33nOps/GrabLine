@@ -373,3 +373,19 @@ def test_settings_view_hosts_phone_page(
         assert without._list.count() == view._list.count() - 1
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_disclosure_toggle_is_flat_with_visible_focus(service: FakeService, mode: str) -> None:
+    from app.ui import theme
+
+    app = ensure_app()
+    theme.apply_theme(app, mode)
+    try:
+        sheet = app.styleSheet()
+        assert "QToolButton {" in sheet
+        block = sheet.split("QToolButton {", 1)[1].split("}", 1)[0]
+        assert "border: 1px solid transparent" in block  # no native frame
+        assert "QToolButton:hover" in sheet and "QToolButton:focus" in sheet
+    finally:
+        theme.apply_theme(app, "light")

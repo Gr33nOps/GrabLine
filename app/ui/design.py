@@ -317,6 +317,15 @@ def stylesheet(p: Palette) -> str:
         background: transparent; border: none; color: {p.text2}; padding: 5px 9px;
     }}
     QPushButton[flat="true"]:hover {{ background: {p.row_hover}; color: {p.text}; }}
+    /* flat disclosure buttons (the Phone page's Advanced toggle): no native
+       frame, a hover wash like flat push buttons, and a visible focus ring */
+    QToolButton {{
+        background: transparent; border: 1px solid transparent; color: {p.text2};
+        border-radius: {RADIUS["md"]}px; padding: 3px 8px;
+    }}
+    QToolButton:hover {{ background: {p.row_hover}; color: {p.text}; }}
+    QToolButton:focus {{ border: 1px solid {p.accent}; }}
+    QToolButton:disabled {{ color: {p.text3}; }}
     QPushButton[danger="true"]:hover {{ border-color: {p.warn}; color: {p.warn}; }}
     /* the detail drawer's tab strip + its in-tab action buttons */
     QPushButton[role="tab"] {{
