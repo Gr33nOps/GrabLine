@@ -37,6 +37,7 @@ class SettingsView(QWidget):
         on_applied: Callable[[], None],
         parent: QWidget | None = None,
         remote_service: Any = None,
+        open_devices: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_applied = on_applied
@@ -94,7 +95,10 @@ class SettingsView(QWidget):
 
             # Second, right after General: the Android app tells people to
             # "go to the Phone page", so it must be easy to find.
-            pages.insert(min(1, len(pages)), (t("Phone"), PhonePage(remote_service)))
+            pages.insert(
+                min(1, len(pages)),
+                (t("Phone"), PhonePage(remote_service, open_devices=open_devices)),
+            )
         self._pending_pages: dict[int, QWidget] = {}
         for title, page in pages:
             if page is None:

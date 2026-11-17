@@ -27,6 +27,10 @@ _PATHS: dict[str, str] = {
     ),
     "dashboard": "M2 9l4-4 3 3 5-5|M2 13h12",
     "queue": "M2 4h12|M2 8h8|M2 12h10",
+    # A phone: rounded body with a home-bar line near the bottom.
+    "phone": "M5 1.5h6a1 1 0 011 1v11a1 1 0 01-1 1H5a1 1 0 01-1-1v-11a1 1 0 011-1z|M7 12h2",
+    # A circular arrow - "try again".
+    "retry": "M13 8a5 5 0 11-1.5-3.5|M13 2.5V5h-2.5",
     "minimize": "M4 8h8",
     "maximize": "M4.5 4.5h7v7h-7z",
     "restore": "M6 6V4.5h5.5V10H10|M4.5 6H10v5.5H4.5z",

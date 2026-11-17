@@ -68,10 +68,11 @@ DEFAULTS: tuple[Shortcut, ...] = (
     Shortcut("app.quit", N_("Quit GrabLine"), N_("General"), "Ctrl+Q"),
     Shortcut("view.refresh", N_("Refresh"), N_("General"), "F5"),
     Shortcut("help.shortcuts", N_("Keyboard shortcuts"), N_("General"), "F1"),
-    # -- Navigation (the four real sidebar pages) ------------------------------
+    # -- Navigation (the real sidebar pages) ------------------------------
     Shortcut("nav.downloads", N_("Go to Downloads"), N_("Navigation"), "Ctrl+1"),
     Shortcut("nav.dashboard", N_("Go to Dashboard"), N_("Navigation"), "Ctrl+2"),
     Shortcut("nav.queue", N_("Go to Queue manager"), N_("Navigation"), "Ctrl+3"),
+    Shortcut("nav.devices", N_("Go to Devices"), N_("Navigation"), "Ctrl+5"),
     Shortcut("nav.settings", N_("Go to Settings"), N_("Navigation"), "Ctrl+4"),
     Shortcut("nav.next", N_("Next page"), N_("Navigation"), "Ctrl+Tab"),
     Shortcut("nav.prev", N_("Previous page"), N_("Navigation"), "Ctrl+Shift+Tab"),

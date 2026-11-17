@@ -33,6 +33,9 @@ _STATUS_LABEL = {
     "completed": N_("Completed"),
     "failed": N_("Failed"),
     "cancelled": N_("Cancelled"),
+    # A phone's download (the Devices page) can also be waiting or unknown.
+    "waiting": N_("Waiting"),
+    "unknown": N_("Unknown"),
 }
 
 
