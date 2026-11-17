@@ -266,7 +266,7 @@ class SidebarButton(QPushButton):
 
     def retint(self) -> None:
         p = theme.current()
-        color = p.accent if self._active else p.text3
+        color = p.accent_text if self._active else p.text3
         self.setIcon(svg_icon(self._icon_name, color))
         bg = p.accent_dim if self._active else "transparent"
         self.setStyleSheet(

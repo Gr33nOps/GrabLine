@@ -55,7 +55,7 @@ def _painted_icon(size: int) -> QIcon:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor("#0170fd"))
+    painter.setBrush(QColor("#2563EB"))
     margin = size * 0.06
     painter.drawEllipse(QPointF(size / 2, size / 2), size / 2 - margin, size / 2 - margin)
 
