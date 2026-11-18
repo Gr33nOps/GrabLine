@@ -871,8 +871,18 @@ class DevicesPage(QWidget):
             bar.release()
         self._bars = []
         blocked = self.table.blockSignals(True)
+        # Take the cell widgets out and hide them now: Qt deletes them later,
+        # and until then they would still paint (a stray icon under the rows).
+        for row in range(self.table.rowCount()):
+            for column in range(self.table.columnCount()):
+                holder = self.table.cellWidget(row, column)
+                if holder is not None:
+                    self.table.removeCellWidget(row, column)
+                    holder.hide()
+                    holder.deleteLater()
         self.table.setRowCount(0)
         self.table.blockSignals(blocked)
+        self.table.viewport().update()
         self._row_ids = []
         self._row_sigs = {}
 
@@ -994,6 +1004,11 @@ class DevicesPage(QWidget):
         sig = (job.id, actions, online, busy, p.text2)
         if self._row_sigs.get(job.id) != sig:
             self._row_sigs[job.id] = sig
+            previous = self.table.cellWidget(row, _C_ACTIONS)
+            if previous is not None:  # hide it now: its deletion is deferred
+                self.table.removeCellWidget(row, _C_ACTIONS)
+                previous.hide()
+                previous.deleteLater()
             self.table.setCellWidget(
                 row, _C_ACTIONS, self._actions_cell(job, actions, online and not busy)
             )

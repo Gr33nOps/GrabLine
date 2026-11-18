@@ -702,3 +702,38 @@ def test_main_window_creates_the_link_service_and_passes_it_on(db: Any, tmp_path
     finally:
         window.shutdown()
         manager.shutdown()
+
+
+def test_redrawing_leaves_no_stray_action_buttons() -> None:
+    """Replaced or removed cell widgets must be hidden at once (their deletion is
+    deferred), or they keep painting as stray icons under the rows."""
+    _service, links, page = make()
+    select(page, "DESKTOP")
+    page.retint()
+    page.retint()
+    links.jobs["L1"] = snapshot([phone_job(7, name="only.iso", status="downloading")])
+    links.hostJobsChanged.emit("L1")
+    page.retint()
+    in_rows = [
+        b
+        for b in page.table.viewport().findChildren(QAbstractButton)
+        if b.isVisibleTo(page.table.viewport())
+    ]
+    assert sorted(str(b.property("action")) for b in in_rows) == ["cancel", "pause"]
+
+
+def test_waiting_link_is_disabled_and_cancel_is_never_the_primary_button() -> None:
+    links = FakeLinks()
+    dlg = dialog(links)
+    dlg.address_edit.setText("10.0.0.2")
+    dlg.code_edit.setText("7K3M-9QX2-RTBW")
+    assert dlg.link_button.property("accent") == "true"
+    dlg.link_button.click()
+    for step in ("connecting", "confirm"):
+        links.linkProgress.emit(step)
+        assert not dlg.link_button.isEnabled()
+        assert dlg.link_button.property("accent") == "false"
+    assert not dlg.close_button.isDefault() and not dlg.close_button.autoDefault()
+    assert dlg.close_button.property("accent") is None
+    links.linkFinished.emit("badCode", "")
+    assert dlg.link_button.isEnabled() and dlg.link_button.property("accent") == "true"

@@ -138,6 +138,11 @@ class LinkDialog(chrome.Dialog):
         self.close_button = QPushButton(t("Cancel"))
         self.close_button.setAccessibleName(t("Cancel"))
         self.close_button.clicked.connect(self.close)
+        # Never the dialog's default button: while Link is disabled, Enter and
+        # the button's look must not turn Cancel into the primary action.
+        self.close_button.setAutoDefault(False)
+        self.close_button.setDefault(False)
+        self.link_button.setAutoDefault(False)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
 
@@ -156,6 +161,11 @@ class LinkDialog(chrome.Dialog):
         self.address_edit.setEnabled(not busy)
         self.code_edit.setEnabled(not busy)
         self._update_enabled()
+        # A waiting Link is a plain disabled button, not a primary one.
+        self.link_button.setProperty("accent", "false" if busy else "true")
+        style = self.link_button.style()
+        style.unpolish(self.link_button)
+        style.polish(self.link_button)
 
     def _show(self, text: str, role: str) -> None:
         self.status_label.setProperty("role", role)
