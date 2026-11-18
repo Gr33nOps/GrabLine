@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from app.core.settings import Settings
 from app.db.database import Database
 from app.remote.client import local, session
 from app.remote.client.local import LocalDownloads, MovePlan, Outcome
-from app.remote.client.service import LinkService, _Link, host_job
+from app.remote.client.service import LinkService, _Link, _row, host_job
 from app.remote.client.session import LinkRecord
 from app.tests.qt_app import ensure_app
 from app.tests.remote_client import pump
@@ -49,6 +50,9 @@ class StubRunner:
         pass
 
     def wake(self) -> None:
+        pass
+
+    def ack(self) -> None:
         pass
 
     def of_type(self, kind: str) -> list[dict[str, Any]]:
@@ -544,3 +548,310 @@ def test_the_sharing_setting_defaults_on_and_persists(rig: Rig) -> None:
     assert rig.db.get_setting("remote_share_downloads") == "0"
     rig.service.set_shared(True)
     assert rig.service.shared_setting() is True
+
+
+# ----------------------------------------------------- security review fixes
+
+
+def _paired(rig: Rig, **changes: Any) -> Any:
+    from app.remote.client import keys, pairing
+
+    fields: dict[str, Any] = {
+        "device_id": "KsucBZHeyJguN6H0BzJQiw",
+        "pc_id": rig.pc_id,
+        "pc_name": "IMPOSTOR",
+        "pin": "y" * 43,
+        "address": "127.0.0.1",
+        "port": 9,
+        "key": keys.new_key(),
+    }
+    fields.update(changes)
+    return pairing.Paired(**fields)
+
+
+def _stored_link(rig: Rig) -> str:
+    """Give the rig's link a real key file and database row."""
+    from app.remote.client import keys
+
+    name = keys.save(keys.new_key(), rig.service._key_dir)
+    rig.link.record = replace(rig.link.record, key_file=name)
+    rig.db.upsert_remote_link(_row(rig.link.record))
+    return name
+
+
+def test_m1_a_host_claiming_an_existing_pc_id_cannot_replace_the_link(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.remote.client import keys
+
+    key_file = _stored_link(rig)
+    discarded: list[Any] = []
+    monkeypatch.setattr(rig.service, "_discard_pairing", discarded.append)
+    finished: list[tuple[str, str]] = []
+    rig.service.linkFinished.connect(lambda code, pc: finished.append((code, pc)))
+    result = _paired(rig)  # same pcId, another pin
+    rig.service._on_paired(result)
+    assert finished == [("conflict", "")]
+    # The real link is untouched: no unpair, still running, key kept, row unchanged.
+    assert rig.runner.of_type("unpair") == [] and not rig.runner.stopped
+    assert keys.load(key_file, rig.service._key_dir) is not None
+    (row,) = rig.db.list_remote_links()
+    assert row["pin"] == "x" * 43 and row["name"] == "DESKTOP" and row["key_file"] == key_file
+    assert rig.service._links[rig.pc_id] is rig.link
+    # The attempt itself is undone on the host that was just paired.
+    assert discarded == [result]
+
+
+def test_m1_the_same_host_linking_again_replaces_its_link(rig: Rig) -> None:
+    from app.remote.client import keys
+
+    old_file = _stored_link(rig)
+    finished: list[tuple[str, str]] = []
+    rig.service.linkFinished.connect(lambda code, pc: finished.append((code, pc)))
+    rig.service._on_paired(_paired(rig, pin="x" * 43, pc_name="DESKTOP"))
+    assert finished == [("ok", rig.pc_id)]
+    assert rig.service._links[rig.pc_id] is not rig.link
+    assert keys.load(old_file, rig.service._key_dir) is None, "the old key goes with the old link"
+    (row,) = rig.db.list_remote_links()
+    assert row["key_file"] != old_file
+
+
+def test_l4_a_pairing_that_completes_after_cancel_is_undone_and_not_kept(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    discarded: list[Any] = []
+    monkeypatch.setattr(rig.service, "_discard_pairing", discarded.append)
+    finished: list[tuple[str, str]] = []
+    rig.service.linkFinished.connect(lambda code, pc: finished.append((code, pc)))
+    rig.service._links.clear()
+    cancel = threading.Event()
+    cancel.set()
+    rig.service._add_cancel = cancel
+    result = _paired(rig, pc_id="B" * 22)
+    rig.service._on_paired(result)
+    assert finished == [("cancelled", "")] and discarded == [result]
+    assert rig.db.list_remote_links() == [] and rig.service.links() == []
+    key_dir = rig.service._key_dir
+    assert key_dir is None or not list(key_dir.glob("*"))
+
+
+def test_l4_discarding_signs_in_to_that_host_and_unpairs(tmp_path: Path) -> None:
+    """The real thing against a scripted host: the pairing nobody keeps is undone."""
+    from app.remote.client import pairing
+    from app.tests.fake_host import FakeConn, FakeHost
+
+    seen: list[dict[str, Any]] = []
+    holder: list[FakeHost] = []
+
+    def script(conn: FakeConn) -> None:
+        conn.hello()
+        auth = conn.recv()
+        assert auth is not None and auth["type"] == "auth"
+        conn.send(
+            {
+                "id": auth["id"],
+                "type": "authOk",
+                "protocolVersion": 6,
+                "pcId": holder[0].pc_id,
+                "pcName": "DESKTOP",
+                "addresses": [],
+                "port": holder[0].port,
+                "features": [],
+            }
+        )
+        message = conn.recv(5.0)
+        if message is not None:
+            seen.append(message)
+            conn.send({"id": message["id"], "type": "ok", "protocolVersion": 6})
+
+    host = FakeHost(tmp_path / "h", script)
+    holder.append(host)
+    ensure_app()
+    db = Database(tmp_path / "d.db")
+    manager = DownloadManager(db, settings=Settings(db), max_concurrent=0)
+    service = LinkService(manager, key_dir=tmp_path / "keys")
+    try:
+        from app.remote.client import keys
+
+        paired = pairing.Paired(
+            device_id="KsucBZHeyJguN6H0BzJQiw",
+            pc_id=host.pc_id,
+            pc_name="DESKTOP",
+            pin=host.pin,
+            address="127.0.0.1",
+            port=host.port,
+            key=keys.new_key(),
+        )
+        service._discard_pairing(paired)
+        assert pump(lambda: bool(seen), 10.0), host.errors
+        assert seen[0]["type"] == "unpair"
+    finally:
+        service.shutdown()
+        manager.shutdown()
+        db.close()
+        host.stop()
+
+
+def test_m2_host_job_strings_are_cut_to_the_section_20_limits() -> None:
+    job = host_job(_job(1, name="n" * 10_000, error="e" * 10_000, kind="k" * 5_000))
+    assert job is not None
+    assert len(job.name) <= 256 and job.kind == "direct" and len(job.error or "") <= 512
+    failed = host_job(_job(2, "failed", error="e" * 10_000))
+    assert failed is not None and failed.error is not None and len(failed.error) <= 512
+    long_url = host_job(_job(3, url="https://example.com/" + "u" * 5_000))
+    assert long_url is not None and long_url.url == ""
+    ok = host_job(_job(4, url="https://example.com/a", kind="torrent"))
+    assert ok is not None and ok.kind == "torrent"
+
+
+def test_m2_a_host_cannot_grow_the_job_list_or_touched_set(rig: Rig) -> None:
+    from app.remote.client.service import MAX_HOST_JOBS
+
+    rig.service._load_jobs(rig.link)  # loading: ``touched`` fills too
+    for number in range(1, MAX_HOST_JOBS + 200):
+        rig.service._on_host_event(
+            rig.link, {"event": "job.added", "seq": number, "job": _job(number)}
+        )
+    assert len(rig.link.jobs) == MAX_HOST_JOBS and len(rig.link.touched) <= MAX_HOST_JOBS
+    assert min(rig.link.jobs) == 200 and max(rig.link.jobs) == MAX_HOST_JOBS + 199, (
+        "the lowest ids are evicted"
+    )
+    for number in range(5000, 5300):
+        rig.service._on_host_event(
+            rig.link, {"event": "job.removed", "seq": 10_000 + number, "jobId": number}
+        )
+    assert len(rig.link.touched) <= MAX_HOST_JOBS
+
+
+def test_m3_another_host_cannot_answer_a_pending_request(rig: Rig) -> None:
+    from app.remote.client.service import _Link
+
+    other_record = replace(rig.link.record, pc_id="B" * 22, name="OTHER")
+    other = _Link(record=other_record, runner=StubRunner(), token=2)  # type: ignore[arg-type]
+    other.state = session.ONLINE
+    results: list[tuple[int, str, str]] = []
+    rig.service.requestFinished.connect(lambda *a: results.append(a))
+    rig.service.send_control(rig.pc_id, 1, "pause")
+    request = rig.runner.of_type("control")[0]
+    # Host B answers with A's request id: nothing happens and the request waits.
+    rig.service._on_message(other, {"id": request["id"], "type": "ok"})
+    assert results == [] and request["id"] in rig.service._pending
+    rig.reply(request, "ok", job=None)  # the real answer still works
+    assert [r[1] for r in results] == ["ok"]
+
+
+def test_m3_request_ids_are_not_guessable(rig: Rig) -> None:
+    rig.service.send_control(rig.pc_id, 1, "pause")
+    rig.service.send_control(rig.pc_id, 1, "resume")
+    first, second = (m["id"] for m in rig.runner.of_type("control"))
+    assert first != second and len(first) > 6 and first.split("-")[1] != second.split("-")[1]
+
+
+def test_l1_only_queued_counts_for_a_move(rig: Rig) -> None:
+    job_id = rig.job("a.zip", URL)
+    rig.command(3, "moveToPc", job_id)
+    (download,) = rig.runner.of_type("download")
+    rig.reply(download, "ok")  # any other success type is not "queued"
+    assert rig.db.get_job(job_id).status is JobStatus.QUEUED  # type: ignore[union-attr]
+    assert rig.results()[-1]["result"] == "failed"
+
+
+def test_l2_paging_stops_after_a_few_pages(rig: Rig) -> None:
+    from app.remote.client.service import MAX_PAGES
+
+    rig.service._load_jobs(rig.link)
+    for number in range(30):
+        if len(rig.runner.of_type("jobs")) <= number:
+            break
+        rig.reply(rig.runner.of_type("jobs")[number], "jobs", jobs=[], nextCursor="MQ", total=0)
+    assert len(rig.runner.of_type("jobs")) == MAX_PAGES
+    assert rig.service.host_jobs(rig.pc_id) is not None, "what arrived is kept"
+
+
+@pytest.mark.parametrize(
+    ("address", "allowed"),
+    [
+        ("10.1.2.3", True), ("192.168.1.20", True), ("172.16.0.9", True), ("172.31.255.1", True),
+        ("169.254.10.1", True), ("[fd7a:115c:a1e0::20]", True), ("fd00::1", True),
+        ("fe80::1", True), ("127.0.0.1", True), ("::1", True),
+        ("8.8.8.8", False), ("172.32.0.1", False), ("100.64.0.1", False), ("2001:db8::1", False),
+        ("0.0.0.0", False), ("example.com", False), ("laptop.local", False), ("", False),
+        ("10.0.0.1:47821", False), ("http://10.0.0.1", False),
+    ],
+)  # fmt: skip
+def test_l3_only_private_ip_literals_are_accepted(address: str, allowed: bool) -> None:
+    from app.remote.addresses import is_client_target
+
+    assert is_client_target(address) is allowed
+
+
+def test_l3_host_supplied_addresses_are_filtered_before_they_are_stored(rig: Rig) -> None:
+    _stored_link(rig)
+    rig.service._on_online(
+        rig.link,
+        {
+            "address": "127.0.0.1",
+            "authOk": {
+                "pcName": "DESKTOP",
+                "features": [],
+                "port": 47821,
+                "addresses": ["10.0.0.5", "evil.example", "8.8.8.8", "[fd00::1]", "192.168.1.9"],
+            },
+        },
+    )
+    expected = ("10.0.0.5", "[fd00::1]", "192.168.1.9")
+    assert rig.link.record.addresses == expected
+    (row,) = rig.db.list_remote_links()
+    assert tuple(row["addresses"]) == expected
+
+
+def test_l6_orphan_key_files_are_removed_at_start(tmp_path: Path) -> None:
+    from app.remote.client import keys
+
+    ensure_app()
+    db = Database(tmp_path / "o.db")
+    manager = DownloadManager(db, settings=Settings(db), max_concurrent=0)
+    folder = tmp_path / "keys"
+    used = keys.save(keys.new_key(), folder)
+    orphan = keys.save(keys.new_key(), folder)
+    (folder / "notes.txt").write_text("not ours")
+    record = LinkRecord(
+        pc_id="A3D7Za2aw26jbGofVV3ZAQ", name="D", pin="x" * 43, device_id="K" * 22,
+        addresses=("127.0.0.1",), port=9, last_address="127.0.0.1", key_file=used,
+        paired_at=1, last_seen_at=1,
+    )  # fmt: skip
+    from app.remote.client.service import _row
+
+    db.upsert_remote_link(_row(record))
+    service = LinkService(manager, key_dir=folder)
+    try:
+        service.start()
+        assert keys.load(used, folder) is not None
+        assert keys.load(orphan, folder) is None and not (folder / orphan).exists()
+        assert (folder / "notes.txt").exists(), "only link-*.pem files are touched"
+    finally:
+        service.shutdown()
+        manager.shutdown()
+        db.close()
+
+
+def test_l7_a_failure_is_logged_by_type_only(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    def boom() -> Any:
+        raise RuntimeError("secret C:/Users/me/x http://user:pw@host/?token=abc")
+
+    monkeypatch.setattr(rig.service.local, "report", boom)
+    with caplog.at_level(logging.DEBUG, logger="app.remote.client.service"):
+        rig.service._report_tick()
+        rig.service._send_report(rig.link, force=True)
+        monkeypatch.setattr(rig.service.local, "run", lambda *a: boom())
+        rig.command(1, "pause", rig.job())
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "RuntimeError" in text
+    assert "secret" not in text and "pw@" not in text and "Users" not in text
+    assert all(r.exc_info is None for r in caplog.records), "no traceback text"

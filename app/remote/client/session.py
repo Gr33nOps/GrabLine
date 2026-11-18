@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.native_host.host import PROTOCOL_VERSION
+from app.remote.addresses import is_client_target
 from app.remote.client import keys
 from app.remote.client.transport import (
     Address,
@@ -50,6 +51,10 @@ BACKOFF_CAP_S = 30.0
 FLOOD_WAIT_S = 30.0  # close 4429
 CLOSED_WAIT_S = 1.0
 AUTH_ID = "auth-1"
+#: Messages handed to the GUI thread and not yet handled: above this the thread
+#: stops reading (TCP pushes back on the host) and gives up after ``PAUSE_LIMIT_S``.
+MESSAGE_BACKLOG_LIMIT = 256
+PAUSE_LIMIT_S = 30.0
 
 #: Link states (``LinkInfo.state``); the first four are what the thread posts.
 CONNECTING = "connecting"
@@ -149,6 +154,8 @@ class LinkRunner:
         self._wake = threading.Event()
         self._out: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
         self._online = False
+        self._unhandled = 0
+        self._unhandled_lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, name="grabline-link", daemon=True)
 
     # ------------------------------------------------------------ public API
@@ -166,6 +173,18 @@ class LinkRunner:
     def join(self, timeout: float = 3.0) -> None:
         if self._thread.is_alive():
             self._thread.join(timeout)
+
+    def ack(self) -> None:
+        """The GUI thread handled one ``message`` event (see
+        ``MESSAGE_BACKLOG_LIMIT``)."""
+        with self._unhandled_lock:
+            if self._unhandled > 0:
+                self._unhandled -= 1
+
+    @property
+    def unhandled(self) -> int:
+        with self._unhandled_lock:
+            return self._unhandled
 
     def wake(self) -> None:
         """Try again now instead of waiting out the back-off."""
@@ -317,7 +336,9 @@ class LinkRunner:
     def _learn(self, auth_ok: dict[str, Any]) -> None:
         listed = auth_ok.get("addresses")
         if isinstance(listed, list):
-            fresh = [a for a in listed if isinstance(a, str) and a][:8]
+            # Only IP literals in private, link-local or loopback ranges: the
+            # host's word is not enough to send this PC to a name or a public IP.
+            fresh = [a for a in listed if isinstance(a, str) and is_client_target(a)][:8]
             if fresh:
                 self._addresses = fresh
         port = auth_ok.get("port")
@@ -360,6 +381,7 @@ class LinkRunner:
         """Read and write until the connection ends or the thread is stopped.
         Raises ``_End`` when the host or the network ended it; returns on stop."""
         last_ping = time.monotonic()
+        paused_since: float | None = None
         while True:
             try:
                 while True:
@@ -372,8 +394,19 @@ class LinkRunner:
                     if not self._flush or self._out.empty():
                         return
                     continue
-                for message in connection.read(0.05):
-                    self._post("message", message)
+                now = time.monotonic()
+                if self.unhandled >= MESSAGE_BACKLOG_LIMIT:
+                    # The GUI is behind: read nothing more for now.
+                    paused_since = paused_since if paused_since is not None else now
+                    if now - paused_since > PAUSE_LIMIT_S:
+                        raise _End(OFFLINE)
+                    self._stop.wait(0.05)
+                else:
+                    paused_since = None
+                    for message in connection.read(0.05):
+                        with self._unhandled_lock:
+                            self._unhandled += 1
+                        self._post("message", message)
                 now = time.monotonic()
                 if now - last_ping >= PING_INTERVAL_S:
                     last_ping = now

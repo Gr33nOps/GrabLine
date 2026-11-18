@@ -57,6 +57,18 @@ def _is_private_or_link_local(ip: IPAddress) -> bool:
     return ip in _UNIQUE_LOCAL or ip in _LINK_LOCAL_V6
 
 
+def is_client_target(address: object) -> bool:
+    """True for an address a link may connect to when the host itself supplied
+    it (``authOk.addresses``): an IP literal that is private, link-local or
+    loopback. Host names and public addresses are refused, so a host cannot
+    steer this PC to somewhere else on the network or the internet."""
+    parsed = parse(address)
+    if parsed is None:
+        return False
+    ip = parsed[0]
+    return ip.is_loopback or _is_private_or_link_local(ip)
+
+
 def is_bindable(address: object, test_mode: bool = False) -> bool:
     """True if the listener may open a socket on this local address."""
     parsed = parse(address)

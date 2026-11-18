@@ -64,7 +64,7 @@ class FakeStore:
 
 class FakeService(QObject):
     pairingStarted = Signal(str, str, int)
-    pairingPending = Signal(str)
+    pairingPending = Signal(str, str)
     pairingLockedWarning = Signal()
     pairingFinished = Signal(str)
     devicesChanged = Signal()

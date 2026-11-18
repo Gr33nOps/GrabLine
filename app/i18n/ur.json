@@ -1013,5 +1013,7 @@
   "Update GrabLine on that PC to see its downloads here.": "اس کی ڈاؤن لوڈز یہاں دیکھنے کے لیے اس پی سی پر GrabLine اپ ڈیٹ کریں۔",
   "Update GrabLine on that PC to use this": "اسے استعمال کرنے کے لیے اس پی سی پر GrabLine اپ ڈیٹ کریں",
   "Update GrabLine on the other PC": "دوسرے پی سی پر GrabLine اپ ڈیٹ کریں",
-  "Update GrabLine on this PC": "اس پی سی پر GrabLine اپ ڈیٹ کریں"
+  "Update GrabLine on this PC": "اس پی سی پر GrabLine اپ ڈیٹ کریں",
+  "Also linked as {name}": "{name} کے طور پر بھی لنک ہے",
+  "You're already linked to a PC with this ID. Remove that link first.": "آپ پہلے سے اس ID والے پی سی سے لنک ہیں۔ پہلے وہ لنک ہٹائیں۔"
 }

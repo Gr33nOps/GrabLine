@@ -1013,5 +1013,7 @@
   "Update GrabLine on that PC to see its downloads here.": "ダウンロードをここに表示するには、その PC の GrabLine を更新してください。",
   "Update GrabLine on that PC to use this": "これを使うには、その PC の GrabLine を更新してください",
   "Update GrabLine on the other PC": "もう一方の PC の GrabLine を更新してください",
-  "Update GrabLine on this PC": "この PC の GrabLine を更新してください"
+  "Update GrabLine on this PC": "この PC の GrabLine を更新してください",
+  "Also linked as {name}": "{name} としてもリンク済み",
+  "You're already linked to a PC with this ID. Remove that link first.": "この ID の PC にはすでにリンクされています。先にそのリンクを削除してください。"
 }

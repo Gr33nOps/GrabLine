@@ -64,7 +64,7 @@ would run on the listener thread):
     supplies ``state``). ``unsubscribe`` and ``unpair`` never arrive.
 ``stateChanged(bool running)``, ``errorOccurred(str code)`` with
     ``portInUse``, ``noAddress`` or ``identity``
-``pairingStarted(str, str, int)``, ``pairingPending(str device_name)``,
+``pairingStarted(str, str, int)``, ``pairingPending(str name, str kind)`` (phone or pc),
 ``pairingLockedWarning()``, ``pairingFinished(str outcome)`` with
     ``approved``, ``denied``, ``expired``, ``locked``, ``cancelled``, ``failed``
 ``devicesChanged()``            a device was paired, removed or seen
@@ -415,7 +415,7 @@ class RemoteListener(QObject):
     stateChanged = Signal(bool)
     errorOccurred = Signal(str)
     pairingStarted = Signal(str, str, int)
-    pairingPending = Signal(str)
+    pairingPending = Signal(str, str)
     pairingLockedWarning = Signal()
     pairingFinished = Signal(str)
     devicesChanged = Signal()
@@ -1068,7 +1068,7 @@ class RemoteListener(QObject):
                     "timeoutSeconds": APPROVAL_TIMEOUT_SECONDS,
                 },
             )
-            self.pairingPending.emit(name)
+            self.pairingPending.emit(name, self._pending_kind)
             return
         self._failures.fail(channel.peer)
         if outcome is ProofOutcome.BAD_CODE:

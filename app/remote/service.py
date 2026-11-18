@@ -63,7 +63,7 @@ class RemoteService(QObject):
 
     #: Re-emitted on the GUI thread for the Settings "Phone" page.
     pairingStarted = Signal(str, str, int)
-    pairingPending = Signal(str)
+    pairingPending = Signal(str, str)
     pairingLockedWarning = Signal()
     pairingFinished = Signal(str)
     devicesChanged = Signal()

@@ -1013,5 +1013,7 @@
   "Update GrabLine on that PC to see its downloads here.": "Actualiza GrabLine en ese PC para ver aquí sus descargas.",
   "Update GrabLine on that PC to use this": "Actualiza GrabLine en ese PC para usar esto",
   "Update GrabLine on the other PC": "Actualiza GrabLine en el otro PC",
-  "Update GrabLine on this PC": "Actualiza GrabLine en este PC"
+  "Update GrabLine on this PC": "Actualiza GrabLine en este PC",
+  "Also linked as {name}": "También vinculado como {name}",
+  "You're already linked to a PC with this ID. Remove that link first.": "Ya estás vinculado a un PC con este ID. Quita primero esa vinculación."
 }

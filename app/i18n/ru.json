@@ -1013,5 +1013,7 @@
   "Update GrabLine on that PC to see its downloads here.": "Обновите GrabLine на том ПК, чтобы видеть его загрузки здесь.",
   "Update GrabLine on that PC to use this": "Обновите GrabLine на том ПК, чтобы использовать это",
   "Update GrabLine on the other PC": "Обновите GrabLine на другом ПК",
-  "Update GrabLine on this PC": "Обновите GrabLine на этом ПК"
+  "Update GrabLine on this PC": "Обновите GrabLine на этом ПК",
+  "Also linked as {name}": "Также связан как {name}",
+  "You're already linked to a PC with this ID. Remove that link first.": "Вы уже связаны с ПК с этим ID. Сначала удалите ту связь."
 }

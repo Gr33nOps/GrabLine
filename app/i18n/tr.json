@@ -1013,5 +1013,7 @@
   "Update GrabLine on that PC to see its downloads here.": "İndirmelerini burada görmek için o bilgisayarda GrabLine'ı güncelleyin.",
   "Update GrabLine on that PC to use this": "Bunu kullanmak için o bilgisayarda GrabLine'ı güncelleyin",
   "Update GrabLine on the other PC": "Diğer bilgisayarda GrabLine'ı güncelleyin",
-  "Update GrabLine on this PC": "Bu bilgisayarda GrabLine'ı güncelleyin"
+  "Update GrabLine on this PC": "Bu bilgisayarda GrabLine'ı güncelleyin",
+  "Also linked as {name}": "Ayrıca {name} olarak bağlı",
+  "You're already linked to a PC with this ID. Remove that link first.": "Bu kimliğe sahip bir bilgisayara zaten bağlısınız. Önce o bağlantıyı kaldırın."
 }

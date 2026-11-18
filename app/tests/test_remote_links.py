@@ -63,9 +63,14 @@ class Host:
         self.started: list[tuple[str, str, int]] = []
         self.pending: list[str] = []
         self.service.pairingStarted.connect(lambda *a: self.started.append(a))
-        self.service.pairingPending.connect(self.pending.append)
+        self.kinds: list[str] = []
+        self.service.pairingPending.connect(self._on_pending)
         self.dest = base / "host-downloads"
         self.dest.mkdir()
+
+    def _on_pending(self, name: str, kind: str) -> None:
+        self.pending.append(name)
+        self.kinds.append(kind)
 
     @property
     def address(self) -> str:
@@ -200,6 +205,7 @@ def test_pairing_with_the_typed_code_links_and_signs_in(host: Host, client: Clie
     info = client.only_link()
     assert info.pc_id == pc_id and info.state == "online" and info.online
     assert info.shares_downloads  # the host lists phoneJobs
+    assert host.kinds == ["pc"], "the Allow prompt is told the device is a PC"
     assert "confirm" in client.progress  # "Confirm on the other PC" while the prompt waits
     # The host stored this PC as a device of kind "pc".
     devices = host.service.store.list()

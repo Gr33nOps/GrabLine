@@ -816,3 +816,59 @@ def test_send_is_refused_when_there_is_no_login(tmp_path: Path) -> None:
         assert runner.send({"id": "x", "type": "ping"}) is False
     finally:
         host.stop()
+
+
+# ----------------------------------------------- security review fixes
+
+
+def test_m2_the_runner_stops_reading_while_the_gui_is_behind(tmp_path: Path) -> None:
+    from app.remote.client.session import MESSAGE_BACKLOG_LIMIT
+
+    holder: list[FakeHost] = []
+    sent = [0]
+
+    def script(conn: FakeConn) -> None:
+        conn.hello()
+        request = conn.recv()
+        assert request is not None
+        conn.send({"id": request["id"], "protocolVersion": 6, **_auth_ok(holder[0])})
+        for number in range(MESSAGE_BACKLOG_LIMIT * 8):
+            conn.send({"type": "event", "event": "job.removed", "jobId": number + 1, "seq": number})
+            sent[0] += 1
+        conn.recv(4.0)
+
+    host = FakeHost(tmp_path / "h", script)
+    holder.append(host)
+    collected = Collected()
+    runner = _runner(_record(host), collected)
+    runner.start()
+    try:
+        assert collected.wait_for(lambda: runner.online)
+        time.sleep(1.0)
+        posted = sum(1 for k, _ in collected.events if k == "message")
+        # Nothing acknowledged: reading stopped at the limit (a read in flight may add a few).
+        assert MESSAGE_BACKLOG_LIMIT <= posted <= MESSAGE_BACKLOG_LIMIT + 8, posted
+        assert runner.unhandled == posted
+        for _ in range(posted):  # the GUI catches up: reading resumes
+            runner.ack()
+        assert collected.wait_for(
+            lambda: sum(1 for k, _ in collected.events if k == "message") > posted
+        )
+    finally:
+        runner.stop()
+        runner.join()
+        host.stop()
+
+
+def test_l3_the_runner_ignores_host_supplied_names_and_public_addresses(tmp_path: Path) -> None:
+    host = FakeHost(tmp_path / "h", lambda conn: None)
+    try:
+        runner = _runner(_record(host), Collected())
+        runner._learn(
+            {"addresses": ["8.8.8.8", "evil.example", "10.0.0.9", "[fe80::1]"], "port": 47822}
+        )
+        assert runner._addresses == ["10.0.0.9", "[fe80::1]"]
+        runner._learn({"addresses": ["8.8.8.8", "evil.example"]})
+        assert runner._addresses == ["10.0.0.9", "[fe80::1]"], "nothing usable: keep what we had"
+    finally:
+        host.stop()

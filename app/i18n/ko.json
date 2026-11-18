@@ -1013,5 +1013,7 @@
   "Update GrabLine on that PC to see its downloads here.": "다운로드를 여기서 보려면 해당 PC의 GrabLine을 업데이트하세요.",
   "Update GrabLine on that PC to use this": "이 기능을 쓰려면 해당 PC의 GrabLine을 업데이트하세요",
   "Update GrabLine on the other PC": "다른 PC의 GrabLine을 업데이트하세요",
-  "Update GrabLine on this PC": "이 PC의 GrabLine을 업데이트하세요"
+  "Update GrabLine on this PC": "이 PC의 GrabLine을 업데이트하세요",
+  "Also linked as {name}": "{name}(으)로도 연결됨",
+  "You're already linked to a PC with this ID. Remove that link first.": "이 ID의 PC에 이미 연결되어 있습니다. 먼저 그 연결을 제거하세요."
 }

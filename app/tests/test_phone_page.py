@@ -264,7 +264,7 @@ def _allow_prompt(page: DevicesPage) -> tuple[QMessageBox, QPushButton, QPushBut
 def test_pending_opens_allow_prompt_and_allow_approves(service: FakeService) -> None:
     page = DevicesPage(service)
     page.pair_button.click()
-    service.pairingPending.emit("Pixel 8")
+    service.pairingPending.emit("Pixel 8", "phone")
     box, allow, _deny = _allow_prompt(page)
     assert box.windowTitle() == "Pair a phone or PC"
     assert box.text() == 'Allow "Pixel 8" to control GrabLine?'
@@ -285,7 +285,7 @@ def test_pending_opens_allow_prompt_and_allow_approves(service: FakeService) -> 
 def test_deny_and_escape_deny(service: FakeService) -> None:
     page = DevicesPage(service)
     page.pair_button.click()
-    service.pairingPending.emit("Pixel 8")
+    service.pairingPending.emit("Pixel 8", "phone")
     _box, _allow, deny = _allow_prompt(page)
     deny.click()
     assert "deny_pairing" in service.names()
@@ -296,7 +296,7 @@ def test_deny_and_escape_deny(service: FakeService) -> None:
     assert dialog.status_label.text() == "Pairing cancelled"
 
     service.calls.clear()
-    service.pairingPending.emit("Pixel 8")
+    service.pairingPending.emit("Pixel 8", "phone")
     box, _allow, _deny = _allow_prompt(page)
     box.reject()
     assert service.names() == ["deny_pairing"]
@@ -305,7 +305,7 @@ def test_deny_and_escape_deny(service: FakeService) -> None:
 def test_prompt_closes_when_pairing_ends_without_answer(service: FakeService) -> None:
     page = DevicesPage(service)
     page.pair_button.click()
-    service.pairingPending.emit("Pixel 8")
+    service.pairingPending.emit("Pixel 8", "phone")
     assert page.allow_box is not None
     service.pairingFinished.emit("failed")
     assert page.allow_box is None

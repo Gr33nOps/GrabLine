@@ -186,7 +186,9 @@ class _Entry:
 
     @property
     def name(self) -> str:
-        return str(self.link.name if self.link is not None else self.device.name)
+        """The device's own name when there is one (a merged row shows what the
+        PC called itself when it linked here, never only the name a host gave)."""
+        return str(self.device.name if self.device is not None else self.link.name)
 
 
 def _kind_of(device: Any) -> str:
@@ -519,14 +521,15 @@ class DevicesPage(QWidget):
         links = list(self._links.links()) if self._links is not None else []
         entries = [_Entry("phone", device=d) for d in devices if _kind_of(d) == "phone"]
         unmatched = list(links)
-        for device in devices:
-            if _kind_of(device) != "pc":
-                continue
+        pcs = [d for d in devices if _kind_of(d) == "pc"]
+        claimed = [getattr(d, "client_pc_id", None) for d in pcs]
+        for device in pcs:
             # The same PC both ways: the device says which PC it is (clientPcId)
-            # and that is this link's host. Names are never compared: two PCs
-            # can share a hostname.
+            # and that is this link's host. Merged only when exactly one device
+            # and one link share the id; names are never compared.
             own = getattr(device, "client_pc_id", None)
-            match = next((link for link in unmatched if own and link.pc_id == own), None)
+            candidates = [link for link in unmatched if own and link.pc_id == own]
+            match = candidates[0] if len(candidates) == 1 and claimed.count(own) == 1 else None
             if match is not None:
                 unmatched.remove(match)
             entries.append(_Entry("pc", device=device, link=match))
@@ -706,7 +709,11 @@ class DevicesPage(QWidget):
         both = entry.device is not None and entry.link is not None
         self.merged_note.setVisible(both)
         if both:
-            self.merged_note.setText(t("This PC is linked both ways, so it is shown once."))
+            self.merged_note.setText(
+                t("This PC is linked both ways, so it is shown once.")
+                + " "
+                + t("Also linked as {name}", name=entry.link.name)
+            )
 
     def _render_device(self, entry: _Entry, device: Any) -> None:
         pc = entry.group == "pc"
@@ -728,7 +735,7 @@ class DevicesPage(QWidget):
         online = bool(link.online)
         self._set_captions(pc=True, link=True)
         self._merge_note(entry)
-        self.name_label.setText(str(link.name))
+        self.name_label.setText(entry.name)
         stopped = link.state in _LINK_STOPPED
         if online:
             state = t("Online")
@@ -1338,12 +1345,8 @@ class DevicesPage(QWidget):
         if self.pairing_dialog is not None:
             self.pairing_dialog.show_locked_warning()
 
-    def _on_pairing_pending(self, device_name: str) -> None:
+    def _on_pairing_pending(self, device_name: str, kind: str = "phone") -> None:
         self._dismiss_allow_box()
-        kind = "phone"
-        asker = getattr(self._service, "pending_kind", None)
-        if callable(asker):
-            kind = str(asker())
         box = QMessageBox(self.window())
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle(t("Pair a phone or PC"))

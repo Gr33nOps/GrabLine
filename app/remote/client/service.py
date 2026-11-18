@@ -43,6 +43,7 @@ Signals
 from __future__ import annotations
 
 import contextlib
+import hmac
 import logging
 import secrets
 import threading
@@ -56,6 +57,7 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from app import __version__
 from app.remote import schema
+from app.remote.addresses import is_client_target
 from app.remote.client import keys, pairing, session
 from app.remote.client.local import (
     FAILED,
@@ -66,6 +68,7 @@ from app.remote.client.local import (
     LocalDownloads,
     MovePlan,
     Outcome,
+    cut,
 )
 from app.remote.client.session import LinkRecord, LinkRunner
 from app.remote.client.transport import parse_address
@@ -83,10 +86,13 @@ REQUEST_TIMEOUT_S = 15.0
 REPORT_INTERVAL_MS = 1000
 MAX_HOST_JOBS = 300
 PAGE_SIZE = 100
+#: A host never gets more pages than the jobs we keep can fill, plus one.
+MAX_PAGES = MAX_HOST_JOBS // PAGE_SIZE + 1
 
 #: ``linkFinished`` codes the service itself adds to ``pairing``'s.
 INVALID_CODE = "invalidCode"
 BUSY = "busy"
+CONFLICT = "conflict"
 FAILED_TO_SAVE = "failed"
 
 _CONTROL_ACTIONS = frozenset({"pause", "resume", "cancel", "retry", "remove"})
@@ -164,6 +170,22 @@ def _int(value: object, low: int = 0) -> int | None:
     return value if type(value) is int and value >= low else None
 
 
+_KNOWN_KINDS = frozenset({"direct", "smart", "hls", "video", "torrent", "cloud", "transfer"})
+
+
+def _cap_jobs(link: _Link) -> None:
+    """Keep at most ``MAX_HOST_JOBS`` jobs (and as many touched ids), dropping
+    the lowest ids: a host cannot grow this PC's memory by sending ids."""
+    for collection in (link.jobs, link.touched):
+        excess = len(collection) - MAX_HOST_JOBS
+        if excess > 0:
+            for job_id in sorted(collection)[:excess]:
+                if isinstance(collection, dict):
+                    del collection[job_id]
+                else:
+                    collection.discard(job_id)
+
+
 def host_job(raw: object) -> PhoneJob | None:
     """One job object of the host (section 14) as a ``PhoneJob``, or None when
     it is malformed. Strings are neutralised by ``PhoneJob.from_fields``."""
@@ -188,19 +210,20 @@ def host_job(raw: object) -> PhoneJob | None:
     ):
         return None
     shown = {"queued", "downloading", "paused", "completed", "failed", "cancelled"}
+    # Section 20 limits: whatever the host sends is cut to them before it is kept.
     return PhoneJob.from_fields(
         {
             "id": job_id,
-            "name": name.strip() or "download",
-            "url": url,
+            "name": cut(name.strip(), 256) or "download",
+            "url": url if len(url) <= 2048 else "",
             "status": status if status in shown else "unknown",
-            "kind": kind,
+            "kind": kind if kind in _KNOWN_KINDS else "direct",
             "downloaded": downloaded,
             "total": total,
             "speed": _int(speed) or 0,
             "eta": eta,
             "createdAt": created or 0,
-            "error": error or None,
+            "error": cut(error, 512) if error else None,
         }
     )
 
@@ -240,6 +263,7 @@ class LinkService(QObject):
         self._next_token = 1
         self._tokens: dict[str, int] = {}
         self._runner_tokens = 0
+        self._discards: list[LinkRunner] = []
         self._shut = False
         self.local = LocalDownloads(manager)
         #: Seconds a request may wait for its reply (tests shorten it).
@@ -272,7 +296,21 @@ class LinkService(QObject):
                 keys.delete(record.key_file, self._key_dir)
                 continue
             self._open(record, key)
+        self._remove_orphan_keys()
         self.linksChanged.emit()
+
+    def _remove_orphan_keys(self) -> None:
+        """Delete ``link-*.pem`` files no link refers to (a pairing that was
+        cancelled or crashed after its key was saved)."""
+        used = {link.record.key_file for link in self._links.values()}
+        folder = keys.keys_dir(self._key_dir)
+        try:
+            names = [p.name for p in folder.glob("link-*.pem")]
+        except OSError:
+            return
+        for name in names:
+            if name not in used:
+                keys.delete(name, self._key_dir)
 
     def shutdown(self) -> None:
         if self._shut:
@@ -285,6 +323,8 @@ class LinkService(QObject):
         for link in self._links.values():
             if link.runner is not None:
                 link.runner.stop()
+        for runner in self._discards:
+            runner.stop()
         for link in self._links.values():
             if link.runner is not None:
                 link.runner.join(2.0)
@@ -432,6 +472,22 @@ class LinkService(QObject):
             code = result.code if isinstance(result, pairing.PairFailed) else FAILED_TO_SAVE
             self.linkFinished.emit(code, "")
             return
+        cancel = self._add_cancel
+        if cancel is not None and cancel.is_set():
+            # Cancel came too late: the host has stored this PC. Undo that
+            # (unpair with the new key) and keep nothing.
+            self._discard_pairing(result)
+            self.linkFinished.emit(pairing.CANCELLED, "")
+            return
+        existing = self._links.get(result.pc_id)
+        if existing is not None and not hmac.compare_digest(
+            existing.record.pin.encode("ascii", "replace"), result.pin.encode("ascii", "replace")
+        ):
+            # A PC id is only a claim the other PC made. Never touch the link we
+            # have (no unpair, no key deleted, no overwrite) because of it.
+            self._discard_pairing(result)
+            self.linkFinished.emit(CONFLICT, "")
+            return
         try:
             name = keys.save(result.key, self._key_dir)
         except OSError:
@@ -439,7 +495,7 @@ class LinkService(QObject):
             return
         old = self._links.pop(result.pc_id, None)
         self._ghosts.pop(result.pc_id, None)
-        if old is not None:
+        if old is not None:  # the same host (same pin) linking again
             self._retire(old)
         now = int(time.time())
         record = LinkRecord(
@@ -463,6 +519,49 @@ class LinkService(QObject):
         self._open(record, result.key)
         self.linkFinished.emit("ok", result.pc_id)
         self.linksChanged.emit()
+
+    def _discard_pairing(self, result: pairing.Paired) -> None:
+        """Undo a pairing we do not keep: sign in to that host with the key made
+        for it and send ``unpair``, then forget the key. Gives up after 30 s."""
+        record = LinkRecord(
+            pc_id=result.pc_id,
+            name=result.pc_name,
+            pin=result.pin,
+            device_id=result.device_id,
+            addresses=(result.address,),
+            port=result.port,
+            last_address=result.address,
+            key_file="link-0000000000000000.pem",  # never stored
+            paired_at=0,
+            last_seen_at=0,
+        )
+        holder: list[LinkRunner] = []
+        unpair_id = "unpair-" + secrets.token_hex(4)
+
+        def post(kind: str, payload: Any) -> None:
+            if not holder:
+                return
+            runner = holder[0]
+            if kind == "online":
+                runner.send({"id": unpair_id, "type": "unpair"})
+                runner.stop(flush=True)
+            elif kind == "state" and payload in session.TERMINAL_STATES:
+                runner.stop()
+
+        runner = LinkRunner(
+            record,
+            result.key,
+            post,
+            app_version=__version__,
+            client_pc_id=self._own_pc_id,
+            connect_timeout=self._connect_timeout,
+        )
+        holder.append(runner)
+        runner.start()
+        stopper = threading.Timer(30.0, runner.stop)
+        stopper.daemon = True
+        stopper.start()
+        self._discards.append(runner)
 
     def _retire(self, link: _Link) -> None:
         """Stop a link that is being replaced or removed and delete its key."""
@@ -516,6 +615,8 @@ class LinkService(QObject):
         link = self._links.get(pc_id)
         if link is None or link.token != token or self._shut:
             return  # an old runner of a link that was replaced or removed
+        if kind == "message" and link.runner is not None:
+            link.runner.ack()  # one less waiting: the runner may read again
         if kind == "state" and isinstance(payload, str):
             self._on_state(link, payload)
         elif kind == "online" and isinstance(payload, dict):
@@ -577,7 +678,7 @@ class LinkService(QObject):
             changes["last_address"] = address
         addresses = auth_ok.get("addresses")
         if isinstance(addresses, list):
-            fresh = tuple(a for a in addresses if isinstance(a, str) and a)[:8]
+            fresh = tuple(a for a in addresses if isinstance(a, str) and is_client_target(a))[:8]
             if fresh:
                 changes["addresses"] = fresh
         port = auth_ok.get("port")
@@ -614,7 +715,7 @@ class LinkService(QObject):
 
     def _request_id(self) -> str:
         self._next_id += 1
-        return f"q{self._next_id}"
+        return f"q{self._next_id}-{secrets.token_hex(4)}"
 
     def _request(self, link: _Link, fields: dict[str, Any], done: Callable[[_Reply], None]) -> bool:
         runner = link.runner
@@ -654,8 +755,11 @@ class LinkService(QObject):
         kind = message.get("type")
         request_id = message.get("id")
         if isinstance(request_id, str):
-            pending = self._pending.pop(request_id, None)
+            pending = self._pending.get(request_id)
+            # Only the link the request went to may answer it; another host
+            # that guesses the id changes nothing and leaves it waiting.
             if pending is not None and pending.pc_id == link.record.pc_id:
+                del self._pending[request_id]
                 if kind == "error":
                     code = message.get("code")
                     pending.done(
@@ -675,8 +779,10 @@ class LinkService(QObject):
         link.loading = True
         link.touched = set()
         collected: dict[int, PhoneJob] = {}
+        pages = [0]
 
         def page(cursor: str | None) -> None:
+            pages[0] += 1
             fields: dict[str, Any] = {"type": "jobs", "limit": PAGE_SIZE, "filter": "all"}
             if cursor is not None:
                 fields["cursor"] = cursor
@@ -692,7 +798,12 @@ class LinkService(QObject):
                     if job is not None and len(collected) < MAX_HOST_JOBS:
                         collected[job.id] = job
                 after = reply.body.get("nextCursor")
-                if isinstance(after, str) and after and len(collected) < MAX_HOST_JOBS:
+                if (
+                    isinstance(after, str)
+                    and after
+                    and len(collected) < MAX_HOST_JOBS
+                    and pages[0] < MAX_PAGES
+                ):
                     page(after)
                     return
                 self._finish_load(link, collected)
@@ -738,6 +849,7 @@ class LinkService(QObject):
             link.jobs[job.id] = job
             if link.loading:
                 link.touched.add(job.id)
+            _cap_jobs(link)
             if link.loaded or link.loading:
                 self._changed_jobs(link)
         elif name == "job.progress":
@@ -748,6 +860,7 @@ class LinkService(QObject):
                 link.jobs.pop(job_id, None)
                 if link.loading:
                     link.touched.add(job_id)
+                _cap_jobs(link)
                 self._changed_jobs(link)
 
     def _apply_progress(self, link: _Link, message: dict[str, Any]) -> None:
@@ -774,6 +887,7 @@ class LinkService(QObject):
         )
         if link.loading:
             link.touched.add(old.id)
+        _cap_jobs(link)
         self._changed_jobs(link)
 
     # ------------------------------------------------------------- sending
@@ -902,8 +1016,8 @@ class LinkService(QObject):
     def _send_report(self, link: _Link, *, force: bool = False) -> None:
         try:
             jobs = self.local.report()
-        except Exception:
-            log.exception("could not build the downloads report")
+        except Exception as exc:
+            log.warning("could not build the downloads report (%s)", type(exc).__name__)
             return
         self._deliver_report(link, jobs, force)
 
@@ -924,8 +1038,8 @@ class LinkService(QObject):
             return
         try:
             jobs = self.local.report()
-        except Exception:
-            log.exception("could not build the downloads report")
+        except Exception as exc:
+            log.warning("could not build the downloads report (%s)", type(exc).__name__)
             return
         for link in links:
             self._deliver_report(link, jobs, False)
@@ -951,8 +1065,8 @@ class LinkService(QObject):
             return
         try:
             outcome = self.local.run(action, job_id)
-        except Exception:
-            log.exception("a command from a linked PC failed")
+        except Exception as exc:
+            log.warning("a command from a linked PC failed (%s)", type(exc).__name__)
             outcome = Outcome(FAILED, FAILED_TEXT)
         if isinstance(outcome, MovePlan):
             self._move(link, command_id, outcome)
@@ -972,11 +1086,11 @@ class LinkService(QObject):
             fields["title"] = plan.title
 
         def done(reply: _Reply) -> None:
-            if reply.ok:
+            if reply.ok and reply.type == "queued":  # only ``queued`` means the host has it
                 try:
                     self.local.finish_move(plan.job_id)
-                except Exception:
-                    log.exception("could not stop a moved download")
+                except Exception as exc:
+                    log.warning("could not stop a moved download (%s)", type(exc).__name__)
                 self._answer(link, command_id, Outcome(OK, None, changed=True))
             else:
                 self._answer(link, command_id, Outcome(FAILED, FAILED_TEXT))

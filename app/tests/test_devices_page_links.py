@@ -357,14 +357,12 @@ def test_pc_wording_for_a_pc_that_does_not_share_or_is_old() -> None:
 
 def test_the_allow_prompt_says_when_the_device_is_a_pc() -> None:
     service, _links, page = make()
-    service.kind_pending = "pc"
     page.pair_button.click()
-    service.pairingPending.emit("LAPTOP")
+    service.pairingPending.emit("LAPTOP", "pc")
     assert page.allow_box is not None
     assert page.allow_box.text() == 'Allow "LAPTOP" (a PC) to control GrabLine?'
     page.allow_box.done(0)
-    service.kind_pending = "phone"
-    service.pairingPending.emit("Pixel 9")
+    service.pairingPending.emit("Pixel 9", "phone")
     assert (
         page.allow_box is not None
         and page.allow_box.text() == 'Allow "Pixel 9" to control GrabLine?'
@@ -422,11 +420,14 @@ def test_a_phone_is_never_merged_with_a_link() -> None:
 
 def test_a_pc_linked_both_ways_is_shown_once_with_a_note() -> None:
     _service, _links, page = both_ways()
-    assert row_names(page.pc_list) == ["desktop"]  # the link's name; matched ignoring case
+    assert row_names(page.pc_list) == ["DESKTOP"]  # the device's own name, not the link's
     assert page.pc_list.count() == 1 and page.device_list.count() == 0
     select(page, row_names(page.pc_list)[0])
     assert not page.merged_note.isHidden()
-    assert page.merged_note.text() == "This PC is linked both ways, so it is shown once."
+    assert page.merged_note.text() == (
+        "This PC is linked both ways, so it is shown once. Also linked as desktop"
+    )
+    assert page.name_label.text() == "DESKTOP"
 
 
 def test_both_ways_prefers_the_live_link_and_falls_back_to_the_reported_list() -> None:
@@ -581,6 +582,7 @@ def test_a_link_attempt_shows_connecting_then_confirm_then_success() -> None:
         ("invalidCode", "That code doesn't look right"),
         ("badAddress", "That address doesn't look right"),
         ("badCode", "That code didn't match"),
+        ("conflict", "You're already linked to a PC with this ID. Remove that link first."),
         ("proofMismatch", "That code didn't match"),
         ("locked", "Too many wrong codes. Show a new code on the other PC"),
         ("expired", "Code expired. Show a new code on the other PC"),
@@ -737,3 +739,27 @@ def test_waiting_link_is_disabled_and_cancel_is_never_the_primary_button() -> No
     assert dlg.close_button.property("accent") is None
     links.linkFinished.emit("badCode", "")
     assert dlg.link_button.isEnabled() and dlg.link_button.property("accent") == "true"
+
+
+def test_m1_a_pc_id_claimed_twice_is_never_merged() -> None:
+    """Two devices claiming the same PC id: neither is merged with the link."""
+    _service, _links, page = make(
+        devices=[
+            device("c1", "LAPTOP", kind="pc", client_pc_id="L1"),
+            device("c2", "IMPOSTOR", kind="pc", client_pc_id="L1"),
+        ],
+        links=[link("L1", "DESKTOP")],
+    )
+    assert page.pc_list.count() == 3
+    assert not any(e.device is not None and e.link is not None for e in page._entries)
+
+
+def test_m1_a_merged_row_shows_the_devices_own_name_and_the_links_name() -> None:
+    _service, _links, page = make(
+        devices=[device("c1", "LAPTOP", kind="pc", client_pc_id="L1")],
+        links=[link("L1", "SOMETHING-ELSE")],
+    )
+    assert row_names(page.pc_list) == ["LAPTOP"]
+    select(page, "LAPTOP")
+    assert page.name_label.text() == "LAPTOP"
+    assert "Also linked as SOMETHING-ELSE" in page.merged_note.text()

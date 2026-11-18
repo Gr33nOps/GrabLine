@@ -48,6 +48,7 @@ _FAILURES = {
     "hostTooOld": N_("Update GrabLine on the other PC"),
     "clientTooOld": N_("Update GrabLine on this PC"),
     "busy": N_("Linking is already in progress"),
+    "conflict": N_("You're already linked to a PC with this ID. Remove that link first."),
 }
 
 
