@@ -286,21 +286,33 @@ def test_hello_on_connect_with_pinned_tls(rig: Rig) -> None:
     assert nonce != b64url_decode(hello["nonce"])
 
 
-@pytest.mark.filterwarnings("ignore::DeprecationWarning")
-def test_tls_below_1_2_is_refused(rig: Rig) -> None:
+def _client_hello(version: bytes) -> bytes:
+    """A minimal TLS ClientHello offering only `version` (TLS 1.0/1.1 allow no extensions)."""
+    # RSA_AES128/256_CBC_SHA and ECDHE_ECDSA_AES128/256_CBC_SHA
+    ciphers = bytes.fromhex("002f0035c009c00a")
+    body = (
+        version + os.urandom(32) + b"\x00" + struct.pack(">H", len(ciphers)) + ciphers + b"\x01\x00"
+    )
+    handshake = b"\x01" + len(body).to_bytes(3, "big") + body
+    return b"\x16\x03\x01" + struct.pack(">H", len(handshake)) + handshake
+
+
+@pytest.mark.parametrize("version", [b"\x03\x01", b"\x03\x02"], ids=["TLS1.0", "TLS1.1"])
+def test_tls_below_1_2_is_refused(rig: Rig, version: bytes) -> None:
+    """A client offering only TLS 1.0 or 1.1 gets an alert or a closed socket, never a ServerHello.
+
+    Sent as raw bytes: a Python ssl context that offers these versions is what the rules forbid.
+    """
     rig.open_pairing()
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    try:
-        context.minimum_version = ssl.TLSVersion.TLSv1
-        context.maximum_version = ssl.TLSVersion.TLSv1_1
-    except (ValueError, ssl.SSLError):
-        pytest.skip("this Python cannot offer TLS 1.1")
-    raw = socket.create_connection(("127.0.0.1", rig.listener.port), timeout=5)
-    with pytest.raises((ssl.SSLError, OSError)):
-        context.wrap_socket(raw)
-    raw.close()
+    with socket.create_connection(("127.0.0.1", rig.listener.port), timeout=5) as raw:
+        raw.sendall(_client_hello(version))
+        try:
+            reply = raw.recv(4096)
+        except OSError:
+            reply = b""
+    handshake_started = reply[:1] == b"\x16" and len(reply) > 5 and reply[5:6] == b"\x02"
+    assert not handshake_started, "the listener answered an old TLS version with a ServerHello"
+    assert reply == b"" or reply[:1] == b"\x15", "expected a TLS alert or a closed connection"
 
 
 def test_origin_header_and_wrong_path_are_refused(rig: Rig) -> None:

@@ -77,6 +77,7 @@ class Client:
         headers: tuple[str, ...] = (),
     ) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE  # the pin below is the trust decision
         raw = socket.create_connection(("127.0.0.1", port), timeout=5)
