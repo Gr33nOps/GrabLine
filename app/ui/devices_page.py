@@ -289,12 +289,12 @@ class DevicesPage(QWidget):
         self.phones_label = components.SectionLabel(t("Phones"))
         col.addWidget(self.phones_label)
         self.device_list = self._make_list(t("Phones"))
-        col.addWidget(self.device_list, 1)
+        col.addWidget(self.device_list)
 
         self.pcs_label = components.SectionLabel(t("PCs"))
         col.addWidget(self.pcs_label)
         self.pc_list = self._make_list(t("PCs"))
-        col.addWidget(self.pc_list, 1)
+        col.addWidget(self.pc_list)
 
         self.no_devices_label = _wrapping(
             components.role_label(t("Nothing is paired or linked yet."), "muted")
@@ -304,6 +304,7 @@ class DevicesPage(QWidget):
         )
         self.no_devices_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         col.addWidget(self.no_devices_label, 1)
+        col.addStretch(1)
 
         self.pair_button = components.accent_button(t("Pair a phone or PC"))
         self.pair_button.setAccessibleName(t("Pair a phone or PC"))
@@ -323,9 +324,10 @@ class DevicesPage(QWidget):
         widget.setAccessibleName(name)
         widget.setFrameShape(QFrame.Shape.NoFrame)
         widget.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        widget.currentItemChanged.connect(
-            lambda current, _previous, w=widget: self._on_current_changed(w, current)
-        )
+        # Selection (not the current item) drives the page: the list that is not
+        # active keeps a current item but no selection, so a focus change in it
+        # can never switch the page by itself.
+        widget.itemSelectionChanged.connect(lambda w=widget: self._on_selection_changed(w))
         return widget
 
     def _build_right(self) -> QWidget:
@@ -553,8 +555,13 @@ class DevicesPage(QWidget):
                 widget.setItemWidget(item, row)
                 if entry.key == self._sel:
                     widget.setCurrentItem(item)
+            if widget.count() and not widget.selectedItems():
+                widget.setCurrentRow(0)
+                widget.clearSelection()
             widget.blockSignals(False)
             widget.setVisible(bool(shown))
+            rows = sum(widget.sizeHintForRow(r) for r in range(widget.count()))
+            widget.setMaximumHeight(rows + 8 if rows else 0)
         self.phones_label.setVisible(self.device_list.count() > 0)
         self.pcs_label.setVisible(self.pc_list.count() > 0)
         self.no_devices_label.setVisible(not self._entries)
@@ -602,13 +609,14 @@ class DevicesPage(QWidget):
         lay.addWidget(sub)
         return holder
 
-    def _on_current_changed(self, widget: QListWidget, current: QListWidgetItem | None) -> None:
-        if current is None:
+    def _on_selection_changed(self, widget: QListWidget) -> None:
+        chosen = widget.selectedItems()
+        if not chosen:
             return
-        key = current.data(Qt.ItemDataRole.UserRole)
+        key = chosen[0].data(Qt.ItemDataRole.UserRole)
         other = self.pc_list if widget is self.device_list else self.device_list
         other.blockSignals(True)
-        other.setCurrentRow(-1)
+        other.clearSelection()
         other.blockSignals(False)
         if key != self._sel:
             self._sel = key

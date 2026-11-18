@@ -125,9 +125,9 @@ def test_nothing_paired_or_linked_shows_the_empty_state() -> None:
 def test_selecting_in_one_group_clears_the_other() -> None:
     _service, _links, page = make()
     select(page, "Pixel 8")
-    assert page.device_list.currentRow() == 0 and page.pc_list.currentRow() == -1
+    assert page.device_list.currentRow() == 0 and page.pc_list.selectedItems() == []
     select(page, "DESKTOP")
-    assert page.pc_list.currentRow() == 0 and page.device_list.currentRow() == -1
+    assert page.pc_list.currentRow() == 0 and page.device_list.selectedItems() == []
     assert page.name_label.text() == "DESKTOP"
 
 
