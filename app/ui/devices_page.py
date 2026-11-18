@@ -1,20 +1,28 @@
-"""The Devices page: paired Android phones, links sent to them, and the
-downloads on each phone (PROTOCOL.md section 20).
+"""The Devices page: phones and PCs, links to and from them, and their downloads
+(PROTOCOL.md sections 20 and 21).
 
-Left: the paired phones and the "Pair a phone" button. Right, for the phone
-picked on the left: its name and state with "Remove", a field to send it a
-link, and "Downloads on this phone", a live table with the actions that fit
-each download. Commands go out only from a click here; the outcome of each one
-is shown under the table and on the status bar.
+Left: "Devices" in two groups. Phones are the paired Android phones. PCs are the
+PCs that linked to this one (devices of kind ``pc``, shown like a phone: the
+downloads they report and the same controls) and the PCs this one linked to
+(the other PC's downloads, live, with Pause/Resume/Cancel/Retry/Remove and a
+field that adds a link on that PC). A PC that appears both ways is shown once.
+Buttons: "Pair a phone or PC" (this PC's code) and "Link to another PC".
 
-The page talks to ``app.remote.service.RemoteService`` only through its public
-API and Qt signals. Every string that came from a phone is shown as plain text.
+Right, for what is picked on the left: its name and state with "Remove", a
+field to send or add a link, and the downloads on it, a live table with the
+actions that fit each download. Commands go out only from a click here; the
+outcome of each one is shown under the table.
+
+The page talks to ``app.remote.service.RemoteService`` and
+``app.remote.client.service.LinkService`` only through their public API and Qt
+signals. Every string that came from another device is shown as plain text.
 The pairing code lives in the pairing dialog and nowhere else.
 """
 
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtCore import QDateTime, QEvent, QLocale, QObject, QPoint, Qt, QTimer, Signal
@@ -43,6 +51,7 @@ from app.core.i18n import N_, t
 from app.remote.phonejobs import PhoneJob, PhoneSnapshot, neutralise
 from app.ui import components, design, motion, theme
 from app.ui.format import human_bytes, plain_tooltip
+from app.ui.link_dialog import LinkDialog
 from app.ui.phone_page import PairingDialog
 
 #: How long a phone may be connected without sending a list before the PC
@@ -90,18 +99,44 @@ _RESULT_TEXT = {
     "offline": N_("The phone is not connected"),
     "busy": N_("Too many commands at once. Try again in a moment."),
 }
+#: The same outcomes for a PC (the words say "that PC", not "the phone").
+_PC_RESULT_TEXT = {
+    "ok": N_("Done"),
+    "notFound": N_("That PC no longer has that download"),
+    "refused": N_("That PC did not allow that"),
+    "failed": N_("That PC could not do that"),
+    "timeout": N_("That PC did not answer"),
+    "offline": N_("That PC is not connected"),
+    "busy": N_("Too many commands at once. Try again in a moment."),
+    "conflict": N_("That can't be done right now"),
+    "unsupported": N_("Update GrabLine on that PC to use this"),
+}
+
+#: What a link's state says when it is not simply online.
+_LINK_STATE_TEXT = {
+    "connecting": N_("Connecting…"),
+    "offline": N_("Offline"),
+    "identityChanged": N_("This PC's identity changed. Link it again"),
+    "removed": N_("This PC no longer accepts this one. Link it again"),
+    "hostTooOld": N_("Update GrabLine on the other PC"),
+    "clientTooOld": N_("Update GrabLine on this PC"),
+}
+_LINK_STOPPED = ("identityChanged", "removed", "hostTooOld", "clientTooOld")
 
 
 def action_label(action: str) -> str:
     return t(_ACTIONS[action][0]) if action in _ACTIONS else action
 
 
-def result_text(result: str, message: str) -> str:
+def result_text(result: str, message: str, *, pc: bool = False) -> str:
     """The words for a command outcome. The phone's own note wins for the
     answers the phone gave; the PC's conclusions use fixed sentences."""
     if message and result in ("ok", "notFound", "refused", "failed"):
         return neutralise(message)
-    return t(_RESULT_TEXT.get(result, "The phone could not do that"))
+    table = _PC_RESULT_TEXT if pc else _RESULT_TEXT
+    return t(
+        table.get(result, "That PC could not do that" if pc else "The phone could not do that")
+    )
 
 
 def _elided(
@@ -134,6 +169,34 @@ def _format_time(unix: int) -> str:
     )
 
 
+def _same_name(a: str, b: str) -> bool:
+    return a.strip().casefold() == b.strip().casefold() and bool(a.strip())
+
+
+@dataclass(frozen=True)
+class _Entry:
+    """One row on the left. ``device`` is a phone or a PC that linked to this
+    one; ``link`` is a PC this one linked to. A PC both ways has both."""
+
+    group: str  # "phone" or "pc"
+    device: Any = None  # a paired device (``RemoteService`` store row)
+    link: Any = None  # a ``LinkInfo``
+
+    @property
+    def key(self) -> str:
+        if self.link is not None:
+            return f"l:{self.link.pc_id}"
+        return f"d:{self.device.device_id}"
+
+    @property
+    def name(self) -> str:
+        return str(self.link.name if self.link is not None else self.device.name)
+
+
+def _kind_of(device: Any) -> str:
+    return "pc" if getattr(device, "kind", "phone") == "pc" else "phone"
+
+
 class DevicesPage(QWidget):
     """Sidebar page "Devices"."""
 
@@ -141,10 +204,13 @@ class DevicesPage(QWidget):
     #: everything inline and does not emit it.
     status = Signal(str)
 
-    def __init__(self, service: Any, parent: QWidget | None = None) -> None:
+    def __init__(self, service: Any, parent: QWidget | None = None, *, links: Any = None) -> None:
         super().__init__(parent)
         self._service = service
-        self._selected: str | None = None
+        self._links = links
+        #: key of the selected row: "d:<deviceId>" or "l:<pcId>"
+        self._sel: str | None = None
+        self._entries: list[_Entry] = []
         self._row_ids: list[int] = []
         #: the job the user picked, by id, so a rebuild keeps it
         self._selected_job: int | None = None
@@ -155,12 +221,17 @@ class DevicesPage(QWidget):
         self._row_sigs: dict[int, tuple[Any, ...]] = {}
         self._bars: list[motion.SmoothProgressBar] = []
         self._online_since: dict[str, float] = {}
-        #: command id -> (device id, job id, action)
+        #: command id -> (device id, job id, action), for commands to a device
         self._commands: dict[int, tuple[str, int, str]] = {}
-        #: (device id, job id) with a command waiting for its answer
+        #: request token -> (pc id, job id, action), for controls sent over a link
+        self._link_commands: dict[int, tuple[str, int, str]] = {}
+        #: token -> pc id, for links added with ``download``
+        self._link_sends: dict[int, str] = {}
+        #: (row key, job id) with a command waiting for its answer
         self._busy: set[tuple[str, int]] = set()
         self._last_render = 0.0
         self.pairing_dialog: PairingDialog | None = None
+        self.link_dialog: LinkDialog | None = None
         self.allow_box: QMessageBox | None = None
         self._allow_button: QPushButton | None = None
 
@@ -191,6 +262,11 @@ class DevicesPage(QWidget):
         service.pairingPending.connect(self._on_pairing_pending)
         service.pairingLockedWarning.connect(self._on_locked_warning)
         service.pairingFinished.connect(self._on_pairing_finished)
+        if links is not None:
+            links.linksChanged.connect(self.refresh)
+            links.linkStateChanged.connect(self._on_link_state)
+            links.hostJobsChanged.connect(self._on_jobs_changed)
+            links.requestFinished.connect(self._on_request_finished)
 
         now = time.monotonic()
         for device in service.store.list():
@@ -208,19 +284,20 @@ class DevicesPage(QWidget):
         left.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         col = QVBoxLayout(left)
         col.setContentsMargins(12, 14, 12, 12)
-        col.setSpacing(10)
-        col.addWidget(components.SectionLabel(t("Paired phones")))
+        col.setSpacing(8)
 
-        self.device_list = QListWidget()
-        self.device_list.setObjectName("DevicesList")
-        self.device_list.setAccessibleName(t("Paired phones"))
-        self.device_list.setFrameShape(QFrame.Shape.NoFrame)
-        self.device_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.device_list.currentItemChanged.connect(self._on_current_changed)
+        self.phones_label = components.SectionLabel(t("Phones"))
+        col.addWidget(self.phones_label)
+        self.device_list = self._make_list(t("Phones"))
         col.addWidget(self.device_list, 1)
 
+        self.pcs_label = components.SectionLabel(t("PCs"))
+        col.addWidget(self.pcs_label)
+        self.pc_list = self._make_list(t("PCs"))
+        col.addWidget(self.pc_list, 1)
+
         self.no_devices_label = _wrapping(
-            components.role_label(t("No phones are paired."), "muted")
+            components.role_label(t("Nothing is paired or linked yet."), "muted")
         )
         self.no_devices_label.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
@@ -228,11 +305,28 @@ class DevicesPage(QWidget):
         self.no_devices_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         col.addWidget(self.no_devices_label, 1)
 
-        self.pair_button = components.accent_button(t("Pair a phone"))
-        self.pair_button.setAccessibleName(t("Pair a phone"))
+        self.pair_button = components.accent_button(t("Pair a phone or PC"))
+        self.pair_button.setAccessibleName(t("Pair a phone or PC"))
         self.pair_button.clicked.connect(self._pair)
         col.addWidget(self.pair_button)
+        self.link_button = QPushButton(t("Link to another PC"))
+        self.link_button.setAccessibleName(t("Link to another PC"))
+        self.link_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.link_button.clicked.connect(self._open_link_dialog)
+        self.link_button.setVisible(self._links is not None)
+        col.addWidget(self.link_button)
         return left
+
+    def _make_list(self, name: str) -> QListWidget:
+        widget = QListWidget()
+        widget.setObjectName("DevicesList")
+        widget.setAccessibleName(name)
+        widget.setFrameShape(QFrame.Shape.NoFrame)
+        widget.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        widget.currentItemChanged.connect(
+            lambda current, _previous, w=widget: self._on_current_changed(w, current)
+        )
+        return widget
 
     def _build_right(self) -> QWidget:
         self.right_stack = QStackedWidget()
@@ -254,14 +348,14 @@ class DevicesPage(QWidget):
         inner.setContentsMargins(24, 20, 24, 22)
         inner.setSpacing(8)
         self.empty_title = components.role_label(
-            t("No phones paired yet"), "strong", size=design.FONT["h1"], bold=True
+            t("No phones or PCs yet"), "strong", size=design.FONT["h1"], bold=True
         )
         inner.addWidget(self.empty_title)
         self.empty_body = _wrapping(
             components.role_label(
                 t(
-                    "Pair your Android phone to send it links from this PC, see and control "
-                    "its downloads here, and start downloads on this PC from your phone."
+                    "Pair your Android phone or link another PC to send it links, see and "
+                    "control its downloads here, and start downloads on this PC from there."
                 ),
                 "dim",
             )
@@ -298,7 +392,15 @@ class DevicesPage(QWidget):
         head.addWidget(self.remove_button, 0, Qt.AlignmentFlag.AlignTop)
         col.addLayout(head)
 
-        col.addWidget(components.SectionLabel(t("Send a link to this phone")))
+        self.merged_note = _wrapping(components.role_label("", "muted", size=design.FONT["small"]))
+        self.merged_note.hide()
+        col.addWidget(self.merged_note)
+        self.share_note = _wrapping(components.role_label("", "muted", size=design.FONT["small"]))
+        self.share_note.hide()
+        col.addWidget(self.share_note)
+
+        self.send_caption = components.SectionLabel(t("Send a link to this phone"))
+        col.addWidget(self.send_caption)
         send_row = QHBoxLayout()
         send_row.setSpacing(8)
         self.link_edit = QLineEdit()
@@ -312,13 +414,20 @@ class DevicesPage(QWidget):
         self.send_button.setAccessibleName(t("Send"))
         self.send_button.clicked.connect(self._send_link)
         send_row.addWidget(self.send_button)
-        col.addLayout(send_row)
+        self.send_row = QWidget()
+        self.send_row.setObjectName("BareContainer")
+        send_row_box = QVBoxLayout(self.send_row)
+        send_row_box.setContentsMargins(0, 0, 0, 0)
+        send_row_box.setSpacing(0)
+        send_row_box.addLayout(send_row)
+        col.addWidget(self.send_row)
         self.send_note = _wrapping(components.role_label("", "muted", size=design.FONT["small"]))
         self.send_note.hide()
         col.addWidget(self.send_note)
 
         col.addSpacing(4)
-        col.addWidget(components.SectionLabel(t("Downloads on this phone")))
+        self.jobs_caption = components.SectionLabel(t("Downloads on this phone"))
+        col.addWidget(self.jobs_caption)
         self.banner_label = _wrapping(components.role_label("", "muted", size=design.FONT["small"]))
         self.banner_label.hide()
         col.addWidget(self.banner_label)
@@ -405,30 +514,74 @@ class DevicesPage(QWidget):
 
     # ------------------------------------------------------------- the list
 
-    def refresh(self) -> None:
-        """Rebuild the list of paired phones, keeping the selection."""
+    def _build_entries(self) -> list[_Entry]:
+        """Phones, then PCs: the PCs that linked to this one and the PCs this
+        one linked to, a PC that did both once."""
         devices = list(self._service.store.list())
-        ids = [d.device_id for d in devices]
-        keep = self._selected if self._selected in ids else (ids[0] if ids else None)
-        self.device_list.blockSignals(True)
-        self.device_list.clear()
+        links = list(self._links.links()) if self._links is not None else []
+        entries = [_Entry("phone", device=d) for d in devices if _kind_of(d) == "phone"]
+        unmatched = list(links)
         for device in devices:
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, device.device_id)
-            online = self._service.is_online(device.device_id)
-            detail = self._seen_text(device, online)
-            item.setData(Qt.ItemDataRole.AccessibleTextRole, f"{device.name}, {detail}")
-            widget = self._device_row(str(device.name), detail, online)
-            item.setSizeHint(widget.sizeHint())
-            self.device_list.addItem(item)
-            self.device_list.setItemWidget(item, widget)
-            if device.device_id == keep:
-                self.device_list.setCurrentItem(item)
-        self.device_list.blockSignals(False)
-        self.device_list.setVisible(bool(devices))
-        self.no_devices_label.setVisible(not devices)
-        self._selected = keep
+            if _kind_of(device) != "pc":
+                continue
+            match = next((link for link in unmatched if _same_name(link.name, device.name)), None)
+            if match is not None:
+                unmatched.remove(match)
+            entries.append(_Entry("pc", device=device, link=match))
+        entries.extend(_Entry("pc", link=link) for link in unmatched)
+        return entries
+
+    def refresh(self) -> None:
+        """Rebuild the two lists, keeping the selection."""
+        self._entries = self._build_entries()
+        keys = [entry.key for entry in self._entries]
+        if self._sel not in keys:
+            self._sel = keys[0] if keys else None
+            self._selected_job = None
+        for widget, group in ((self.device_list, "phone"), (self.pc_list, "pc")):
+            widget.blockSignals(True)
+            widget.clear()
+            shown = [e for e in self._entries if e.group == group]
+            for entry in shown:
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, entry.key)
+                detail, online = self._row_state(entry)
+                item.setData(Qt.ItemDataRole.AccessibleTextRole, f"{entry.name}, {detail}")
+                row = self._device_row(entry.name, detail, online)
+                item.setSizeHint(row.sizeHint())
+                widget.addItem(item)
+                widget.setItemWidget(item, row)
+                if entry.key == self._sel:
+                    widget.setCurrentItem(item)
+            widget.blockSignals(False)
+            widget.setVisible(bool(shown))
+        self.phones_label.setVisible(self.device_list.count() > 0)
+        self.pcs_label.setVisible(self.pc_list.count() > 0)
+        self.no_devices_label.setVisible(not self._entries)
         self._render_right()
+
+    def _entry(self, key: str | None) -> _Entry | None:
+        for entry in self._entries:
+            if entry.key == key:
+                return entry
+        return None
+
+    def _row_state(self, entry: _Entry) -> tuple[str, bool]:
+        """The line under a name on the left, and whether it is online."""
+        if entry.link is not None and (entry.device is None or self._driver(entry) == "link"):
+            return self._link_text(entry.link), bool(entry.link.online)
+        assert entry.device is not None
+        online = bool(self._service.is_online(entry.device.device_id))
+        return self._seen_text(entry.device, online), online
+
+    def _link_text(self, link: Any) -> str:
+        if link.state == "online":
+            return t("Online")
+        if link.state == "offline":
+            if link.last_seen_at:
+                return t("Last seen {when}", when=_format_time(link.last_seen_at))
+            return t("Offline")
+        return t(_LINK_STATE_TEXT.get(link.state, "Offline"))
 
     def _seen_text(self, device: Any, online: bool) -> str:
         if online:
@@ -449,10 +602,16 @@ class DevicesPage(QWidget):
         lay.addWidget(sub)
         return holder
 
-    def _on_current_changed(self, current: QListWidgetItem | None, _previous: Any) -> None:
-        device_id = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
-        if device_id != self._selected:
-            self._selected = device_id
+    def _on_current_changed(self, widget: QListWidget, current: QListWidgetItem | None) -> None:
+        if current is None:
+            return
+        key = current.data(Qt.ItemDataRole.UserRole)
+        other = self.pc_list if widget is self.device_list else self.device_list
+        other.blockSignals(True)
+        other.setCurrentRow(-1)
+        other.blockSignals(False)
+        if key != self._sel:
+            self._sel = key
             self._selected_job = None
             self.link_edit.clear()
             self.send_note.setText("")
@@ -461,10 +620,15 @@ class DevicesPage(QWidget):
             self._render_right()
 
     def selected_device(self) -> Any | None:
-        for device in self._service.store.list():
-            if device.device_id == self._selected:
-                return device
-        return None
+        """The paired device (phone, or PC that linked to this one) picked on
+        the left, if the row has one."""
+        entry = self._entry(self._sel)
+        return entry.device if entry is not None else None
+
+    def selected_link(self) -> Any | None:
+        """The link to another PC picked on the left, if the row has one."""
+        entry = self._entry(self._sel)
+        return entry.link if entry is not None else None
 
     def _on_presence(self, device_id: str) -> None:
         if self._service.is_online(device_id):
@@ -473,16 +637,75 @@ class DevicesPage(QWidget):
             self._online_since.pop(device_id, None)
         self.refresh()
 
+    def _on_link_state(self, _pc_id: str) -> None:
+        self.refresh()
+
     # ------------------------------------------------------- the right side
+
+    def _driver(self, entry: _Entry) -> str:
+        """Which side supplies what the right pane shows: ``device`` (the
+        downloads the device reported) or ``link`` (the other PC's downloads,
+        live). A PC both ways uses the link while it is online."""
+        if entry.link is None:
+            return "device"
+        if entry.device is None:
+            return "link"
+        if entry.link.online:
+            return "link"
+        if self._service.is_online(entry.device.device_id):
+            return "device"
+        return "link"
 
     def _render_right(self) -> None:
         self._last_render = time.monotonic()
-        device = self.selected_device()
-        if device is None:
+        entry = self._entry(self._sel)
+        if entry is None:
             self.right_stack.setCurrentIndex(0)
             return
         self.right_stack.setCurrentIndex(1)
+        driver = self._driver(entry)
+        if driver == "link":
+            assert entry.link is not None
+            self._render_link(entry, entry.link)
+        else:
+            assert entry.device is not None
+            self._render_device(entry, entry.device)
+
+    def _set_captions(self, *, pc: bool, link: bool) -> None:
+        """The words that change with what is picked: a phone, a PC that linked
+        to this one, or a PC this one linked to."""
+        if link:
+            send, jobs = t("Add a link to this PC"), t("Downloads on this PC")
+            self.link_edit.setPlaceholderText(t("Paste a link to download on that PC"))
+            self.send_button.setText(t("Add"))
+            self.send_button.setAccessibleName(t("Add"))
+        else:
+            send = t("Send a link to this phone")
+            jobs = t("Downloads on this PC") if pc else t("Downloads on this phone")
+            self.link_edit.setPlaceholderText(t("Paste a link to send"))
+            self.send_button.setText(t("Send"))
+            self.send_button.setAccessibleName(t("Send"))
+        self.send_caption.setText(send.upper())
+        self.link_edit.setAccessibleName(send)
+        self.jobs_caption.setText(jobs.upper())
+        for widget in (self.action_bar, self.result_label, self.table):
+            widget.setAccessibleName(jobs)
+        # A PC that linked to this one never pulls links; only phones do.
+        self.send_row.setVisible(link or not pc)
+        self.send_caption.setVisible(link or not pc)
+
+    def _merge_note(self, entry: _Entry) -> None:
+        both = entry.device is not None and entry.link is not None
+        self.merged_note.setVisible(both)
+        if both:
+            self.merged_note.setText(t("This PC is linked both ways, so it is shown once."))
+
+    def _render_device(self, entry: _Entry, device: Any) -> None:
+        pc = entry.group == "pc"
         online = bool(self._service.is_online(device.device_id))
+        self._set_captions(pc=pc, link=False)
+        self._merge_note(entry)
+        self.share_note.hide()
         self.name_label.setText(str(device.name))
         paired = t("Paired {date}", date=_format_time(device.created_at))
         seen = self._seen_text(device, online)
@@ -491,9 +714,55 @@ class DevicesPage(QWidget):
         _repolish(self.state_label)
         self.remove_button.setAccessibleName(f"{t('Remove')} {device.name}")
         self._update_send_enabled()
-        self._render_jobs(device, online)
+        self._render_jobs(entry, online, pc=pc)
 
-    def _jobs_state(self, device_id: str, online: bool) -> tuple[str, PhoneSnapshot | None]:
+    def _render_link(self, entry: _Entry, link: Any) -> None:
+        online = bool(link.online)
+        self._set_captions(pc=True, link=True)
+        self._merge_note(entry)
+        self.name_label.setText(str(link.name))
+        stopped = link.state in _LINK_STOPPED
+        if online:
+            state = t("Online")
+        elif link.state == "offline" and link.last_seen_at:
+            state = t("Last seen {when}", when=_format_time(link.last_seen_at))
+        else:
+            state = t(_LINK_STATE_TEXT.get(link.state, "Offline"))
+        linked = t("Linked {date}", date=_format_time(link.paired_at))
+        self.state_label.setText(state if stopped else f"{state}  ·  {linked}")
+        self.state_label.setProperty("role", "ok" if online else ("warn" if stopped else "muted"))
+        _repolish(self.state_label)
+        self.remove_button.setAccessibleName(f"{t('Remove')} {link.name}")
+        self._render_share_note(link)
+        self._update_send_enabled()
+        self._render_jobs(entry, online, pc=True)
+
+    def _render_share_note(self, link: Any) -> None:
+        """Tell the person when the other PC cannot see this PC's downloads."""
+        text = ""
+        if link.state == "online":
+            if not link.shares_downloads:
+                text = t("That PC can't see downloads on this PC. Update GrabLine on it.")
+            elif self._links is not None and not self._links.shared_setting():
+                text = t(
+                    "Sharing is off, so that PC can't see or control downloads on this PC. "
+                    "Turn it on in Settings, Phones and PCs."
+                )
+        self.share_note.setText(text)
+        self.share_note.setVisible(bool(text))
+
+    def _jobs_state(self, entry: _Entry, online: bool) -> tuple[str, PhoneSnapshot | None]:
+        if self._driver(entry) == "link":
+            link = entry.link
+            assert link is not None
+            if link.state in _LINK_STOPPED:
+                return f"link_{link.state}", None
+            snapshot = self._links.host_jobs(link.pc_id)
+            if snapshot is None:
+                return ("checking" if online else "offline_never"), None
+            return ("jobs" if snapshot.jobs else "empty"), snapshot
+        assert entry.device is not None
+        device_id = entry.device.device_id
         snapshot = self._service.phone_jobs(device_id)
         if snapshot is None:
             if not online:
@@ -506,25 +775,50 @@ class DevicesPage(QWidget):
             return "empty", snapshot
         return "jobs", snapshot
 
-    def _render_jobs(self, device: Any, online: bool) -> None:
-        state, snapshot = self._jobs_state(device.device_id, online)
+    def _render_jobs(self, entry: _Entry, online: bool, *, pc: bool) -> None:
+        state, snapshot = self._jobs_state(entry, online)
+        driver_is_link = self._driver(entry) == "link"
         text = {
-            "offline_never": t("Its downloads show up here once the phone connects."),
-            "checking": t("Checking the phone's downloads…"),
-            "older": t("Update GrabLine on the phone to see its downloads here."),
-            "not_shared": t(
-                "This phone doesn't share its downloads. "
-                "Turn it on in GrabLine on the phone: Settings, PCs."
+            "offline_never": (
+                t("Its downloads show up here once that PC connects.")
+                if pc
+                else t("Its downloads show up here once the phone connects.")
             ),
-            "empty": t("No downloads on this phone."),
+            "checking": (
+                t("Checking that PC's downloads…") if pc else t("Checking the phone's downloads…")
+            ),
+            "older": (
+                t("Update GrabLine on that PC to see its downloads here.")
+                if pc
+                else t("Update GrabLine on the phone to see its downloads here.")
+            ),
+            "not_shared": (
+                t(
+                    "This PC doesn't share its downloads. "
+                    "Turn it on in GrabLine on that PC: Settings, Phones and PCs."
+                )
+                if pc
+                else t(
+                    "This phone doesn't share its downloads. "
+                    "Turn it on in GrabLine on the phone: Settings, PCs."
+                )
+            ),
+            "empty": t("No downloads on that PC.") if pc else t("No downloads on this phone."),
         }.get(state)
+        if text is None and state.startswith("link_"):
+            text = t(_LINK_STATE_TEXT.get(state[5:], "Offline"))
         stale = not online and snapshot is not None and state == "jobs"
         self.banner_label.setVisible(stale)
         if stale:
-            self.banner_label.setText(t("Offline. Showing the last list this phone sent."))
-        if state == "checking":
+            self.banner_label.setText(
+                t("Offline. Showing the last list from that PC.")
+                if pc
+                else t("Offline. Showing the last list this phone sent.")
+            )
+        if state == "checking" and not driver_is_link:
+            assert entry.device is not None
             remaining = LIST_GRACE_S - (
-                time.monotonic() - self._online_since.get(device.device_id, 0.0)
+                time.monotonic() - self._online_since.get(entry.device.device_id, 0.0)
             )
             self._grace_timer.start(max(50, int(remaining * 1000) + 50))
         if text is not None:
@@ -536,14 +830,21 @@ class DevicesPage(QWidget):
             return
         assert snapshot is not None
         self.jobs_stack.setCurrentIndex(1)
-        self._fill_rows(device.device_id, snapshot, online)
+        self._fill_rows(self._busy_key(), snapshot, online)
         self._dim.setEnabled(not online)
 
-    def _on_jobs_changed(self, device_id: str) -> None:
-        """A phone reports at most once a second by its own rule, but the PC
-        does not rely on that: re-drawing is limited to one per interval and
-        the newest list wins."""
-        if device_id != self._selected:
+    def _on_jobs_changed(self, source_id: str) -> None:
+        """A device reports at most once a second by its own rule, and a host's
+        events come as they happen, but the page does not rely on that:
+        re-drawing is limited to one per interval and the newest list wins."""
+        entry = self._entry(self._sel)
+        if entry is None:
+            return
+        ids = {
+            getattr(entry.device, "device_id", None),
+            getattr(entry.link, "pc_id", None),
+        }
+        if source_id not in ids:
             return
         wait = RENDER_MIN_INTERVAL_S - (time.monotonic() - self._last_render)
         if wait <= 0 and not self._render_timer.isActive():
@@ -552,7 +853,7 @@ class DevicesPage(QWidget):
             self._render_timer.start(max(1, int(wait * 1000) + 1))
 
     def _render_throttled(self) -> None:
-        if self._selected is not None:
+        if self._sel is not None:
             self._render_right()
 
     # ------------------------------------------------------------ the table
@@ -567,12 +868,12 @@ class DevicesPage(QWidget):
         self._row_ids = []
         self._row_sigs = {}
 
-    def _fill_rows(self, device_id: str, snapshot: PhoneSnapshot, online: bool) -> None:
+    def _fill_rows(self, key: str, snapshot: PhoneSnapshot, online: bool) -> None:
         ids = [job.id for job in snapshot.jobs]
         if ids != self._row_ids:
             self._rebuild_rows(snapshot)
         for row, job in enumerate(snapshot.jobs):
-            self._update_row(row, device_id, job, online)
+            self._update_row(row, key, job, online)
         self._rendered = snapshot
         # Keep the job the user picked (by id) across rebuilds; fall back to the
         # first row only when it is gone.
@@ -639,7 +940,23 @@ class DevicesPage(QWidget):
         assert item is not None
         return item
 
-    def _update_row(self, row: int, device_id: str, job: PhoneJob, online: bool) -> None:
+    def _busy_key(self) -> str:
+        """Who a command in flight belongs to: the link while the page shows
+        the other PC's own downloads, else the device."""
+        entry = self._entry(self._sel)
+        if entry is None:
+            return ""
+        if self._driver(entry) == "link":
+            return f"l:{entry.link.pc_id}"
+        return f"d:{entry.device.device_id}"
+
+    def _movable(self) -> bool:
+        """Only a download on a phone or on a PC that linked to this one can be
+        moved here; the downloads of a PC this one linked to are already on a PC."""
+        entry = self._entry(self._sel)
+        return entry is not None and self._driver(entry) == "device"
+
+    def _update_row(self, row: int, key: str, job: PhoneJob, online: bool) -> None:
         p = theme.current()
         name_item = self._cell(row, _C_NAME)
         name_item.setText(job.name)
@@ -664,13 +981,13 @@ class DevicesPage(QWidget):
             fraction = 1.0
         bar.set_value(fraction or 0.0)
         bar.set_color(None if downloading else design.status_color(p, job.status))
-        busy = (device_id, job.id) in self._busy
-        actions = job.actions()
+        busy = (key, job.id) in self._busy
+        actions = job.actions(movable=self._movable())
         sig = (job.id, actions, online, busy, p.text2)
         if self._row_sigs.get(job.id) != sig:
             self._row_sigs[job.id] = sig
             self.table.setCellWidget(
-                row, _C_ACTIONS, self._actions_cell(device_id, job, actions, online and not busy)
+                row, _C_ACTIONS, self._actions_cell(job, actions, online and not busy)
             )
 
     @staticmethod
@@ -686,7 +1003,7 @@ class DevicesPage(QWidget):
         return human_bytes(job.downloaded) if job.downloaded else ""
 
     def _action_buttons(
-        self, device_id: str, job: PhoneJob, actions: tuple[str, ...], enabled: bool
+        self, job: PhoneJob, actions: tuple[str, ...], enabled: bool
     ) -> list[QPushButton]:
         """One button per action that fits, each with the download's name in
         its accessible name, a plain-text tooltip and keyboard focus."""
@@ -701,22 +1018,28 @@ class DevicesPage(QWidget):
             button.setFixedSize(30, 28)
             button.setStyleSheet("QPushButton { padding: 0px; }")
             button.setEnabled(enabled)
-            button.clicked.connect(
-                lambda _checked=False, a=action, j=job.id: self._command(device_id, j, a)
-            )
+            button.clicked.connect(lambda _checked=False, a=action, j=job.id: self._command(j, a))
             buttons.append(button)
         return buttons
+
+    def _selected_online(self) -> bool:
+        entry = self._entry(self._sel)
+        if entry is None:
+            return False
+        if self._driver(entry) == "link":
+            return bool(entry.link.online)
+        return bool(self._service.is_online(entry.device.device_id))
 
     def _refresh_action_bar(self) -> None:
         """The actions for the selected download as a real row of buttons under
         the table. Windows UI Automation does not expose widgets placed inside
         table cells, so this is the path screen readers and keyboards use; the
         buttons in the row are the mouse shortcut for the same commands."""
-        device_id = self._selected
+        key = self._busy_key() if self._sel is not None else None
         snapshot = self._rendered
         row = self.table.currentRow()
         if (
-            device_id is None
+            key is None
             or snapshot is None
             or self.jobs_stack.currentIndex() != 1
             or not 0 <= row < len(self._row_ids)
@@ -729,9 +1052,9 @@ class DevicesPage(QWidget):
         # they were drawn from: never from whatever list arrived since.
         job = snapshot.job(self._row_ids[row])
         assert job is not None
-        online = bool(self._service.is_online(device_id))
-        enabled = online and (device_id, job.id) not in self._busy
-        sig = (device_id, job.id, job.name, job.actions(), enabled, theme.current().text2)
+        actions = job.actions(movable=self._movable())
+        enabled = self._selected_online() and (key, job.id) not in self._busy
+        sig = (key, job.id, job.name, actions, enabled, theme.current().text2)
         if sig == self._bar_sig and not self.action_bar.isHidden():
             return  # unchanged: keep the buttons, and the focus on them
         self._clear_action_bar()
@@ -739,7 +1062,7 @@ class DevicesPage(QWidget):
         caption = _elided(job.name, "dim")
         caption.setAccessibleName(job.name)
         self.action_layout.addWidget(caption, 1)
-        for button in self._action_buttons(device_id, job, job.actions(), enabled):
+        for button in self._action_buttons(job, actions, enabled):
             self.action_layout.addWidget(button)
         self.action_bar.show()
 
@@ -753,34 +1076,30 @@ class DevicesPage(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
 
-    def _actions_cell(
-        self, device_id: str, job: PhoneJob, actions: tuple[str, ...], enabled: bool
-    ) -> QWidget:
+    def _actions_cell(self, job: PhoneJob, actions: tuple[str, ...], enabled: bool) -> QWidget:
         holder = QWidget()
         holder.setObjectName("BareContainer")
         lay = QHBoxLayout(holder)
         lay.setContentsMargins(4, 0, 4, 0)
         lay.setSpacing(2)
         lay.addStretch(1)
-        for button in self._action_buttons(device_id, job, actions, enabled):
+        for button in self._action_buttons(job, actions, enabled):
             lay.addWidget(button)
         return holder
 
     def _row_menu(self, row: int) -> QMenu | None:
         """A menu with the actions that fit one download, or None."""
-        device_id = self._selected
-        snapshot = self._service.phone_jobs(device_id) if device_id else None
-        if device_id is None or snapshot is None or not 0 <= row < len(snapshot.jobs):
+        key = self._busy_key() if self._sel is not None else None
+        snapshot = self._rendered
+        if key is None or snapshot is None or not 0 <= row < len(snapshot.jobs):
             return None
         job = snapshot.jobs[row]
-        online = bool(self._service.is_online(device_id))
+        online = self._selected_online()
         menu = QMenu(self)
-        for action in job.actions():
+        for action in job.actions(movable=self._movable()):
             entry = menu.addAction(action_label(action))
-            entry.setEnabled(online and (device_id, job.id) not in self._busy)
-            entry.triggered.connect(
-                lambda _checked=False, a=action, j=job.id: self._command(device_id, j, a)
-            )
+            entry.setEnabled(online and (key, job.id) not in self._busy)
+            entry.triggered.connect(lambda _checked=False, a=action, j=job.id: self._command(j, a))
         if not menu.actions():
             return None
         return menu
@@ -794,15 +1113,26 @@ class DevicesPage(QWidget):
 
     # ------------------------------------------------------------- commands
 
-    def _command(self, device_id: str, job_id: int, action: str) -> None:
-        if (device_id, job_id) in self._busy:
+    def _command(self, job_id: int, action: str) -> None:
+        entry = self._entry(self._sel)
+        if entry is None or (self._busy_key(), job_id) in self._busy:
             return
-        command_id = int(self._service.send_phone_command(device_id, job_id, action))
-        if command_id <= 0:
-            self._show_result(action, "failed", "")
-            return
-        self._commands[command_id] = (device_id, job_id, action)
-        self._busy.add((device_id, job_id))
+        if self._driver(entry) == "link":
+            assert entry.link is not None and self._links is not None
+            token = int(self._links.send_control(entry.link.pc_id, job_id, action))
+            if token <= 0:
+                self._show_result(action, "failed", "", pc=True)
+                return
+            self._link_commands[token] = (entry.link.pc_id, job_id, action)
+        else:
+            assert entry.device is not None
+            device_id = entry.device.device_id
+            command_id = int(self._service.send_phone_command(device_id, job_id, action))
+            if command_id <= 0:
+                self._show_result(action, "failed", "", pc=entry.group == "pc")
+                return
+            self._commands[command_id] = (device_id, job_id, action)
+        self._busy.add((self._busy_key(), job_id))
         self._render_right()
 
     def _on_command_finished(self, command_id: int, result: str, message: str) -> None:
@@ -810,21 +1140,38 @@ class DevicesPage(QWidget):
         if entry is None:
             return
         device_id, job_id, action = entry
-        self._busy.discard((device_id, job_id))
-        self._show_result(action, result, message)
-        if device_id == self._selected:
+        self._busy.discard((f"d:{device_id}", job_id))
+        current = self._entry(self._sel)
+        pc = current is not None and current.group == "pc"
+        self._show_result(action, result, message, pc=pc)
+        if current is not None and getattr(current.device, "device_id", None) == device_id:
             self._render_right()
 
-    def _show_result(self, action: str, result: str, message: str) -> None:
+    def _on_request_finished(self, token: int, result: str, message: str) -> None:
+        """A control or an added link sent over a link has its outcome."""
+        control = self._link_commands.pop(token, None)
+        if control is not None:
+            pc_id, job_id, action = control
+            self._busy.discard((f"l:{pc_id}", job_id))
+            self._show_result(action, result, message, pc=True)
+            current = self._entry(self._sel)
+            if current is not None and getattr(current.link, "pc_id", None) == pc_id:
+                self._render_right()
+            return
+        pc_id_sent = self._link_sends.pop(token, None)
+        if pc_id_sent is not None:
+            self._show_add_outcome(pc_id_sent, result, message)
+
+    def _show_result(self, action: str, result: str, message: str, *, pc: bool = False) -> None:
         """Inline, under the table: what happened, in words. A failure is
         coloured so it cannot be missed."""
-        if result == "ok" and not message and action in _OK_TEXT:
+        if result == "ok" and not message and action in _OK_TEXT and not pc:
             text = t(_OK_TEXT[action])
         else:
             text = t(
                 "{action}: {result}",
                 action=action_label(action),
-                result=result_text(result, message),
+                result=result_text(result, message, pc=pc),
             )
         self.result_label.setText(text)
         self.result_label.setProperty("role", "ok" if result == "ok" else "warn")
@@ -837,19 +1184,58 @@ class DevicesPage(QWidget):
         if self.link_edit.text():
             self._note_timer.stop()
             self._clear_note()  # typing again: the last answer is old news
-        self.send_button.setEnabled(bool(self.link_edit.text().strip()))
+        entry = self._entry(self._sel)
+        usable = True
+        if entry is not None and self._driver(entry) == "link":
+            usable = bool(entry.link.online)
+        self.send_button.setEnabled(bool(self.link_edit.text().strip()) and usable)
 
     def _send_link(self) -> None:
-        url = self.link_edit.text().strip()
-        device_id = self._selected
-        if not url or device_id is None:
+        entry = self._entry(self._sel)
+        text = self.link_edit.text().strip()
+        if not text or entry is None:
             return
-        queued = self._service.queue_for_phone(device_id, url)
+        if self._driver(entry) == "link":
+            self._add_link_on_pc(entry, text)
+            return
+        if entry.device is None or entry.group == "pc":
+            return
+        queued = self._service.queue_for_phone(entry.device.device_id, text)
         if queued:
             self.link_edit.clear()
-            text = t("Sent to your phone")
+            note = t("Sent to your phone")
         else:
-            text = t("This link cannot be sent to a phone")
+            note = t("This link cannot be sent to a phone")
+        self._show_note(note)
+
+    def _add_link_on_pc(self, entry: _Entry, text: str) -> None:
+        assert entry.link is not None and self._links is not None
+        urls = text.split()
+        pc_id = entry.link.pc_id
+        if len(urls) == 1:
+            token = int(self._links.send_download(pc_id, urls[0]))
+        else:
+            token = int(self._links.send_links(pc_id, urls))
+        if token <= 0:
+            self._show_note(t("This link cannot be sent to a PC"))
+            return
+        self._link_sends[token] = pc_id
+
+    def _show_add_outcome(self, pc_id: str, result: str, message: str) -> None:
+        entry = self._entry(self._sel)
+        if entry is None or getattr(entry.link, "pc_id", None) != pc_id:
+            return
+        if result == "ok":
+            self.link_edit.clear()
+            self._show_note(
+                t("That PC already has this link")
+                if message == "duplicate"
+                else t("Added on that PC")
+            )
+        else:
+            self._show_note(result_text(result, "", pc=True))
+
+    def _show_note(self, text: str) -> None:
         self.send_note.setText(text)
         self.send_note.show()
         self._note_timer.start(NOTE_SHOWN_MS)
@@ -874,10 +1260,14 @@ class DevicesPage(QWidget):
         return box.clickedButton() is remove
 
     def _remove_selected(self) -> None:
-        device = self.selected_device()
-        if device is None or not self._confirm_remove(str(device.name)):
+        entry = self._entry(self._sel)
+        if entry is None or not self._confirm_remove(entry.name):
             return
-        self._service.remove_device(device.device_id)
+        # A PC linked both ways is one row: removing it ends both directions.
+        if entry.device is not None:
+            self._service.remove_device(entry.device.device_id)
+        if entry.link is not None and self._links is not None:
+            self._links.remove_link(entry.link.pc_id)
         self.refresh()
 
     # -------------------------------------------------------------- theming
@@ -900,6 +1290,18 @@ class DevicesPage(QWidget):
         dialog.activateWindow()
         self._service.start_pairing()
 
+    def _open_link_dialog(self) -> None:
+        if self._links is None:
+            return
+        dialog = self.link_dialog
+        if dialog is None:
+            dialog = LinkDialog(self._links, self.window())
+            dialog.finished.connect(lambda _result: setattr(self, "link_dialog", None))
+            self.link_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def _on_dialog_closed(self, _result: int) -> None:
         self.pairing_dialog = None
         self._dismiss_allow_box()
@@ -915,11 +1317,18 @@ class DevicesPage(QWidget):
 
     def _on_pairing_pending(self, device_name: str) -> None:
         self._dismiss_allow_box()
+        kind = "phone"
+        asker = getattr(self._service, "pending_kind", None)
+        if callable(asker):
+            kind = str(asker())
         box = QMessageBox(self.window())
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle(t("Pair a phone"))
+        box.setWindowTitle(t("Pair a phone or PC"))
         box.setTextFormat(Qt.TextFormat.PlainText)
-        box.setText(t('Allow "{name}" to control GrabLine?', name=device_name))
+        if kind == "pc":
+            box.setText(t('Allow "{name}" (a PC) to control GrabLine?', name=device_name))
+        else:
+            box.setText(t('Allow "{name}" to control GrabLine?', name=device_name))
         allow = box.addButton(t("Allow"), QMessageBox.ButtonRole.AcceptRole)
         deny = box.addButton(t("Deny"), QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(deny)
@@ -965,6 +1374,8 @@ class DevicesPage(QWidget):
     def closeEvent(self, event: Any) -> None:  # pragma: no cover - widget teardown
         if self.pairing_dialog is not None:
             self.pairing_dialog.close()
+        if self.link_dialog is not None:
+            self.link_dialog.close()
         for bar in self._bars:
             bar.release()
         self._bars = []
