@@ -1,0 +1,27 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The job after the action (here: paused).",
+  "state": "authed",
+  "message": {
+    "id": "r-16",
+    "type": "ok",
+    "protocolVersion": 6,
+    "job": {
+      "id": 41,
+      "url": "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+      "name": "ubuntu-26.04-desktop-amd64.iso",
+      "status": "paused",
+      "kind": "direct",
+      "downloaded": 1288490188,
+      "total": 6144000000,
+      "speed": 0,
+      "eta": null,
+      "queueId": null,
+      "createdAt": 1794700000,
+      "finishedAt": null,
+      "error": null,
+      "requestId": "req-0001-7b1e4c1a9f3d4e55",
+      "fetchable": false
+    }
+  }
+}

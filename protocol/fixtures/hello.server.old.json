@@ -1,0 +1,11 @@
+{
+  "direction": "pc-to-phone",
+  "description": "hello from a PC whose protocol is older than the phone needs (QA-17). The phone shows 'Update GrabLine on your PC' and closes; it must not crash on the missing fields.",
+  "state": "preauth",
+  "message": {
+    "type": "hello",
+    "protocolVersion": 5,
+    "pcName": "Study PC",
+    "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+  }
+}

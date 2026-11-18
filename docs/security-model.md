@@ -6,7 +6,8 @@ security certification. See [Testing](testing.md) for verification scope.
 
 GrabLine takes hostile input by design: arbitrary URLs, whatever a server
 sends back, stranger-chosen filenames, stranger-built archives, and messages
-from web pages through the browser extension.
+from web pages through the browser extension. If you pair a phone, it also
+takes messages from that phone over your local network.
 
 This document maps where untrusted data crosses into the app, what stops it
 doing harm, and what is *not* defended because it is outside the threat model.
@@ -40,6 +41,7 @@ what comes back over the wire.
 | B5 | Subprocess → FFmpeg / 7-Zip / script / power | the command line | shell injection, argument injection | argument lists only, never a shell string; paths passed as discrete args |
 | B6 | Secrets at rest → DB, exports, logs, keychain | proxy creds, cookies, API keys | credential theft | keychain for cloud logins; API keys and cookies stripped from exports; DB 0600 on POSIX; no secrets logged |
 | B7 | Network → redirects, TLS, decompression | redirect targets, certificates, gzip | MITM, SSRF, decompression bomb | TLS verification on by default, off only on an explicit user opt-in, never silently |
+| B8 | Local network → phone-remote listener → handoffs table, job controls | WebSocket frames from a paired phone, or from anyone on the LAN who tries | send commands, impersonate a phone or the PC, write outside the download folders, expose the PC to the internet | [Phone remote listener](#phone-remote-listener): off by default, private binds only, pinned TLS, device keys, ids instead of paths |
 
 ## What is enforced (and where)
 
@@ -150,6 +152,89 @@ what comes back over the wire.
 - **Provisioning**: the fetched FFmpeg and Deno binaries are verified against
   hardcoded SHA-256 pins and downloaded over HTTPS from their expected hosts.
 
+## Phone remote listener
+
+GrabLine has exactly one network listener: the optional phone-remote listener
+in `app/remote/`. It lets GrabLine for Android, paired with this PC, add
+downloads and control the queue over the local network. The wire format is in
+[protocol/PROTOCOL.md](../protocol/PROTOCOL.md) (section numbers below refer
+to it). The browser extension still uses Native Messaging stdio and no port.
+
+It is the only new way into the computer, so it has the strictest rules in
+the app. Each rule has a QA test (ids from the phone project's QA table).
+
+### Rules
+
+| Area | Rule | QA |
+|---|---|---|
+| When it exists | Off by default. No socket exists until you open **Pair a phone**. | QA-11 |
+| | On only while a phone is paired or a pairing code is showing. | QA-11 |
+| | Off again within 1 s of the last phone being removed, and when an unused pairing code expires or is closed. | QA-11 |
+| | The Settings switch "Listener on or off" closes every connection; pairings are kept. | - |
+| Where it listens | One socket per local address in these ranges only: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `fc00::/7`, `fe80::/10`. | QA-11 |
+| | Never `0.0.0.0` or `::`. Never a public address. | QA-11 |
+| | Never UPnP or any router port mapping. | QA-11 |
+| | A connection from a peer outside those ranges is closed before the TLS handshake. | QA-11 |
+| | Addresses are re-read on every network change and at least every 5 s. | QA-12 |
+| | A hidden test setting (`remote_loopback_test`, off by default, not in the UI) also binds `127.0.0.1` for the Android emulator. | - |
+| Identity of the PC | TLS 1.2 or newer with a self-signed P-256 certificate made on first use. The phone pins the SHA-256 of its public key (SPKI) and refuses any other key. There is no "connect anyway". | QA-07 |
+| | The pin travels in the pairing QR code. In manual entry, the pairing proofs bind the code to the key that was shown. | QA-07 |
+| Pairing | A code is 12 characters (60 bits), single-use, valid for 2 minutes. | QA-02 |
+| | The fifth wrong proof locks pairing. A new code needs a new action from you. | QA-03 |
+| | The code is never sent. The phone sends an HMAC proof bound to this connection, the PC key and the phone key. The PC proves itself back. | QA-01 |
+| | Every new phone needs your **Allow** on the PC. Deny stores nothing. | QA-04 |
+| Identity of the phone | The phone's key is a P-256 key in Android Keystore and cannot be exported. The PC stores only the public key. | QA-06 |
+| | Every connection starts with a signed transcript (nonce, PC pin, device id). A signature made for another PC never verifies here. | QA-05 |
+| | Before login only `pair` and `auth` are accepted, in frames of 4 KB or less, within 10 s. Anything else gets one generic `unauthorized` and no state is read. | QA-05 |
+| | Unknown device, removed device and bad signature look the same to the sender. | QA-05 |
+| Revocation | Removing a phone on the PC deletes its key and closes its connections at once. Its next request fails within 1 s. | QA-06 |
+| | Resetting phone connections deletes the certificate, so every phone refuses the PC until it pairs again. | QA-07 |
+| Limits | Frames of 1 MB at most; a larger one closes that connection and the listener keeps running. | QA-09 |
+| | Per-device rate limit (20 requests/s, burst 40; costly requests cost 5) and a flood close. The listener never runs on the UI thread. | QA-10 |
+| | At most 8 paired phones, 2 connections per phone, 8 unauthenticated connections. | QA-10 |
+| Input | Strict JSON schema: wrong types and bad patterns are refused, never coerced. | QA-09 |
+| | Fields that name a location (`path`, `folder`, `dir`, `destDir`, `dest_dir`, `filename`, `file`, `saveAs`) are refused with `forbidden`. | QA-08, QA-40 |
+| | Browser fields (`cookie`, `referer`, `userAgent`) are ignored and never stored. | - |
+| What a phone can reach | Folders and queues only by ids the PC issued; the PC turns them into paths itself. | QA-08 |
+| | Jobs only by job id, never by path. Files can be copied only from finished jobs. | QA-40 |
+| | Nothing the PC sends back contains a filesystem path, and links lose any `user:password@`. | - |
+| Your screen | A phone link never opens a dialog and never carries cookies. It uses the unattended add path with the quality you chose, or `best`. | QA-13 |
+| Downloaded files | Unchanged. Phone links use the normal pipeline and the same advisory checks. Nothing is opened automatically. | - |
+| Browser pages | A handshake with an `Origin` header is refused, so a web page cannot open a connection to it. | Listener tests (P1-D11) |
+| Logs | Pairing codes, nonces, proofs, signatures and keys are never logged. | - |
+
+### CI gate
+
+`scripts/check_no_listen.py` fails the build if any code outside `app/remote/`
+opens a listening socket or server. It allows listening only in `app/remote/`,
+which must stay off by default.
+
+### Threats and the rules that stop them
+
+| Threat | Rule | QA |
+|---|---|---|
+| Someone on the same Wi-Fi sends commands | Off until pairing; only `pair`/`auth` before login; signed login bound to this PC; one generic `unauthorized`; pre-login limits | QA-05, QA-11 |
+| A fake PC impersonates yours | SPKI pin from the QR code; custom trust check with no bypass; proofs tie pairing to the PC key, including manual entry | QA-07 |
+| Pairing code guessed or reused | 60-bit code, never sent; single use; 2 minutes; lock after 5 wrong proofs; Allow prompt | QA-01 to QA-04 |
+| A stolen phone keeps access | Removal closes its connections at once and deletes its key; the key is non-exportable; the PC holds no secret that can act as the phone | QA-06 |
+| The phone writes anywhere on the PC | Folders and queues by PC-issued id only; jobs by id; path-bearing fields refused; no paths in replies | QA-08, QA-40 |
+| Oversized or malformed messages | 1 MB cap (4 KB before login); strict schema; unknown type `unsupported`; per-device rate limit; flood close | QA-09, QA-10 |
+| The listener exposed to the internet | Private and link-local binds only; peer address check; no UPnP; `Origin` refused; off after the last unpairing | QA-11 |
+| Downloaded files are dangerous | Same advisory checks as the desktop: warn, never quarantine, never auto-open; `fetch` only copies bytes | - |
+
+### Not defended
+
+- A phone you paired and allowed. Every paired phone may use every phone
+  message, the same as someone sitting at the PC's queue. There are no roles.
+- Anyone who can already read your GrabLine data folder as you. The
+  certificate key is readable by your account only, but that is no defence
+  against your own account.
+- Traffic analysis on the local network: a nearby device can see that a PC
+  accepts connections on the port, and the unauthenticated `hello` shows only
+  the PC's id and name.
+- A router or network that forwards the port to the internet by hand. GrabLine
+  never asks for that and binds no public address.
+
 ## What is advisory (and stays that way)
 
 VirusTotal / local virus scan, Safe Browsing, the HTTP-vs-HTTPS notice, and the
@@ -162,7 +247,9 @@ deliberate product decision, not an oversight.
   `file://`/`user:pass@` URL, a huge download the user chose.
 - The engines are not sandboxed in containers (out of scope; would break the
   product). yt-dlp, FFmpeg, and libtorrent run with the app's own privileges.
-- No app-level authentication: GrabLine is a single-user desktop app.
+- No app-level authentication for the desktop window: GrabLine is a
+  single-user desktop app. The phone listener is the exception: it
+  authenticates every phone (see above).
 - Attacks that require local admin the attacker would already have.
 
 ## Reporting a vulnerability

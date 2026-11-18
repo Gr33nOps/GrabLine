@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Flow control: the phone has written everything below 'received' to disk. No id and no reply.",
+  "state": "authed",
+  "message": {
+    "type": "fetchAck",
+    "streamId": 7,
+    "received": 2097152
+  }
+}

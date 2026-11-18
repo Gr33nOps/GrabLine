@@ -42,6 +42,12 @@ hidden += ["libtorrent", "psutil"]
 # boto3's bundled service data) so SFTP/S3/credential storage work when frozen.
 for cloud_pkg in ("paramiko", "boto3", "botocore", "keyring", "keyring.backends"):
     hidden += collect_submodules(cloud_pkg)
+# Phone remote: TLS is Python's ssl (bundled with the interpreter), the PC
+# certificate and device keys use cryptography, the pairing QR uses segno.
+# Qt's own TLS plugin is not needed by the listener.
+for remote_pkg in ("cryptography", "segno"):
+    hidden += collect_submodules(remote_pkg)
+hidden += ["ssl", "_ssl"]
 boto_datas, boto_bins, boto_hidden = collect_all("botocore")
 hidden += boto_hidden
 # Ship the browser extension inside the app so the Browser Setup wizard can

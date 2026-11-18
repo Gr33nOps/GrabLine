@@ -1,0 +1,12 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The user pressed Deny (QA-04). The phone deletes the key it generated and shows 'PC declined'. The connection is then closed (4403).",
+  "state": "preauth",
+  "message": {
+    "id": "r-1",
+    "type": "error",
+    "protocolVersion": 6,
+    "code": "pairingDenied",
+    "message": "pairing was declined on the PC"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "direction": "phone-to-pc",
+  "description": "A queue id that does not exist.",
+  "state": "authed",
+  "message": {
+    "id": "x-1",
+    "type": "download",
+    "url": "https://example.com/a.zip",
+    "requestId": "req-bad-0000000000000001",
+    "queueId": 999
+  },
+  "expectError": "notFound",
+  "precondition": "no queue with id 999"
+}

@@ -1,0 +1,9 @@
+{
+  "direction": "phone-to-pc",
+  "description": "A request without type.",
+  "state": "authed",
+  "message": {
+    "id": "x-4"
+  },
+  "expectError": "badRequest"
+}

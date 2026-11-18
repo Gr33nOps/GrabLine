@@ -9,7 +9,7 @@ the app is visually consistent everywhere).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette
+from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.ui import design
@@ -43,6 +43,18 @@ def remember_default(app: QApplication) -> None:
     """No-op retained for callers/tests; the design system owns the look."""
 
 
+_system_family_cache: list[str] | None = None
+
+
+def _system_families(font: QFont) -> list[str]:
+    """The font families in use before Plex was applied (remembered once)."""
+    global _system_family_cache
+    if _system_family_cache is None:
+        fams = [f for f in font.families() if f] or [font.family()]
+        _system_family_cache = [f for f in fams if f != design.SANS_FAMILY]
+    return _system_family_cache
+
+
 def apply_theme(app: QApplication, mode: str, accent: str | None = None) -> None:
     """Apply "system", "light", or "dark" - optionally re-tinted around an
     ``accent`` hex (Settings → Appearance; None/"" = the brand blue)."""
@@ -54,6 +66,12 @@ def apply_theme(app: QApplication, mode: str, accent: str | None = None) -> None
     if accent:
         palette = design.with_accent(palette, accent)
     _current = palette
+    if design.load_brand_fonts():  # IBM Plex Sans; else keep the system font
+        font = app.font()
+        # Plex first; the old system family stays as the per-glyph fallback
+        # (Plex has no U+25CF status dot, for one).
+        font.setFamilies([design.SANS_FAMILY, *_system_families(font)])
+        app.setFont(font)
     app.setStyle("Fusion")  # a consistent base for the stylesheet everywhere
     app.setPalette(design.qpalette(_current))
     app.setStyleSheet(design.stylesheet(_current))

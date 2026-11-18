@@ -1,0 +1,438 @@
+"""Settings -> Phones and PCs: turn the remote on or off, set its port, and choose
+whether linked PCs may see and control this PC's downloads; and the pairing
+dialog the Devices page opens.
+
+The page talks to ``app.remote.service.RemoteService`` only through its public
+API and Qt signals. The pairing code lives in the pairing dialog and nowhere
+else: it is never logged, stored or put in an accessible description.
+"""
+
+from __future__ import annotations
+
+import io
+import time
+from collections.abc import Callable
+from typing import Any
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.core.i18n import t
+from app.ui import chrome, components, design, theme
+
+_QR_TARGET_PX = 260
+_QUIET_ZONE_MODULES = 4
+
+
+def qr_pixmap(uri: str, target: int = _QR_TARGET_PX) -> QPixmap:
+    """The pairing QR as dark modules on white with a quiet zone, whole-pixel
+    scaled to about ``target`` px so it stays crisp and scans in dark theme."""
+    import segno
+
+    qr = segno.make(uri, error="m")
+    modules = qr.symbol_size(scale=1, border=_QUIET_ZONE_MODULES)[0]
+    scale = max(1, target // modules)
+    buffer = io.BytesIO()
+    qr.save(
+        buffer, kind="png", scale=scale, border=_QUIET_ZONE_MODULES, dark="#000000", light="#ffffff"
+    )
+    pixmap = QPixmap()
+    pixmap.loadFromData(buffer.getvalue(), "PNG")
+    return pixmap
+
+
+def _wrapping(label: QLabel) -> QLabel:
+    label.setWordWrap(True)
+    label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+    label.setMinimumWidth(0)
+    label.setTextFormat(Qt.TextFormat.PlainText)
+    return label
+
+
+def _mono_font(point_size: int) -> QFont:
+    font = QFont("IBM Plex Mono")
+    font.setStyleHint(QFont.StyleHint.Monospace)
+    font.setFixedPitch(True)
+    font.setPointSize(point_size)
+    return font
+
+
+def _countdown_text(seconds: int) -> str:
+    seconds = max(0, seconds)
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+class PairingDialog(chrome.Dialog):
+    """Shows the QR code and manual code while a pairing is open. Not modal;
+    closing it cancels the pairing."""
+
+    def __init__(self, service: Any, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._service = service
+        self._active = False
+        self._expires_at = 0
+        self.setModal(False)
+        self.setWindowTitle(t("Pair a phone or PC"))
+        self.setMinimumWidth(340)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        self.instruction = _wrapping(
+            components.role_label(t("Scan this code with GrabLine on your phone."), "muted")
+        )
+        layout.addWidget(self.instruction)
+
+        # White card so the code scans the same in light and dark themes.
+        self.qr_frame = QFrame()
+        self.qr_frame.setStyleSheet("QFrame { background: #ffffff; border-radius: 8px; }")
+        qr_layout = QVBoxLayout(self.qr_frame)
+        qr_layout.setContentsMargins(8, 8, 8, 8)
+        self.qr_label = QLabel()
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_label.setFixedSize(_QR_TARGET_PX + 16, _QR_TARGET_PX + 16)
+        self.qr_label.setAccessibleName(t("Pairing QR code"))
+        qr_layout.addWidget(self.qr_label)
+        layout.addWidget(self.qr_frame, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self.manual_caption = _wrapping(
+            components.role_label(
+                t("Can't scan, or linking a PC? Type this into GrabLine on the other device:"),
+                "muted",
+            )
+        )
+        layout.addWidget(self.manual_caption)
+        self.manual_label = QLabel()
+        self.manual_label.setFont(_mono_font(design.FONT["body"]))
+        self.manual_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.manual_label.setWordWrap(True)
+        self.manual_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        self.manual_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.manual_label.setAccessibleName(t("Pair a phone or PC"))
+        layout.addWidget(self.manual_label)
+
+        self.countdown_label = components.role_label("", "strong", bold=True)
+        layout.addWidget(self.countdown_label)
+
+        self.banner = _wrapping(QLabel(""))
+        self.banner.setStyleSheet(f"color: {theme.current().warn};")
+        self.banner.hide()
+        layout.addWidget(self.banner)
+
+        self.status_label = _wrapping(QLabel(""))
+        self.status_label.hide()
+        layout.addWidget(self.status_label)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        self.new_code_button = components.accent_button(t("New code"))
+        self.new_code_button.setAccessibleName(t("New code"))
+        self.new_code_button.clicked.connect(self._new_code)
+        self.new_code_button.hide()
+        buttons.addWidget(self.new_code_button)
+        self.close_button = QPushButton(t("Close"))
+        self.close_button.setAccessibleName(t("Close"))
+        self.close_button.clicked.connect(self.close)
+        buttons.addWidget(self.close_button)
+        layout.addLayout(buttons)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._tick)
+
+    # ------------------------------------------------------------ service
+
+    def show_code(self, qr_uri: str, manual_text: str, expires_at_unix: int) -> None:
+        self._active = True
+        self._expires_at = expires_at_unix
+        self.qr_label.setPixmap(qr_pixmap(qr_uri))
+        self.manual_label.setText(manual_text)
+        self.qr_frame.show()
+        self.instruction.show()
+        self.manual_caption.show()
+        self.manual_label.show()
+        self.countdown_label.show()
+        self.banner.hide()
+        self.status_label.hide()
+        self.new_code_button.hide()
+        self._tick()
+        self._timer.start()
+
+    def show_locked_warning(self) -> None:
+        self.banner.setText(t("Too many wrong codes. Show a new code."))
+        self.banner.show()
+        self.new_code_button.show()
+
+    def finished_with(self, outcome: str) -> None:
+        """The service ended this pairing. The code is gone, so hide it."""
+        self._active = False
+        self._timer.stop()
+        if outcome == "cancelled":
+            return
+        self._hide_code()
+        if outcome == "approved":
+            self._set_status(t("Paired. It can now control GrabLine."))
+        elif outcome == "denied":
+            self._set_status(t("Pairing cancelled"))
+        elif outcome == "expired":
+            self.countdown_label.setText(t("Code expired"))
+            self.countdown_label.show()
+            self.new_code_button.show()
+        elif outcome == "locked":
+            self.show_locked_warning()
+        else:
+            self._set_status(t("Pairing failed. Try again."))
+            self.new_code_button.show()
+        self._fit_to_content()
+
+    # ------------------------------------------------------------- internal
+
+    def _hide_code(self) -> None:
+        self.qr_label.clear()
+        self.manual_label.clear()
+        self.qr_frame.hide()
+        self.instruction.hide()
+        self.manual_caption.hide()
+        self.manual_label.hide()
+        self.countdown_label.hide()
+
+    def _fit_to_content(self) -> None:
+        """Shrink to the remaining widgets once the QR area is hidden, so an end
+        state is a small message rather than a tall empty dialog."""
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        self.adjustSize()
+
+    def _set_status(self, text: str) -> None:
+        self.banner.hide()
+        self.status_label.setText(text)
+        self.status_label.show()
+
+    def _tick(self) -> None:
+        remaining = int(self._expires_at - time.time() + 0.999)
+        if remaining <= 0:
+            self._timer.stop()
+            self._expire()
+            return
+        self.countdown_label.setText(t("Code expires in {time}", time=_countdown_text(remaining)))
+
+    def _expire(self) -> None:
+        # Tell the service so the code stops working, then show the expired view.
+        if self._active:
+            self._service.cancel_pairing()
+        self.finished_with("expired")
+
+    def _new_code(self) -> None:
+        self.new_code_button.hide()
+        self._service.start_pairing()
+
+    def done(self, result: int) -> None:
+        self._timer.stop()
+        if self._active:
+            self._active = False
+            self._service.cancel_pairing()
+        super().done(result)
+
+
+class PhonePage(QWidget):
+    """The Settings "Phones and PCs" page: the remote switch and its port, and
+    the sharing setting for linked PCs. Pairing, linking and the devices live on
+    the Devices page (``app.ui.devices_page``)."""
+
+    def __init__(
+        self,
+        service: Any,
+        parent: QWidget | None = None,
+        *,
+        open_devices: Callable[[], None] | None = None,
+        links: Any = None,
+    ) -> None:
+        super().__init__(parent)
+        self._service = service
+        self._links = links
+        self._error: str | None = None
+        self._listening = False
+
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self.setMinimumWidth(0)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        layout.addWidget(
+            _wrapping(
+                components.role_label(
+                    t(
+                        "Control GrabLine from your Android phone or another PC "
+                        "on the same network."
+                    ),
+                    "muted",
+                )
+            )
+        )
+
+        self.devices_hint = _wrapping(
+            components.role_label(t("Paired phones and PCs are listed in Devices."), "muted")
+        )
+        layout.addWidget(self.devices_hint)
+        devices_row = QHBoxLayout()
+        self.devices_button = components.accent_button(
+            t("Pair and manage phones and PCs in Devices")
+        )
+        self.devices_button.setAccessibleName(t("Pair and manage phones and PCs in Devices"))
+        if open_devices is not None:
+            self.devices_button.clicked.connect(lambda _checked=False: open_devices())
+        else:
+            self.devices_button.setEnabled(False)
+        devices_row.addWidget(self.devices_button)
+        devices_row.addStretch(1)
+        layout.addLayout(devices_row)
+
+        self.enabled_check = QCheckBox(t("Allow phones and PCs to connect"))
+        self.enabled_check.setAccessibleName(t("Allow phones and PCs to connect"))
+        self.enabled_check.setChecked(bool(service.enabled_setting()))
+        self.enabled_check.clicked.connect(self._toggle_enabled)
+        layout.addWidget(self.enabled_check)
+
+        self.status_label = _wrapping(QLabel(""))
+        self.status_label.setAccessibleName(t("Allow phones and PCs to connect"))
+        layout.addWidget(self.status_label)
+
+        self.share_check = QCheckBox(t("Let linked PCs see and control downloads on this PC"))
+        self.share_check.setAccessibleName(t("Let linked PCs see and control downloads on this PC"))
+        self.share_check.setVisible(links is not None)
+        if links is not None:
+            self.share_check.setChecked(bool(links.shared_setting()))
+            self.share_check.clicked.connect(self._toggle_share)
+        layout.addWidget(self.share_check)
+
+        self.advanced_toggle = QToolButton()
+        self.advanced_toggle.setText(t("Advanced"))
+        self.advanced_toggle.setAccessibleName(t("Advanced"))
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self.advanced_toggle.toggled.connect(self._toggle_advanced)
+        layout.addWidget(self.advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.advanced_box = QWidget()
+        advanced_row = QHBoxLayout(self.advanced_box)
+        advanced_row.setContentsMargins(18, 0, 0, 0)
+        port_label = QLabel(t("Port:"))
+        self.port_spin = QSpinBox()
+        self.port_spin.setRange(1024, 65535)
+        self.port_spin.setValue(int(service.port_setting()))
+        self.port_spin.setAccessibleName(t("Port:"))
+        # Room for five digits plus the field padding and the step buttons.
+        self.port_spin.setMinimumWidth(self.port_spin.fontMetrics().horizontalAdvance("65535") + 64)
+        self.port_spin.setMaximumWidth(140)
+        self.port_spin.editingFinished.connect(self._apply_port)
+        port_label.setBuddy(self.port_spin)
+        advanced_row.addWidget(port_label)
+        advanced_row.addWidget(self.port_spin)
+        advanced_row.addStretch(1)
+        self.advanced_box.hide()
+        layout.addWidget(self.advanced_box)
+        layout.addStretch(1)
+
+        service.stateChanged.connect(self._on_state)
+        service.errorOccurred.connect(self._on_error)
+
+        self._listening = self._read_listening()
+        self._update_status()
+
+    # --------------------------------------------------------------- state
+
+    def _read_listening(self) -> bool:
+        try:
+            if not self._service.listener_created:
+                return False
+            return bool(self._service.listener.running)
+        except Exception:
+            return False
+
+    def _address_count(self) -> int:
+        try:
+            return len(self._service.listener.bound_addresses())
+        except Exception:
+            return 0
+
+    def refresh(self) -> None:
+        """Re-read the switch and the status line."""
+        self._update_status()
+
+    def _update_status(self) -> None:
+        if self._error == "portInUse":
+            text = t(
+                "Port {port} is in use. Choose another in Advanced.", port=self.port_spin.value()
+            )
+        elif self._error == "noAddress":
+            text = t("This PC isn't on a private network.")
+        elif self._error is not None:
+            text = t("Connections could not start.")
+        elif not self._service.enabled_setting():
+            text = t("Phones and PCs can't connect while this is off.")
+        elif self._listening:
+            count = self._address_count()
+            text = (
+                t("Listening on 1 address.")
+                if count == 1
+                else t("Listening on {count} addresses.", count=count)
+            )
+        else:
+            text = t("Nothing is listening until you pair a phone or PC.")
+        self.status_label.setText(text)
+
+    def _on_state(self, running: bool) -> None:
+        self._listening = bool(running)
+        if running:
+            self._error = None
+        self._update_status()
+
+    def _on_error(self, code: str) -> None:
+        self._error = code or "error"
+        self._update_status()
+
+    # ------------------------------------------------------------- actions
+
+    def _toggle_enabled(self, checked: bool) -> None:
+        self._error = None
+        self._service.set_enabled(bool(checked))
+        self._update_status()
+
+    def _toggle_share(self, checked: bool) -> None:
+        if self._links is not None:
+            self._links.set_shared(bool(checked))
+
+    def _toggle_advanced(self, shown: bool) -> None:
+        self.advanced_box.setVisible(shown)
+        self.advanced_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if shown else Qt.ArrowType.RightArrow
+        )
+
+    def _apply_port(self) -> None:
+        port = self.port_spin.value()
+        if port == self._service.port_setting():
+            return
+        self._error = None
+        self._service.set_port(port)
+        self._update_status()
+
+
+__all__ = ["PairingDialog", "PhonePage", "qr_pixmap"]

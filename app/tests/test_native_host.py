@@ -435,3 +435,27 @@ def test_captured_media_does_not_redirect_unrelated_files():
     chunk = "https://rr1.googlevideo.com/videoplayback?sq=1"
     assert captured_video_page(chunk, "https://youtube.com.evil.test/watch?v=x") == chunk
     assert captured_video_page(chunk, None) == chunk
+
+
+# ------------------------------------------ protocol 6: no phone impersonation
+
+
+def test_protocol_version_is_six(db: Database):
+    from app.native_host import host
+
+    assert host.PROTOCOL_VERSION == 6
+    assert handle_message(db, {"type": "ping"})["protocolVersion"] == 6
+
+
+@pytest.mark.parametrize("claimed", ["phone", "phone-links", "Phone", "  PHONE-links  ", "phoneX"])
+def test_extension_cannot_claim_a_phone_source(db: Database, claimed: str):
+    handle_message(db, {"type": "download", "url": "https://example.com/a.zip", "source": claimed})
+    handoffs = db.claim_handoffs()
+    assert [h.source for h in handoffs] == ["extension"]
+
+
+def test_other_extension_sources_are_kept(db: Database):
+    handle_message(
+        db, {"type": "download", "url": "https://example.com/a.zip", "source": "context-menu"}
+    )
+    assert db.claim_handoffs()[0].source == "context-menu"

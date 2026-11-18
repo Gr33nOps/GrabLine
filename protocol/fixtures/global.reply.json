@@ -1,0 +1,17 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The global state after the action (here: after setSpeedLimit).",
+  "state": "authed",
+  "message": {
+    "id": "r-24",
+    "type": "global",
+    "protocolVersion": 6,
+    "state": {
+      "paused": false,
+      "speedLimit": 2097152,
+      "speed": 2097152,
+      "active": 1,
+      "queued": 0
+    }
+  }
+}

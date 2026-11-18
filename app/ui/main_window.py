@@ -106,6 +106,7 @@ from app.ui import (
     guard,
     icons,
     motion,
+    remote_add,
     theme,
     threads,
     work_threads,
@@ -116,7 +117,7 @@ from app.ui.cloud_dialog import CloudFolderDialog, prompt_cloud_url
 from app.ui.dashboard_view import DashboardView
 from app.ui.detail_drawer import DetailDrawer
 from app.ui.dupes_dialog import DupesDialog
-from app.ui.format import human_bytes
+from app.ui.format import human_bytes, plain_tooltip
 from app.ui.gallery_panel import GalleryPanel
 from app.ui.gif_dialog import GifDialog
 from app.ui.inspector_dialog import InspectorDialog
@@ -243,6 +244,15 @@ class MainWindow(QMainWindow):
         #: touches the database after it closes.
         self._shutting_down = False
 
+        # Phone remote: the unattended add path and the listener service
+        # (created on demand; the listener stays off until a phone is paired).
+        # Before the shell, because the sidebar only offers Devices with it.
+        self._remote_adder: remote_add.UnattendedAdder | None = None
+        self._remote_service: Any = None
+        #: This PC's links to other PCs (the client side, PROTOCOL.md section 21).
+        self._link_service: Any = None
+        self._start_remote_service()
+
         # Shell: a 48px icon rail on the left, the stacked content on the right.
         self._pages = QStackedWidget()
         self._pages.addWidget(self._build_downloads_page())  # index 0
@@ -259,6 +269,9 @@ class MainWindow(QMainWindow):
             "queue": self._make_queue_page,
             "settings": self._make_settings_page,
         }
+        self._devices_page: Any = None
+        if self._remote_service is not None:
+            self._page_factories["devices"] = self._make_devices_page
         shell = QWidget()
         row = QHBoxLayout(shell)
         row.setContentsMargins(0, 0, 0, 0)
@@ -355,9 +368,12 @@ class MainWindow(QMainWindow):
             ("downloads", "download", t("Downloads"), lambda: self._switch_view("downloads")),
             ("dashboard", "dashboard", t("Dashboard"), lambda: self._switch_view("dashboard")),
             ("queue", "queue", t("Queue manager"), lambda: self._switch_view("queue")),
+            ("devices", "phone", t("Devices"), lambda: self._switch_view("devices")),
             ("settings", "settings", t("Settings"), lambda: self._switch_view("settings")),
         )
         for key, icon_name, tip, handler in nav:
+            if key == "devices" and self._remote_service is None:
+                continue  # the phone remote failed to start: nothing to manage
             btn = components.SidebarButton(icon_name, tip)
             btn.clicked.connect(handler)
             self._nav[key] = btn
@@ -602,7 +618,7 @@ class MainWindow(QMainWindow):
         p = theme.current()
         for key, btn in self._filter_buttons.items():
             active = key == self._filter
-            color = p.accent if active else p.text2
+            color = p.accent_text if active else p.text2
             border = p.accent if active else "transparent"
             weight = 600 if active else 400
             btn.setStyleSheet(
@@ -716,7 +732,21 @@ class MainWindow(QMainWindow):
     def _make_settings_page(self) -> QWidget:
         from app.ui.settings_view import SettingsView
 
-        return SettingsView(self.settings, self._on_settings_applied)
+        return SettingsView(
+            self.settings,
+            self._on_settings_applied,
+            remote_service=self._remote_service,
+            open_devices=lambda: self._switch_view("devices"),
+            link_service=self._link_service,
+        )
+
+    def _make_devices_page(self) -> QWidget:
+        from app.ui.devices_page import DevicesPage
+
+        page = DevicesPage(self._remote_service, links=self._link_service)
+        page.status.connect(lambda text: self.statusBar().showMessage(text, 6000))
+        self._devices_page = page
+        return page
 
     def _page_for(self, key: str) -> int | None:
         """This page's index in the stack, building it on first use."""
@@ -763,6 +793,8 @@ class MainWindow(QMainWindow):
         for btn in self._retintable:
             btn.retint()
         self._drawer.retint()
+        if self._devices_page is not None:
+            self._devices_page.retint()
         self._style_filter_buttons()
         # Rebuild rows so per-row widgets (pills, bars) repaint in the new theme.
         self._row_job_ids = []
@@ -798,6 +830,7 @@ class MainWindow(QMainWindow):
             "nav.downloads": lambda: self._switch_view("downloads"),
             "nav.dashboard": lambda: self._switch_view("dashboard"),
             "nav.queue": lambda: self._switch_view("queue"),
+            "nav.devices": lambda: self._switch_view("devices"),
             "nav.settings": lambda: self._switch_view("settings"),
             "nav.next": lambda: self._cycle_page(1),
             "nav.prev": lambda: self._cycle_page(-1),
@@ -868,7 +901,11 @@ class MainWindow(QMainWindow):
             ShortcutsDialog(self._shortcuts.effective(), self).exec()
 
     def _cycle_page(self, delta: int) -> None:
-        order = ("downloads", "dashboard", "queue", "settings")
+        order = tuple(
+            key
+            for key in ("downloads", "dashboard", "queue", "devices", "settings")
+            if key in self._nav
+        )
         try:
             index = order.index(self._current_page)
         except ValueError:
@@ -984,6 +1021,11 @@ class MainWindow(QMainWindow):
         bounded operations (a subprocess convert, a network resolve), so the
         wait terminates."""
         self._shutting_down = True
+        if self._remote_service is not None:
+            # Close phone connections first so no request reaches a dying window.
+            self._remote_service.shutdown()
+        if self._link_service is not None:
+            self._link_service.shutdown()
         self._dashboard_view.shutdown()
         for timer in (self._timer, self._handoff_timer, self._rss_timer, self._watch_timer):
             timer.stop()
@@ -1012,6 +1054,17 @@ class MainWindow(QMainWindow):
     def _drain_handoffs(self) -> None:
         seen: set[str] = set()
         for handoff in self.manager.db.claim_handoffs():
+            if handoff.source == remote_add.PHONE_SOURCE:
+                # A paired phone: no one is at the PC, so never a dialog.
+                self._phone_adder().add(handoff)
+                continue
+            if handoff.source == remote_add.PHONE_LINKS_SOURCE:
+                # Many links from a phone: each its own unattended add, no picker.
+                for link in handoff.payload:
+                    self._phone_adder().add(
+                        replace(handoff, url=link, source=remote_add.PHONE_SOURCE, payload=())
+                    )
+                continue
             # One browser click can deposit the same URL many times (extension
             # retry / dual webRequest+onCreated). Claiming once still left a
             # batch of identical rows - collapse them here so we only open one
@@ -1050,6 +1103,89 @@ class MainWindow(QMainWindow):
                     headers=handoff.headers,
                     from_browser=True,
                 )
+
+    def _start_remote_service(self) -> None:
+        """The phone remote. Its listener opens no socket until a phone is
+        paired or a pairing code is showing; a failure here never stops the
+        app from starting."""
+        try:
+            from app.remote.service import RemoteService
+
+            service = RemoteService(self.manager, self.settings, self.resolver, self)
+            service.start()
+        except Exception:
+            log.exception("phone remote unavailable")
+            return
+        self._remote_service = service
+        # Links to other PCs: each one connects out, so nothing listens here.
+        try:
+            from app.remote.client.service import LinkService
+
+            links = LinkService(self.manager, self)
+            links.start()
+        except Exception:
+            log.exception("PC links unavailable")
+            return
+        self._link_service = links
+
+    def _add_send_to_phone_menu(self, menu: QMenu) -> dict[QAction, str | None]:
+        """A "Send to phone" submenu: one entry per paired phone plus "Any
+        phone". Returns action -> device id (None = any phone)."""
+        service = self._remote_service
+        phones = (
+            [d for d in service.store.list() if getattr(d, "kind", "phone") == "phone"]
+            if service is not None
+            else []
+        )
+        send_menu = menu.addMenu(t("Send to phone"))
+        send_menu.setEnabled(bool(phones))
+        actions: dict[QAction, str | None] = {}
+        if not phones:
+            send_menu.setToolTip(t("Pair a phone in Devices"))
+            return actions
+        for device in phones:
+            actions[send_menu.addAction(device.name)] = device.device_id
+        send_menu.addSeparator()
+        actions[send_menu.addAction(t("Any phone"))] = None
+        return actions
+
+    def _send_to_phone(self, device_id: str | None, view: JobView) -> None:
+        service = self._remote_service
+        if service is None:
+            return
+        queued = service.queue_for_phone(device_id, view.url, view.display_name)
+        self.statusBar().showMessage(
+            t("Sent to your phone") if queued else t("This link cannot be sent to a phone"), 3000
+        )
+
+    def _phone_adder(self) -> remote_add.UnattendedAdder:
+        if self._remote_adder is None:
+            self._remote_adder = remote_add.UnattendedAdder(
+                self.manager,
+                self.resolver,
+                self.settings,
+                resolve_folder=self._phone_folder,
+                queue_exists=self._queue_exists,
+                on_outcome=self._on_phone_outcome,
+                parent=self,
+            )
+        return self._remote_adder
+
+    def _phone_folder(self, folder_id: str) -> Path | None:
+        """A folder id the phone chose, mapped back to a path only if it is
+        one of the PC's own download folders (never a path from the phone)."""
+        service = self._remote_service
+        return service.resolve_folder(folder_id) if service is not None else None
+
+    def _queue_exists(self, queue_id: int) -> bool:
+        return any(queue.id == queue_id for queue in self.manager.db.list_queues())
+
+    def _on_phone_outcome(self, outcome: remote_add.AddOutcome) -> None:
+        service = self._remote_service
+        if service is not None:
+            service.add_outcome(outcome)
+        if outcome.result == "queued":
+            self.refresh()
 
     def _open_gallery(self, urls: list[str], page_title: str | None) -> None:
         """F2.2: the extension collected a page's images - pick and batch."""
@@ -2269,6 +2405,7 @@ class MainWindow(QMainWindow):
         copy_magnet = menu.addAction(t("Copy magnet link"))
         copy_magnet.setVisible(view.kind is JobKind.TORRENT)
         redownload = menu.addAction(t("Download again"))
+        send_actions = self._add_send_to_phone_menu(menu)
         # Convert to… - every FFmpeg target that makes sense for this file,
         # grouped Video / Audio / Image, plus the tuned GIF dialog.
         ffmpeg_path = find_ffmpeg(self.settings)
@@ -2369,6 +2506,8 @@ class MainWindow(QMainWindow):
             self._copy_magnet(view)
         elif chosen is redownload:
             self.begin_add_url(view.url, allow_duplicate=True)
+        elif chosen in send_actions:
+            self._send_to_phone(send_actions[chosen], view)
         elif to_gif is not None and chosen is to_gif and ffmpeg_path is not None:
             GifDialog(ffmpeg_path, file_path, self).exec()
         elif chosen in convert_actions and ffmpeg_path is not None:
@@ -3347,12 +3486,20 @@ class MainWindow(QMainWindow):
     def _update_status_info(self, views: list[JobView]) -> None:
         active = sum(1 for v in views if v.status is JobStatus.DOWNLOADING)
         done = sum(1 for v in views if v.status is JobStatus.COMPLETED)
-        counts = t(
-            "{total} items · {active} active · {done} completed",
-            total=len(views),
-            active=active,
-            done=done,
-        )
+        if len(views) == 1:
+            counts = t(
+                "{total} item · {active} active · {done} completed",
+                total=len(views),
+                active=active,
+                done=done,
+            )
+        else:
+            counts = t(
+                "{total} items · {active} active · {done} completed",
+                total=len(views),
+                active=active,
+                done=done,
+            )
         self._status_info.setText(f"{counts}     GrabLine v{__version__} · " + t("No telemetry"))
 
     def _restore_selection(self) -> None:
@@ -3586,7 +3733,7 @@ class MainWindow(QMainWindow):
         if pill is not None:
             previous = pill.full_text()
             pill.set_status(view.status.value, view.queue_name)
-            pill.setToolTip(view.error or pill.full_text())
+            pill.setToolTip(plain_tooltip(view.error or pill.full_text()))
             if pill.full_text() != previous:
                 self._status_width_dirty = True
 

@@ -161,3 +161,65 @@ def test_phase0_database_migrates_in_place(tmp_path: Path):
         assert smart.kind is JobKind.SMART
     finally:
         db.close()
+
+
+_OLD_HANDOFFS_SCHEMA = """
+CREATE TABLE handoffs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    url        TEXT NOT NULL,
+    page_url   TEXT,
+    page_title TEXT,
+    source     TEXT NOT NULL DEFAULT 'extension',
+    payload    TEXT NOT NULL DEFAULT '[]',
+    quality    TEXT,
+    headers    TEXT NOT NULL DEFAULT '{}',
+    claimed    INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
+
+def test_handoff_options_roundtrip(db: Database):
+    opts = {"quality": "best", "audio_only": False, "n": 2}
+    db.add_handoff("http://x.test/v", source="phone", options=opts)
+    db.add_handoff("http://x.test/w", source="phone")
+    first, second = db.claim_handoffs()
+    assert first.source == "phone"
+    assert first.options == opts
+    assert second.options == {}
+
+
+def test_handoff_options_stored_compact_and_sorted(db: Database):
+    db.add_handoff("http://x.test/v", options={"b": 1, "a": 2})
+    raw = db._conn.execute("SELECT options FROM handoffs").fetchone()[0]
+    assert raw == '{"a":2,"b":1}'
+
+
+def test_handoff_options_migrate_old_database(tmp_path: Path):
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(_OLD_HANDOFFS_SCHEMA)
+    conn.execute("INSERT INTO handoffs (url, source) VALUES ('http://x.test/old', 'phone')")
+    conn.commit()
+    conn.close()
+    database = Database(path)
+    try:
+        cols = {r["name"] for r in database._conn.execute("PRAGMA table_info(handoffs)")}
+        assert "options" in cols
+        database.add_handoff("http://x.test/new", options={"k": "v"})
+        old, new = database.claim_handoffs()
+        assert old.options == {}
+        assert new.options == {"k": "v"}
+    finally:
+        database.close()
+
+
+def test_handoff_malformed_options_become_empty(db: Database, caplog):
+    for bad in ("{not json", "[1, 2]", "null"):
+        hid = db.add_handoff("http://x.test/v")
+        with db._lock, db._conn:
+            db._conn.execute("UPDATE handoffs SET options = ? WHERE id = ?", (bad, hid))
+    with caplog.at_level("WARNING"):
+        claimed = db.claim_handoffs()
+    assert [h.options for h in claimed] == [{}, {}, {}]
+    assert "malformed options" in caplog.text

@@ -1,0 +1,9 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Phase 4. Links the PC user queued for this phone.",
+  "state": "authed",
+  "message": {
+    "id": "r-35",
+    "type": "outbox"
+  }
+}

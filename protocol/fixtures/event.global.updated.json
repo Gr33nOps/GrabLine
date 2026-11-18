@@ -1,0 +1,19 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Pause-all, speed limit or totals changed; at most one per second.",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "global.updated",
+    "seq": 7,
+    "ts": 1794700007,
+    "state": {
+      "paused": true,
+      "speedLimit": null,
+      "speed": 0,
+      "active": 0,
+      "queued": 1
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Bring the PC window forward; target is optional.",
+  "state": "authed",
+  "message": {
+    "id": "r-12",
+    "type": "focus",
+    "target": "settings"
+  }
+}

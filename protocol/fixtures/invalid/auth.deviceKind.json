@@ -1,0 +1,15 @@
+{
+  "direction": "phone-to-pc",
+  "description": "deviceKind is neither phone nor pc (checked before the signature).",
+  "state": "preauth",
+  "message": {
+    "id": "x-41",
+    "type": "auth",
+    "protocolVersion": 6,
+    "deviceId": "KsucBZHeyJguN6H0BzJQiw",
+    "signature": "MEUCIQDEkNVli0ImyofhN_Wu6-4n3CBTJwbf9PLA_GpHelIhsAIgGE-UGdJQPUyd2T_zsX1zDXFD6yn-mSsGqKBL67H4TCM",
+    "appVersion": "1.0.0",
+    "deviceKind": "toaster"
+  },
+  "expectError": "badRequest"
+}

@@ -61,6 +61,9 @@ jobs:
           fi
           echo "S1 gate passed"
 
+      - name: "Listener gate (only app/remote may listen on a port)"
+        run: python scripts/check_no_listen.py
+
       - name: Lint (ruff)
         run: ruff check .
 

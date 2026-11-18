@@ -73,6 +73,9 @@ and Deno are downloaded separately when needed; RAR/7Z extraction needs 7-Zip.
   difference between an unpaired host and an app that is closed.
 
 The extension communicates over local stdio pipes, with no listening web server.
+GrabLine opens no network port except the optional phone-remote listener, which
+is off until you pair a phone and listens only on your local network. See the
+[security model](docs/security-model.md#phone-remote-listener).
 Download takeover can be disabled in its popup. Generated browser files and POST
 exports stay in the browser; Firefox and Chromium use different takeover paths.
 
@@ -146,7 +149,7 @@ own; FFmpeg and Deno are provisioned separately rather than bundled in installer
 [support]: https://ko-fi.com/zain021xd
 [license]: LICENSE
 [ci]: https://github.com/GrabLine/GrabLine/actions/workflows/ci.yml
-[download-badge]: https://img.shields.io/github/v/release/GrabLine/GrabLine?label=download&color=0170fd
+[download-badge]: https://img.shields.io/github/v/release/GrabLine/GrabLine?label=download&color=2563EB
 [ci-badge]: https://img.shields.io/github/actions/workflow/status/GrabLine/GrabLine/ci.yml?branch=main&label=CI
 [license-badge]: https://img.shields.io/badge/license-AGPL--3.0--or--later-blue
 [amo-badge]: https://img.shields.io/amo/v/grabline-connect?label=Firefox&color=ff7139

@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Retry one job by id.",
+  "state": "authed",
+  "message": {
+    "id": "r-19",
+    "type": "control",
+    "jobId": 41,
+    "action": "retry"
+  }
+}

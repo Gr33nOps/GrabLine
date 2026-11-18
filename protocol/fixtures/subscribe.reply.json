@@ -1,0 +1,21 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Events start after this reply; fetch 'jobs' next for the snapshot.",
+  "state": "authed",
+  "message": {
+    "id": "r-40",
+    "type": "subscribed",
+    "protocolVersion": 6,
+    "topics": [
+      "jobs",
+      "global"
+    ],
+    "state": {
+      "paused": false,
+      "speedLimit": null,
+      "speed": 11534336,
+      "active": 1,
+      "queued": 0
+    }
+  }
+}

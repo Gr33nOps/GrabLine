@@ -1,0 +1,34 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Folders are opaque ids plus a display name; no path is ever sent in either direction.",
+  "state": "authed",
+  "message": {
+    "id": "r-26",
+    "type": "queues",
+    "protocolVersion": 6,
+    "queues": [
+      {
+        "id": 2,
+        "name": "Videos",
+        "paused": false
+      },
+      {
+        "id": 3,
+        "name": "Night queue",
+        "paused": true
+      }
+    ],
+    "folders": [
+      {
+        "id": "fRGVmYXVsdERpcg",
+        "name": "Downloads",
+        "isDefault": true
+      },
+      {
+        "id": "fQ3J5cHRvR3JhYg",
+        "name": "Movies",
+        "isDefault": false
+      }
+    ]
+  }
+}

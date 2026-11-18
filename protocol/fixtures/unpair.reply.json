@@ -1,0 +1,10 @@
+{
+  "direction": "pc-to-phone",
+  "description": "The device is deleted; the PC then closes the connection (1000).",
+  "state": "authed",
+  "message": {
+    "id": "r-50",
+    "type": "ok",
+    "protocolVersion": 6
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "direction": "phone-to-pc",
+  "description": "publicKey is not a P-256 SubjectPublicKeyInfo.",
+  "state": "preauth",
+  "message": {
+    "id": "x-19",
+    "type": "pair",
+    "protocolVersion": 6,
+    "deviceName": "Pixel 8",
+    "publicKey": "RkFLRS1LRVk",
+    "codeProof": "Smf4OozxeARyGSFxpYre8dXqDe8DFizLRu1JIcYkVaQ"
+  },
+  "expectError": "badRequest"
+}

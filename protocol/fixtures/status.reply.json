@@ -1,0 +1,25 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Same shape as the extension's reply: a URL with no job is 'pending'.",
+  "state": "authed",
+  "message": {
+    "id": "r-10",
+    "type": "status",
+    "protocolVersion": 6,
+    "appRunning": true,
+    "jobs": [
+      {
+        "url": "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+        "id": 41,
+        "status": "downloading",
+        "downloaded": 1288490188,
+        "total": 6144000000,
+        "name": "ubuntu-26.04-desktop-amd64.iso"
+      },
+      {
+        "url": "https://example.com/never-seen.zip",
+        "status": "pending"
+      }
+    ]
+  }
+}

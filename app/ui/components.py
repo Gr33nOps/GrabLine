@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from app.core.i18n import N_, t
 from app.ui import design, theme
+from app.ui.format import plain_tooltip
 from app.ui.icons import svg_icon
 
 _GRAPH_HISTORY = 120
@@ -33,6 +34,9 @@ _STATUS_LABEL = {
     "completed": N_("Completed"),
     "failed": N_("Failed"),
     "cancelled": N_("Cancelled"),
+    # A phone's download (the Devices page) can also be waiting or unknown.
+    "waiting": N_("Waiting"),
+    "unknown": N_("Unknown"),
 }
 
 
@@ -84,12 +88,15 @@ class ElidingLabel(QLabel):
             self.setFont(font)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)
+        # Plain text unless a caller opts in: these labels show names that come
+        # from files, phones and the network.
+        self.setTextFormat(Qt.TextFormat.PlainText)
         self.setText(text)
 
     def setText(self, text: str) -> None:
         self._full = text or ""
         # Only offer a tooltip when there is something the elision hides.
-        self.setToolTip(self._full if self._full else "")
+        self.setToolTip(plain_tooltip(self._full))
         self._render()
 
     def full_text(self) -> str:
@@ -120,6 +127,8 @@ class StatusPill(ElidingLabel):
     def set_status(self, status: str, queue_name: str | None = None) -> None:
         p = theme.current()
         color = design.status_color(p, status)
+        if status == "downloading":
+            color = p.accent_text  # as text it needs more contrast than the fill blue
         # setStyleSheet re-polishes the widget on every call, identical string
         # or not. The download list re-sends each row's status twice a second,
         # so skipping the unchanged ones is the difference between a quiet list
@@ -266,7 +275,7 @@ class SidebarButton(QPushButton):
 
     def retint(self) -> None:
         p = theme.current()
-        color = p.accent if self._active else p.text3
+        color = p.accent_text if self._active else p.text3
         self.setIcon(svg_icon(self._icon_name, color))
         bg = p.accent_dim if self._active else "transparent"
         self.setStyleSheet(

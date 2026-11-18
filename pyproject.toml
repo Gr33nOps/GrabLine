@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grabline"
-version = "1.32.15"
+version = "1.33.0"
 description = "GrabLine: a fast, free, open-source download manager with a browser button and a full quality picker."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,6 +28,10 @@ dependencies = [
     "keyring>=25.0",
     # Battery mode (pause on battery) needs a battery sensor.
     "psutil>=5.9",
+    # Phone remote: TLS certificates and device keys (cryptography) and the
+    # pairing QR code (segno, pure Python, no Pillow needed).
+    "cryptography>=42.0",
+    "segno>=1.6",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +51,7 @@ grabline = "app.__main__:main"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-"app.ui" = ["assets/*.png"]
+"app.ui" = ["assets/*.png", "assets/check.svg", "assets/fonts/*.ttf", "assets/fonts/OFL.txt"]
 "app" = ["i18n/*.json"]
 
 [tool.ruff]
@@ -84,7 +88,7 @@ check_untyped_defs = true
 warn_unreachable = false
 
 [[tool.mypy.overrides]]
-module = ["yt_dlp", "yt_dlp.*", "libtorrent", "paramiko", "paramiko.*", "boto3", "keyring", "pyftpdlib.*", "psutil", "httpx_socks"]
+module = ["yt_dlp", "yt_dlp.*", "libtorrent", "paramiko", "paramiko.*", "boto3", "keyring", "pyftpdlib.*", "psutil", "httpx_socks", "segno"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

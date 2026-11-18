@@ -1,0 +1,9 @@
+{
+  "direction": "phone-to-pc",
+  "description": "A request without id. The error reply has no id.",
+  "state": "authed",
+  "message": {
+    "type": "ping"
+  },
+  "expectError": "badRequest"
+}

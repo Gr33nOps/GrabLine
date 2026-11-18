@@ -1,0 +1,10 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Phase 4. Finished files the phone may copy.",
+  "state": "authed",
+  "message": {
+    "id": "r-30",
+    "type": "files",
+    "limit": 50
+  }
+}

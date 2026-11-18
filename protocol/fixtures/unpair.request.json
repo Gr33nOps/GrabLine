@@ -1,0 +1,9 @@
+{
+  "direction": "phone-to-pc",
+  "description": "The phone removes its own pairing.",
+  "state": "authed",
+  "message": {
+    "id": "r-50",
+    "type": "unpair"
+  }
+}

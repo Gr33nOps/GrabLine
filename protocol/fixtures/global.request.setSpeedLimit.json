@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Global action: setSpeedLimit.",
+  "state": "authed",
+  "message": {
+    "id": "r-24",
+    "type": "global",
+    "action": "setSpeedLimit",
+    "bytesPerSecond": 2097152
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Quality options, best first. Labels are the same set host.py accepts.",
+  "state": "authed",
+  "message": {
+    "id": "r-27",
+    "type": "analysis",
+    "protocolVersion": 6,
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "title": "Sample video",
+    "duration": 212,
+    "isPlaylist": false,
+    "count": 1,
+    "qualities": [
+      {
+        "label": "best",
+        "kind": "video",
+        "height": 1080,
+        "ext": "mp4",
+        "sizeBytes": 73400320
+      },
+      {
+        "label": "1080p",
+        "kind": "video",
+        "height": 1080,
+        "ext": "mp4",
+        "sizeBytes": 73400320
+      },
+      {
+        "label": "720p",
+        "kind": "video",
+        "height": 720,
+        "ext": "mp4",
+        "sizeBytes": 41943040
+      },
+      {
+        "label": "360p",
+        "kind": "video",
+        "height": 360,
+        "ext": "mp4",
+        "sizeBytes": null
+      },
+      {
+        "label": "mp3",
+        "kind": "audio",
+        "height": null,
+        "ext": "mp3",
+        "sizeBytes": null
+      },
+      {
+        "label": "m4a",
+        "kind": "audio",
+        "height": null,
+        "ext": "m4a",
+        "sizeBytes": 3496000
+      }
+    ]
+  }
+}

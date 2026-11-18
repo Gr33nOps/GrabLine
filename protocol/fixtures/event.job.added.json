@@ -1,0 +1,29 @@
+{
+  "direction": "pc-to-phone",
+  "description": "A job appeared. requestId is set when it came from this phone's download.",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "job.added",
+    "seq": 1,
+    "ts": 1794700001,
+    "job": {
+      "id": 41,
+      "url": "https://example.com/files/ubuntu-26.04-desktop-amd64.iso",
+      "name": "ubuntu-26.04-desktop-amd64.iso",
+      "status": "queued",
+      "kind": "direct",
+      "downloaded": 0,
+      "total": null,
+      "speed": 0,
+      "eta": null,
+      "queueId": null,
+      "createdAt": 1794700000,
+      "finishedAt": null,
+      "error": null,
+      "requestId": "req-0001-7b1e4c1a9f3d4e55",
+      "fetchable": false
+    }
+  }
+}

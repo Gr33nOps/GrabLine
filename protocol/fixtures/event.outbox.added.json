@@ -1,0 +1,13 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Phase 4. The PC queued a link for this phone.",
+  "state": "authed",
+  "message": {
+    "type": "event",
+    "protocolVersion": 6,
+    "event": "outbox.added",
+    "seq": 8,
+    "ts": 1794700008,
+    "count": 1
+  }
+}

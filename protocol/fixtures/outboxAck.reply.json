@@ -1,0 +1,11 @@
+{
+  "direction": "pc-to-phone",
+  "description": "How many rows were deleted.",
+  "state": "authed",
+  "message": {
+    "id": "r-36",
+    "type": "ok",
+    "protocolVersion": 6,
+    "removed": 1
+  }
+}

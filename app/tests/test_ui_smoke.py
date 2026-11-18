@@ -113,6 +113,8 @@ def test_main_window_lists_jobs(db: Database, tmp_path: Path):
         window.show()  # refresh() only updates a window a user can see
         window.refresh()
         assert window.table.rowCount() == 1
+        # One job reads "1 item", not "1 items".
+        assert window._status_info.text().startswith("1 item · ")
         # Name lives in column 1 (column 0 is the type icon).
         name_item = window.table.item(0, 1)
         assert name_item is not None and name_item.text() == "x.bin"
@@ -333,7 +335,7 @@ def test_main_window_sidebar_is_pure_navigation(db: Database, tmp_path: Path):
         window.show()  # refresh() only updates a window a user can see
         # The rail is navigation only; every tool moved to the downloads
         # toolbar, so there is no Tools page and no overflow menu.
-        assert set(window._nav) == {"downloads", "dashboard", "queue", "settings"}
+        assert set(window._nav) == {"downloads", "dashboard", "queue", "devices", "settings"}
         assert not hasattr(window, "_overflow_menu")
         assert not hasattr(window, "_tools_view")
         window._switch_view("settings")

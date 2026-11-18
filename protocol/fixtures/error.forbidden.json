@@ -1,0 +1,12 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Error reply with code forbidden. 'message' is English text for logs only; the phone shows its own words.",
+  "state": "authed",
+  "message": {
+    "id": "r-7",
+    "type": "error",
+    "protocolVersion": 6,
+    "code": "forbidden",
+    "message": "not allowed"
+  }
+}

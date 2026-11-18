@@ -1,0 +1,12 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Only http, https and magnet links are accepted.",
+  "state": "authed",
+  "message": {
+    "id": "x-1",
+    "type": "download",
+    "url": "file:///C:/Users/me/secret.txt",
+    "requestId": "req-bad-0000000000000001"
+  },
+  "expectError": "badRequest"
+}

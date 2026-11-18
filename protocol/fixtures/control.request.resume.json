@@ -1,0 +1,11 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Resume one job by id.",
+  "state": "authed",
+  "message": {
+    "id": "r-17",
+    "type": "control",
+    "jobId": 41,
+    "action": "resume"
+  }
+}

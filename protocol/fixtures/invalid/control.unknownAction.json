@@ -1,0 +1,12 @@
+{
+  "direction": "phone-to-pc",
+  "description": "An action outside the fixed set.",
+  "state": "authed",
+  "message": {
+    "id": "x-6",
+    "type": "control",
+    "jobId": 41,
+    "action": "deleteFile"
+  },
+  "expectError": "badRequest"
+}

@@ -1,0 +1,12 @@
+{
+  "direction": "phone-to-pc",
+  "description": "The phone did the command (result ok, notFound, refused or failed).",
+  "state": "authed",
+  "message": {
+    "id": "r-32",
+    "type": "phoneCommandResult",
+    "commandId": 3,
+    "result": "ok",
+    "message": null
+  }
+}

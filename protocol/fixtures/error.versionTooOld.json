@@ -1,0 +1,13 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Error reply with code versionTooOld. 'message' is English text for logs only; the phone shows its own words.",
+  "state": "preauth",
+  "message": {
+    "id": "r-7",
+    "type": "error",
+    "protocolVersion": 6,
+    "code": "versionTooOld",
+    "message": "this phone app is too old for this PC",
+    "minClientVersion": 6
+  }
+}

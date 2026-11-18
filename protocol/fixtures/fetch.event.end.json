@@ -1,0 +1,12 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Last message of a stream. status: complete | cancelled | error.",
+  "state": "authed",
+  "message": {
+    "type": "fetchEnd",
+    "protocolVersion": 6,
+    "streamId": 7,
+    "status": "complete",
+    "nextOffset": 73400320
+  }
+}

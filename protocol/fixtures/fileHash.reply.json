@@ -1,0 +1,14 @@
+{
+  "direction": "pc-to-phone",
+  "description": "sha256 is lowercase hex of the whole file.",
+  "state": "authed",
+  "message": {
+    "id": "r-34",
+    "type": "fileHash",
+    "protocolVersion": 6,
+    "jobId": 40,
+    "size": 73400320,
+    "etag": "s73400320-m1794699400",
+    "sha256": "fbbc976930683621654f0280d6eb3b6fef0ff4a7ca138dd4894b6fd45adafa46"
+  }
+}

@@ -300,6 +300,6 @@ class DashboardView(QWidget):
             for column, value in enumerate((name, human_bytes(byte_count), str(files))):
                 if item.text(column) != value:
                     item.setText(column, value)
-            item.setForeground(1, QColor(p.accent))
+            item.setForeground(1, QColor(p.accent_text))
             item.setTextAlignment(1, right)
             item.setTextAlignment(2, right)

@@ -1,0 +1,12 @@
+{
+  "direction": "phone-to-pc",
+  "description": "The phone has stored these items; the PC deletes them.",
+  "state": "authed",
+  "message": {
+    "id": "r-36",
+    "type": "outboxAck",
+    "itemIds": [
+      12
+    ]
+  }
+}

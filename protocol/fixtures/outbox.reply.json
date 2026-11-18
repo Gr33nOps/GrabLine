@@ -1,0 +1,19 @@
+{
+  "direction": "pc-to-phone",
+  "description": "Items stay until acknowledged.",
+  "state": "authed",
+  "message": {
+    "id": "r-35",
+    "type": "outbox",
+    "protocolVersion": 6,
+    "items": [
+      {
+        "itemId": 12,
+        "url": "https://example.com/files/manual.pdf",
+        "title": "manual.pdf",
+        "quality": null,
+        "createdAt": 1794699940
+      }
+    ]
+  }
+}

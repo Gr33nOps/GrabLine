@@ -1,0 +1,9 @@
+{
+  "direction": "phone-to-pc",
+  "description": "Stop events on this connection.",
+  "state": "authed",
+  "message": {
+    "id": "r-41",
+    "type": "unsubscribe"
+  }
+}
