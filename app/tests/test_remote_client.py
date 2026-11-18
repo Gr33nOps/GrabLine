@@ -457,6 +457,10 @@ def test_a_host_with_an_old_protocol_gets_nothing_sent(tmp_path: Path) -> None:
         assert pairing.pair(f"127.0.0.1:{host.port}", CODE, "L") == pairing.PairFailed(
             pairing.HOST_TOO_OLD
         )
+        # The fake host records what it received when its read ends, just after the client left.
+        deadline = time.monotonic() + 5
+        while not received and time.monotonic() < deadline:
+            time.sleep(0.02)
         assert received == [None]
     finally:
         host.stop()
