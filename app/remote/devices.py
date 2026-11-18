@@ -145,6 +145,8 @@ class Device:
     created_at: int
     last_seen_at: int
     kind: str = DEFAULT_DEVICE_KIND
+    #: A PC's own pcId as it said at pairing (never changes); None for phones.
+    client_pc_id: str | None = None
 
 
 def auth_transcript(nonce: bytes, pin: bytes | str, device_id: str) -> bytes:
@@ -256,6 +258,7 @@ class DeviceStore:
         *,
         device_id: str | None = None,
         kind: str = DEFAULT_DEVICE_KIND,
+        client_pc_id: str | None = None,
     ) -> Device:
         """Store a newly paired phone or PC and return its row.
 
@@ -268,16 +271,24 @@ class DeviceStore:
             raise ValueError("invalid device name")
         if kind not in DEVICE_KINDS:
             raise ValueError("invalid device kind")
+        if client_pc_id is not None and (kind != "pc" or not is_valid_id(client_pc_id)):
+            client_pc_id = None  # only a PC has one, and only a well-formed one is kept
         load_public_key(public_key)
         new_id = self._new_id() if device_id is None else device_id
         if not is_valid_id(new_id):
             raise ValueError("invalid device id")
         now = self._now()
         if not self._db.add_remote_device(
-            new_id, cleaned, bytes(public_key), now, limit=MAX_DEVICES, kind=kind
+            new_id,
+            cleaned,
+            bytes(public_key),
+            now,
+            limit=MAX_DEVICES,
+            kind=kind,
+            client_pc_id=client_pc_id,
         ):
             raise DeviceLimitError("device list is full")
-        return Device(new_id, cleaned, bytes(public_key), now, now, kind)
+        return Device(new_id, cleaned, bytes(public_key), now, now, kind, client_pc_id)
 
     def get(self, device_id: str) -> Device | None:
         if not is_valid_id(device_id):

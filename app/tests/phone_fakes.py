@@ -11,7 +11,13 @@ from PySide6.QtCore import QObject, Signal
 from app.remote.phonejobs import PhoneJob, PhoneSnapshot
 
 
-def device(device_id: str, name: str, last_seen: int = 0, kind: str = "phone") -> SimpleNamespace:
+def device(
+    device_id: str,
+    name: str,
+    last_seen: int = 0,
+    kind: str = "phone",
+    client_pc_id: str | None = None,
+) -> SimpleNamespace:
     return SimpleNamespace(
         device_id=device_id,
         name=name,
@@ -19,6 +25,7 @@ def device(device_id: str, name: str, last_seen: int = 0, kind: str = "phone") -
         created_at=1_700_000_000,
         last_seen_at=last_seen,
         kind=kind,
+        client_pc_id=client_pc_id,
     )
 
 

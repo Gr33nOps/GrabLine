@@ -399,6 +399,7 @@ Common errors for every request: `badRequest`, `rateLimited`, `unsupported`, `in
 | `codeProof` | bytes, 32 raw | Section 5.3 |
 | `appVersion` | string, at most 32, opt | For the device list only |
 | `deviceKind` | string, opt | `phone` (default) or `pc` (section 21). Anything else: `badRequest`. The kind is stored with the device and shown in the Allow prompt. |
+| `clientPcId` | string, 22, opt | Only for `deviceKind` `pc` (section 21): the client PC's own `pcId`. Not 22 base64url characters of 16 bytes: `badRequest`. Stored with the device; ignored for a phone. |
 
 | `pairPending` field | Type | Notes |
 | --- | --- | --- |
@@ -421,6 +422,7 @@ Check order on the PC: schema; session exists and not expired (`pairingExpired`)
 | `signature` | bytes, at most 72 raw | Section 6 |
 | `appVersion` | string, at most 32, opt | Stored with `lastSeen` |
 | `deviceKind` | string, opt | `phone` or `pc`, checked like in `pair` (`badRequest` otherwise) and then ignored: the kind stored at pairing wins (section 21) |
+| `clientPcId` | string, 22, opt | Checked like in `pair` and then ignored: the value stored at pairing never changes (section 21) |
 
 | `authOk` field | Type | Notes |
 | --- | --- | --- |
@@ -866,6 +868,16 @@ else is `badRequest`. The host stores the kind from `pair` with the device and s
 (icon and wording: "Allow LAPTOP (a PC) to control GrabLine?"). A `deviceKind` in `auth` that differs from
 the stored one is ignored (the stored kind wins). The limit of 8 paired devices counts PCs and phones together.
 
+### `clientPcId`
+
+`pair` and `auth` take an optional `clientPcId` for `deviceKind` `"pc"`: the client PC's own `pcId` (22 base64url
+characters of 16 bytes, the id of its data directory, the same one its listener sends as `pcId` in `hello` and
+`authOk`). The host validates the format (`badRequest` otherwise), stores it with the device and never changes it:
+a different value in a later `auth` is ignored. A phone has none (a value sent with `deviceKind` `phone` is
+validated and dropped). It lets the host's window tell that the PC which linked to it is the same PC it linked
+to (that PC's `pcId` is the link's `pcId`) and show it once. Names are never compared: two PCs may share a
+host name. A PC that sends none (an older build) is simply shown separately.
+
 ### The client PC
 
 | Rule | Detail |
@@ -890,4 +902,5 @@ the same rate limits, revocation (removing the device on the host closes it at o
 
 Fixtures (protocol/fixtures): `pair.request.pc.json`, `auth.request.pc.json` (the proof and the signature are the
 ones of `pair.request.json` and `auth.request.json`: neither covers the name or the kind), and the invalid cases
-`invalid/pair.deviceKind.json` and `invalid/auth.deviceKind.json` (`badRequest`).
+`invalid/pair.deviceKind.json`, `invalid/auth.deviceKind.json`, `invalid/pair.clientPcId.json` and
+`invalid/auth.clientPcId.json` (`badRequest`). The two PC fixtures carry a `clientPcId`.

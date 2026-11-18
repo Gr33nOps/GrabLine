@@ -548,3 +548,41 @@ def test_the_kind_stored_at_pairing_wins_over_the_one_in_auth(host: Host) -> Non
         finally:
             ws.close()
     assert kind_of(host, device_id) == "pc"
+
+
+def test_the_host_stores_the_clients_own_pc_id_and_it_never_changes(
+    host: Host, client: Client
+) -> None:
+    from app.remote.devices import DeviceStore
+
+    link_up(host, client)
+    own = DeviceStore(client.db).pc_id()
+    (device,) = host.service.store.list()
+    assert device.client_pc_id == own
+    assert own != host.service.store.pc_id()
+    # The client signs in again (with its own id in auth): nothing changes.
+    pc_id = client.only_link().pc_id
+    host.service.set_enabled(False)
+    host.service.set_enabled(True)
+    assert pump(lambda: host.service.is_online(device.device_id), 15.0)
+    assert client.links.is_online(pc_id)
+    stored = host.service.store.get(device.device_id)
+    assert stored is not None and stored.client_pc_id == own
+
+
+def test_an_auth_with_another_client_pc_id_is_ignored(host: Host) -> None:
+    from app.remote.devices import b64url_decode
+
+    device_id, phone, pin = _raw_pair(host, "pc")
+    assert host.service.store.get(device_id).client_pc_id is None  # type: ignore[union-attr]
+    ws = RawClient(host.service.listener.port, pin=pin)
+    try:
+        nonce = b64url_decode(ws.message()["nonce"])
+        request = phone.auth_request(pin, nonce)
+        request["deviceKind"] = "pc"
+        request["clientPcId"] = "EBESExQVFhcYGRobHB0eHw"
+        ws.send(request)
+        assert ws.message()["type"] == "authOk"
+    finally:
+        ws.close()
+    assert host.service.store.get(device_id).client_pc_id is None  # type: ignore[union-attr]

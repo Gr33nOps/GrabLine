@@ -1046,6 +1046,7 @@ class RemoteListener(QObject):
             code_proof=fields["codeProof"],
             device_name=fields["deviceName"],
             device_kind=fields["deviceKind"],
+            client_pc_id=fields["clientPcId"],
         )
         outcome = result.outcome
         if outcome is ProofOutcome.ACCEPTED:

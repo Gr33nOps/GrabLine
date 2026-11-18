@@ -129,7 +129,8 @@ CREATE TABLE IF NOT EXISTS remote_devices (
     public_key   BLOB NOT NULL,
     created_at   INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL,
-    kind         TEXT NOT NULL DEFAULT 'phone'
+    kind         TEXT NOT NULL DEFAULT 'phone',
+    client_pc_id TEXT
 );
 
 -- Other PCs this PC linked to (app/remote/client). The device key itself is a
@@ -193,6 +194,7 @@ _HANDOFFS_MIGRATIONS = {
 
 _REMOTE_DEVICES_MIGRATIONS = {
     "kind": "ALTER TABLE remote_devices ADD COLUMN kind TEXT NOT NULL DEFAULT 'phone'",
+    "client_pc_id": "ALTER TABLE remote_devices ADD COLUMN client_pc_id TEXT",
 }
 
 
@@ -841,6 +843,7 @@ class Database:
         *,
         limit: int,
         kind: str = "phone",
+        client_pc_id: str | None = None,
     ) -> bool:
         """Store a paired phone or PC. False (nothing stored) when ``limit``
         devices already exist or the id is taken; the count and the insert are
@@ -851,31 +854,52 @@ class Database:
                 return False
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO remote_devices "
-                "(device_id, name, public_key, created_at, last_seen_at, kind) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (device_id, name, public_key, created_at, created_at, kind),
+                "(device_id, name, public_key, created_at, last_seen_at, kind, client_pc_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (device_id, name, public_key, created_at, created_at, kind, client_pc_id),
             )
             return cur.rowcount == 1
 
-    def get_remote_device(self, device_id: str) -> tuple[str, str, bytes, int, int, str] | None:
+    def get_remote_device(
+        self, device_id: str
+    ) -> tuple[str, str, bytes, int, int, str, str | None] | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT device_id, name, public_key, created_at, last_seen_at, kind "
-                "FROM remote_devices WHERE device_id = ?",
+                "SELECT device_id, name, public_key, created_at, last_seen_at, kind, "
+                "client_pc_id FROM remote_devices WHERE device_id = ?",
                 (device_id,),
             ).fetchone()
         if row is None:
             return None
-        return (str(row[0]), str(row[1]), bytes(row[2]), int(row[3]), int(row[4]), str(row[5]))
+        return (
+            str(row[0]),
+            str(row[1]),
+            bytes(row[2]),
+            int(row[3]),
+            int(row[4]),
+            str(row[5]),
+            None if row[6] is None else str(row[6]),
+        )
 
-    def list_remote_devices(self) -> list[tuple[str, str, bytes, int, int, str]]:
+    def list_remote_devices(self) -> list[tuple[str, str, bytes, int, int, str, str | None]]:
         """Paired phones and PCs, oldest pairing first."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT device_id, name, public_key, created_at, last_seen_at, kind "
-                "FROM remote_devices ORDER BY created_at, device_id"
+                "SELECT device_id, name, public_key, created_at, last_seen_at, kind, "
+                "client_pc_id FROM remote_devices ORDER BY created_at, device_id"
             ).fetchall()
-        return [(str(r[0]), str(r[1]), bytes(r[2]), int(r[3]), int(r[4]), str(r[5])) for r in rows]
+        return [
+            (
+                str(r[0]),
+                str(r[1]),
+                bytes(r[2]),
+                int(r[3]),
+                int(r[4]),
+                str(r[5]),
+                None if r[6] is None else str(r[6]),
+            )
+            for r in rows
+        ]
 
     def touch_remote_device(self, device_id: str, last_seen_at: int) -> bool:
         with self._lock, self._conn:

@@ -142,6 +142,7 @@ def pair(
     device_name: str,
     *,
     app_version: str | None = None,
+    client_pc_id: str | None = None,
     on_progress: Callable[[str], None] | None = None,
     cancel: threading.Event | None = None,
     timeout: float = PAIR_TIMEOUT_S,
@@ -177,7 +178,16 @@ def pair(
         return PairFailed(NOT_FOUND)
     try:
         return _exchange(
-            connection, address, code, name, app_version, note, stopped, timeout, hello_timeout
+            connection,
+            address,
+            code,
+            name,
+            app_version,
+            client_pc_id,
+            note,
+            stopped,
+            timeout,
+            hello_timeout,
         )
     finally:
         connection.close()
@@ -189,6 +199,7 @@ def _exchange(
     code: str,
     device_name: str,
     app_version: str | None,
+    client_pc_id: str | None,
     note: Callable[[str], None],
     stopped: Callable[[], bool],
     timeout: float,
@@ -225,6 +236,8 @@ def _exchange(
     }
     if app_version:
         request["appVersion"] = app_version[:32]
+    if client_pc_id and is_valid_id(client_pc_id):
+        request["clientPcId"] = client_pc_id  # this PC's own pcId (section 21)
     note("sending")
     try:
         connection.send_json(request)

@@ -69,7 +69,7 @@ from app.remote.client.local import (
 )
 from app.remote.client.session import LinkRecord, LinkRunner
 from app.remote.client.transport import parse_address
-from app.remote.devices import clean_device_name
+from app.remote.devices import DeviceStore, clean_device_name
 from app.remote.listener import default_pc_name
 from app.remote.phonejobs import PhoneJob, PhoneSnapshot
 
@@ -228,6 +228,9 @@ class LinkService(QObject):
         self._db = manager.db
         self._key_dir = key_dir
         self._device_name = clean_device_name(device_name or "") or default_pc_name()
+        #: This PC's own pcId (the id its listener sends as ``pcId``), told to
+        #: the host at pairing so it can tell which link is this PC (section 21).
+        self._own_pc_id = DeviceStore(self._db).pc_id()
         self._backoff = backoff
         self._connect_timeout = connect_timeout
         self._links: dict[str, _Link] = {}
@@ -302,6 +305,7 @@ class LinkService(QObject):
 
         kwargs: dict[str, Any] = {
             "app_version": __version__,
+            "client_pc_id": self._own_pc_id,
             "connect_timeout": self._connect_timeout,
         }
         if self._backoff is not None:
@@ -398,6 +402,7 @@ class LinkService(QObject):
                 code,
                 self._device_name,
                 app_version=__version__,
+                client_pc_id=self._own_pc_id,
                 on_progress=lambda step: self._emit_safely(bridge.progress, step),
                 cancel=cancel,
             )

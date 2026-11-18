@@ -169,10 +169,6 @@ def _format_time(unix: int) -> str:
     )
 
 
-def _same_name(a: str, b: str) -> bool:
-    return a.strip().casefold() == b.strip().casefold() and bool(a.strip())
-
-
 @dataclass(frozen=True)
 class _Entry:
     """One row on the left. ``device`` is a phone or a PC that linked to this
@@ -526,7 +522,11 @@ class DevicesPage(QWidget):
         for device in devices:
             if _kind_of(device) != "pc":
                 continue
-            match = next((link for link in unmatched if _same_name(link.name, device.name)), None)
+            # The same PC both ways: the device says which PC it is (clientPcId)
+            # and that is this link's host. Names are never compared: two PCs
+            # can share a hostname.
+            own = getattr(device, "client_pc_id", None)
+            match = next((link for link in unmatched if own and link.pc_id == own), None)
             if match is not None:
                 unmatched.remove(match)
             entries.append(_Entry("pc", device=device, link=match))

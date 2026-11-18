@@ -377,11 +377,47 @@ def test_the_allow_prompt_says_when_the_device_is_a_pc() -> None:
 
 def both_ways() -> tuple[FakeService, FakeLinks, DevicesPage]:
     service, links, page = make(
-        devices=[device("c1", "DESKTOP", kind="pc")], links=[link("L1", "desktop")], online={"c1"}
+        devices=[device("c1", "DESKTOP", kind="pc", client_pc_id="L1")],
+        links=[link("L1", "desktop")],
+        online={"c1"},
     )
     service.lists["c1"] = snapshot([phone_job(1, name="its-own.iso")])
     page.refresh()
     return service, links, page
+
+
+def test_pcs_with_the_same_name_stay_separate_without_a_matching_id() -> None:
+    """Names are never compared: two PCs may share a hostname."""
+    _service, _links, page = make(
+        devices=[
+            device("c1", "DESKTOP", kind="pc"),  # an older build: no clientPcId
+            device("c2", "DESKTOP", kind="pc", client_pc_id="SOMEONE-ELSE-0000000"),
+        ],
+        links=[link("L1", "DESKTOP")],
+    )
+    assert row_names(page.pc_list) == ["DESKTOP", "DESKTOP", "DESKTOP"]
+    assert page.pc_list.count() == 3
+    assert [e.link is not None and e.device is not None for e in page._entries] == [False] * 3
+
+
+def test_a_pc_is_merged_only_by_its_client_pc_id() -> None:
+    _service, _links, page = make(
+        devices=[
+            device("c1", "LAPTOP", kind="pc", client_pc_id="L2"),
+            device("c2", "OTHER", kind="pc", client_pc_id="L1"),
+        ],
+        links=[link("L1", "LAPTOP"), link("L2", "somebody")],
+    )
+    pairs = {(e.device.device_id, e.link.pc_id) for e in page._entries if e.device and e.link}
+    assert pairs == {("c1", "L2"), ("c2", "L1")}, "matched by id even when the names differ"
+    assert page.pc_list.count() == 2
+
+
+def test_a_phone_is_never_merged_with_a_link() -> None:
+    _service, _links, page = make(
+        devices=[device("p1", "DESKTOP", client_pc_id="L1")], links=[link("L1", "DESKTOP")]
+    )
+    assert page.device_list.count() == 1 and page.pc_list.count() == 1
 
 
 def test_a_pc_linked_both_ways_is_shown_once_with_a_note() -> None:

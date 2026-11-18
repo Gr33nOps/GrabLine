@@ -130,6 +130,7 @@ class LinkRunner:
         post: Post,
         *,
         app_version: str = "",
+        client_pc_id: str = "",
         backoff: Callable[[int], float] = backoff_seconds,
         connect_timeout: float = 2.0,
     ) -> None:
@@ -137,6 +138,7 @@ class LinkRunner:
         self._key = key
         self._post = post
         self._app_version = app_version
+        self._client_pc_id = client_pc_id
         self._backoff = backoff
         self._connect_timeout = connect_timeout
         self._addresses = list(record.addresses)
@@ -293,6 +295,8 @@ class LinkRunner:
             "signature": b64url_encode(self._key.sign(transcript)),
             "deviceKind": "pc",
         }
+        if self._client_pc_id and is_valid_id(self._client_pc_id):
+            request["clientPcId"] = self._client_pc_id
         if self._app_version:
             request["appVersion"] = self._app_version[:32]
         try:

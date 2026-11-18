@@ -1,6 +1,6 @@
 {
   "direction": "phone-to-pc",
-  "description": "Per-connection login of a linked PC (section 21). The signature is the one of auth.request.json (the transcript does not include the kind). A deviceKind that differs from the stored one is ignored: the kind stored at pairing wins.",
+  "description": "Per-connection login of a linked PC (section 21). The signature is the one of auth.request.json (the transcript does not include the kind). A deviceKind that differs from the stored one is ignored: the kind stored at pairing wins. A clientPcId is checked for format and then ignored: the one stored at pairing never changes.",
   "state": "preauth",
   "message": {
     "id": "r-2",
@@ -9,6 +9,7 @@
     "deviceId": "KsucBZHeyJguN6H0BzJQiw",
     "signature": "MEUCIQDEkNVli0ImyofhN_Wu6-4n3CBTJwbf9PLA_GpHelIhsAIgGE-UGdJQPUyd2T_zsX1zDXFD6yn-mSsGqKBL67H4TCM",
     "appVersion": "1.0.0",
-    "deviceKind": "pc"
+    "deviceKind": "pc",
+    "clientPcId": "EBESExQVFhcYGRobHB0eHw"
   }
 }

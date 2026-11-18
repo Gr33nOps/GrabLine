@@ -1,0 +1,16 @@
+{
+  "direction": "phone-to-pc",
+  "description": "clientPcId is not 22 base64url characters of a 16-byte id.",
+  "state": "preauth",
+  "message": {
+    "id": "x-43",
+    "type": "auth",
+    "protocolVersion": 6,
+    "deviceId": "KsucBZHeyJguN6H0BzJQiw",
+    "signature": "MEUCIQDEkNVli0ImyofhN_Wu6-4n3CBTJwbf9PLA_GpHelIhsAIgGE-UGdJQPUyd2T_zsX1zDXFD6yn-mSsGqKBL67H4TCM",
+    "appVersion": "1.0.0",
+    "deviceKind": "pc",
+    "clientPcId": "not-a-pc-id"
+  },
+  "expectError": "badRequest"
+}

@@ -1,6 +1,6 @@
 {
   "protocolVersion": 6,
-  "count": 138,
+  "count": 140,
   "fixtures": [
     {
       "file": "analyze.reply.json",
@@ -389,6 +389,13 @@
       "expectClose": 4401
     },
     {
+      "file": "invalid/auth.clientPcId.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "auth",
+      "expectError": "badRequest"
+    },
+    {
       "file": "invalid/auth.deviceKind.json",
       "direction": "phone-to-pc",
       "state": "preauth",
@@ -595,6 +602,13 @@
     },
     {
       "file": "invalid/pair.badPublicKey.json",
+      "direction": "phone-to-pc",
+      "state": "preauth",
+      "type": "pair",
+      "expectError": "badRequest"
+    },
+    {
+      "file": "invalid/pair.clientPcId.json",
       "direction": "phone-to-pc",
       "state": "preauth",
       "type": "pair",

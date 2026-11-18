@@ -202,3 +202,96 @@ def test_the_pc_fixtures_carry_real_proofs() -> None:
     auth = _fixture("auth.request.pc.json")["message"]
     device = Device(auth["deviceId"], "LAPTOP", PUBLIC_KEY, 0, 0, "pc")
     assert verify_auth(device, NONCE, PIN, b64url_decode(auth["signature"]))
+
+
+# ------------------------------------------------------------ clientPcId
+
+CLIENT_PC_ID = "EBESExQVFhcYGRobHB0eHw"  # 16 bytes, base64url
+
+
+@pytest.mark.parametrize("name", ["pair.request.pc.json", "auth.request.pc.json"])
+def test_the_pc_fixtures_carry_a_valid_client_pc_id(name: str) -> None:
+    assert validate(_fixture(name)["message"]).fields["clientPcId"] == CLIENT_PC_ID
+
+
+@pytest.mark.parametrize("name", ["pair.request.json", "auth.request.json"])
+def test_a_request_without_a_client_pc_id_has_none(name: str) -> None:
+    assert validate(_fixture(name)["message"]).fields["clientPcId"] is None
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        "short",
+        "x" * 23,
+        "x" * 21,
+        CLIENT_PC_ID[:-1] + "!",
+        CLIENT_PC_ID[:-1] + "B",
+        7,
+        True,
+        ["a"],
+    ],
+)
+@pytest.mark.parametrize("name", ["pair.request.pc.json", "auth.request.pc.json"])
+def test_a_bad_client_pc_id_is_bad_request(name: str, bad: Any) -> None:
+    message = _fixture(name)["message"]
+    message["clientPcId"] = bad
+    with pytest.raises(RequestError) as caught:
+        validate(message)
+    assert caught.value.code == "badRequest"
+
+
+def test_the_store_keeps_a_pcs_client_pc_id_and_drops_a_phones(db: Database) -> None:
+    store = DeviceStore(db)
+    pc = store.add("LAPTOP", PUBLIC_KEY, kind="pc", client_pc_id=CLIENT_PC_ID)
+    assert pc.client_pc_id == CLIENT_PC_ID
+    stored = store.get(pc.device_id)
+    assert stored is not None and stored.client_pc_id == CLIENT_PC_ID
+    phone = store.add("Pixel", PUBLIC_KEY, client_pc_id=CLIENT_PC_ID)
+    assert phone.client_pc_id is None
+    bad = store.add("Other", PUBLIC_KEY, kind="pc", client_pc_id="nope")
+    assert bad.client_pc_id is None
+    assert store.add("Third", PUBLIC_KEY, kind="pc").client_pc_id is None
+
+
+def test_the_session_stores_the_client_pc_id_on_approval(db: Database) -> None:
+    session = _session(db)
+    proof = compute_code_proof(CODE, NONCE, PIN, PUBLIC_KEY)
+    session.submit_proof(
+        nonce=NONCE,
+        public_key=PUBLIC_KEY,
+        code_proof=proof,
+        device_name="LAPTOP",
+        device_kind="pc",
+        client_pc_id=CLIENT_PC_ID,
+    )
+    paired = session.approve()
+    assert paired is not None and paired.device.client_pc_id == CLIENT_PC_ID
+    assert DeviceStore(db).list()[0].client_pc_id == CLIENT_PC_ID
+
+
+def test_a_device_made_before_client_pc_id_has_none(tmp_path: Path) -> None:
+    path = tmp_path / "older.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        """
+        CREATE TABLE remote_devices (
+            device_id TEXT PRIMARY KEY, name TEXT NOT NULL, public_key BLOB NOT NULL,
+            created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'phone'
+        );
+        """
+    )
+    old.execute(
+        "INSERT INTO remote_devices VALUES (?, ?, ?, ?, ?, ?)",
+        ("KsucBZHeyJguN6H0BzJQiw", "LAPTOP", PUBLIC_KEY, 1, 2, "pc"),
+    )
+    old.commit()
+    old.close()
+    migrated = Database(path)
+    try:
+        (device,) = DeviceStore(migrated).list()
+        assert (device.kind, device.client_pc_id) == ("pc", None)
+    finally:
+        migrated.close()
