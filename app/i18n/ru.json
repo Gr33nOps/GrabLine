@@ -1015,5 +1015,8 @@
   "Update GrabLine on the other PC": "Обновите GrabLine на другом ПК",
   "Update GrabLine on this PC": "Обновите GrabLine на этом ПК",
   "Also linked as {name}": "Также связан как {name}",
-  "You're already linked to a PC with this ID. Remove that link first.": "Вы уже связаны с ПК с этим ID. Сначала удалите ту связь."
+  "You're already linked to a PC with this ID. Remove that link first.": "Вы уже связаны с ПК с этим ID. Сначала удалите ту связь.",
+  "Remove the device that linked to this PC": "Удалить устройство, связавшееся с этим ПК",
+  "Remove the link to that PC": "Удалить связь с тем ПК",
+  "This PC is linked both ways. Remove \"{device}\", which linked to this PC, or \"{link}\", the link this PC made?": "Этот ПК связан в обе стороны. Удалить «{device}», связавшийся с этим ПК, или «{link}», связь, созданную этим ПК?"
 }

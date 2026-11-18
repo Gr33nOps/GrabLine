@@ -223,12 +223,17 @@ class WsConnection:
     # ------------------------------------------------------------- reading
 
     def read(self, timeout: float = POLL_S) -> list[dict[str, Any]]:
+        """Like :meth:`read_sized`, without the sizes."""
+        return [message for message, _size in self.read_sized(timeout)]
+
+    def read_sized(self, timeout: float = POLL_S) -> list[tuple[dict[str, Any], int]]:
         """Wait up to ``timeout`` for frames. Returns the decoded JSON objects
-        that arrived (usually none or one). Answers pings itself.
+        that arrived (usually none or one) with the size in bytes of each frame's
+        text. Answers pings itself.
 
         Raises ``ConnectionClosed`` when the peer closes or the stream is
         malformed, ``TransportError`` when the socket fails."""
-        messages: list[dict[str, Any]] = []
+        messages: list[tuple[dict[str, Any], int]] = []
         events = self._pending
         self._pending = []
         if not events:
@@ -240,7 +245,7 @@ class WsConnection:
                 except (ValueError, RecursionError):
                     continue  # never crash on one bad frame; it is dropped
                 if isinstance(message, dict):
-                    messages.append(message)
+                    messages.append((message, len(value.encode("utf-8"))))
             elif kind == "ping" and isinstance(value, bytes):
                 with contextlib.suppress(TransportError):
                     self._send(wire.encode_client_frame(wire.OP_PONG, value))

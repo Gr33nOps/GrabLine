@@ -1015,5 +1015,8 @@
   "Update GrabLine on the other PC": "Diğer bilgisayarda GrabLine'ı güncelleyin",
   "Update GrabLine on this PC": "Bu bilgisayarda GrabLine'ı güncelleyin",
   "Also linked as {name}": "Ayrıca {name} olarak bağlı",
-  "You're already linked to a PC with this ID. Remove that link first.": "Bu kimliğe sahip bir bilgisayara zaten bağlısınız. Önce o bağlantıyı kaldırın."
+  "You're already linked to a PC with this ID. Remove that link first.": "Bu kimliğe sahip bir bilgisayara zaten bağlısınız. Önce o bağlantıyı kaldırın.",
+  "Remove the device that linked to this PC": "Bu bilgisayara bağlanan cihazı kaldır",
+  "Remove the link to that PC": "O bilgisayara olan bağlantıyı kaldır",
+  "This PC is linked both ways. Remove \"{device}\", which linked to this PC, or \"{link}\", the link this PC made?": "Bu bilgisayar iki yönlü bağlı. Bu bilgisayara bağlanan \"{device}\" mı, yoksa bu bilgisayarın kurduğu \"{link}\" bağlantısı mı kaldırılsın?"
 }

@@ -167,7 +167,10 @@ class _Bridge(QObject):
 
 
 def _int(value: object, low: int = 0) -> int | None:
-    return value if type(value) is int and value >= low else None
+    """An int from the host within ``low`` and the protocol's safe maximum
+    (a huge value would overflow the figures the page computes from it)."""
+    ok = type(value) is int and low <= value <= schema.MAX_SAFE_INT
+    return value if ok else None  # type: ignore[return-value]
 
 
 _KNOWN_KINDS = frozenset({"direct", "smart", "hls", "video", "torrent", "cloud", "transfer"})
@@ -446,7 +449,7 @@ class LinkService(QObject):
                 on_progress=lambda step: self._emit_safely(bridge.progress, step),
                 cancel=cancel,
             )
-            self._emit_safely(bridge.paired, result)
+            self._emit_safely(bridge.paired, (result, cancel))  # this attempt's own cancel
 
         self._add_thread = threading.Thread(target=work, name="grabline-link-pair", daemon=True)
         self._add_thread.start()
@@ -465,14 +468,14 @@ class LinkService(QObject):
         QTimer.singleShot(0, self, call)
 
     @Slot(object)
-    def _on_paired(self, result: object) -> None:
+    def _on_paired(self, payload: object) -> None:
         if self._shut:
             return
+        result, cancel = payload if isinstance(payload, tuple) else (payload, None)
         if not isinstance(result, pairing.Paired):
             code = result.code if isinstance(result, pairing.PairFailed) else FAILED_TO_SAVE
             self.linkFinished.emit(code, "")
             return
-        cancel = self._add_cancel
         if cancel is not None and cancel.is_set():
             # Cancel came too late: the host has stored this PC. Undo that
             # (unpair with the new key) and keep nothing.
@@ -561,6 +564,7 @@ class LinkService(QObject):
         stopper = threading.Timer(30.0, runner.stop)
         stopper.daemon = True
         stopper.start()
+        self._discards = [r for r in self._discards if r.alive]
         self._discards.append(runner)
 
     def _retire(self, link: _Link) -> None:
@@ -819,6 +823,7 @@ class LinkService(QObject):
             if job_id in link.jobs:
                 merged[job_id] = link.jobs[job_id]
         link.jobs = merged
+        _cap_jobs(link)
         link.loading = False
         link.touched = set()
         link.loaded = True

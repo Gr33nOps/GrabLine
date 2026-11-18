@@ -628,9 +628,8 @@ def test_l4_a_pairing_that_completes_after_cancel_is_undone_and_not_kept(
     rig.service._links.clear()
     cancel = threading.Event()
     cancel.set()
-    rig.service._add_cancel = cancel
     result = _paired(rig, pc_id="B" * 22)
-    rig.service._on_paired(result)
+    rig.service._on_paired((result, cancel))
     assert finished == [("cancelled", "")] and discarded == [result]
     assert rig.db.list_remote_links() == [] and rig.service.links() == []
     key_dir = rig.service._key_dir
@@ -775,7 +774,8 @@ def test_l2_paging_stops_after_a_few_pages(rig: Rig) -> None:
     [
         ("10.1.2.3", True), ("192.168.1.20", True), ("172.16.0.9", True), ("172.31.255.1", True),
         ("169.254.10.1", True), ("[fd7a:115c:a1e0::20]", True), ("fd00::1", True),
-        ("fe80::1", True), ("127.0.0.1", True), ("::1", True),
+        ("fe80::1", True), ("127.0.0.1", False), ("::1", False), ("fe80::1%eth0", False),
+        ("10.0.0.1%1", False), ("fd00::" + "1" * 70, False), ("[::ffff:127.0.0.1]", False),
         ("8.8.8.8", False), ("172.32.0.1", False), ("100.64.0.1", False), ("2001:db8::1", False),
         ("0.0.0.0", False), ("example.com", False), ("laptop.local", False), ("", False),
         ("10.0.0.1:47821", False), ("http://10.0.0.1", False),
@@ -855,3 +855,82 @@ def test_l7_a_failure_is_logged_by_type_only(
     assert "RuntimeError" in text
     assert "secret" not in text and "pw@" not in text and "Users" not in text
     assert all(r.exc_info is None for r in caplog.records), "no traceback text"
+
+
+# ------------------------------------------- second review (Low1, Note4-7)
+
+
+def test_low1_huge_host_numbers_are_refused_not_kept() -> None:
+    from app.remote.schema import MAX_SAFE_INT
+
+    huge = 10**400
+    for field in ("id", "downloaded", "total", "speed", "eta", "createdAt"):
+        assert host_job(_job(5, **{field: huge})) is None or field in ("speed", "createdAt")
+    assert host_job(_job(5, id=MAX_SAFE_INT + 1)) is None
+    assert host_job(_job(5, downloaded=MAX_SAFE_INT + 1)) is None
+    assert host_job(_job(5, total=MAX_SAFE_INT + 1)) is None
+    assert host_job(_job(5, eta=MAX_SAFE_INT + 1)) is None
+    # speed and createdAt are not required: out of range becomes 0
+    job = host_job(_job(5, speed=huge, createdAt=huge, status="downloading"))
+    assert job is not None and job.speed == 0 and job.created_at == 0
+    assert job.fraction is not None or job.total is None
+    ok = host_job(_job(6, downloaded=MAX_SAFE_INT, total=MAX_SAFE_INT))
+    assert ok is not None and ok.fraction == 1.0
+
+
+def test_low1_a_huge_progress_event_changes_nothing(rig: Rig) -> None:
+    rig.service._on_host_event(rig.link, {"event": "job.added", "seq": 1, "job": _job(1)})
+    rig.link.loaded = True
+    rig.service._on_host_event(
+        rig.link,
+        {"event": "job.progress", "seq": 2, "jobId": 1, "status": "downloading",
+         "downloaded": 10**400, "total": 10**400, "speed": 10**400, "eta": 10**400},
+    )  # fmt: skip
+    job = rig.link.jobs[1]
+    assert job.downloaded == 0 and job.speed == 0
+
+
+def test_note4_a_late_pairing_of_an_old_attempt_is_not_attributed_to_a_new_one(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    discarded: list[Any] = []
+    monkeypatch.setattr(rig.service, "_discard_pairing", discarded.append)
+    finished: list[tuple[str, str]] = []
+    rig.service.linkFinished.connect(lambda code, pc: finished.append((code, pc)))
+    rig.service._links.clear()
+    old_cancel = threading.Event()
+    old_cancel.set()  # the person cancelled attempt 1 ...
+    rig.service._add_cancel = threading.Event()  # ... and started attempt 2
+    result = _paired(rig, pc_id="C" * 22)
+    rig.service._on_paired((result, old_cancel))
+    assert finished == [("cancelled", "")] and discarded == [result]
+    assert rig.service._add_cancel is not None and not rig.service._add_cancel.is_set()
+    # An attempt whose own event is not set is kept.
+    rig.service._on_paired((_paired(rig, pc_id="D" * 22), threading.Event()))
+    assert finished[-1][0] == "ok"
+
+
+def test_note6_finishing_a_load_applies_the_cap(rig: Rig) -> None:
+    from app.remote.client.service import MAX_HOST_JOBS
+
+    for number in range(1, MAX_HOST_JOBS + 101):
+        job = host_job(_job(number))
+        assert job is not None
+        rig.link.jobs[number] = job
+        rig.link.touched.add(number)
+    rig.service._finish_load(rig.link, {})
+    assert len(rig.link.jobs) == MAX_HOST_JOBS and min(rig.link.jobs) == 101
+
+
+def test_note7_finished_discard_runners_are_pruned(rig: Rig) -> None:
+    class Gone:
+        alive = False
+
+        def stop(self) -> None:
+            pass
+
+    rig.service._discards = [Gone(), Gone()]  # type: ignore[list-item]
+    rig.service._discard_pairing(_paired(rig))
+    assert len(rig.service._discards) == 1 and rig.service._discards[0].alive

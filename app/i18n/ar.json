@@ -1015,5 +1015,8 @@
   "Update GrabLine on the other PC": "حدّث GrabLine على الكمبيوتر الآخر",
   "Update GrabLine on this PC": "حدّث GrabLine على هذا الكمبيوتر",
   "Also linked as {name}": "مرتبط أيضًا باسم {name}",
-  "You're already linked to a PC with this ID. Remove that link first.": "أنت مرتبط بالفعل بكمبيوتر بهذا المعرّف. أزل ذلك الربط أولًا."
+  "You're already linked to a PC with this ID. Remove that link first.": "أنت مرتبط بالفعل بكمبيوتر بهذا المعرّف. أزل ذلك الربط أولًا.",
+  "Remove the device that linked to this PC": "إزالة الجهاز الذي ارتبط بهذا الكمبيوتر",
+  "Remove the link to that PC": "إزالة الربط بذلك الكمبيوتر",
+  "This PC is linked both ways. Remove \"{device}\", which linked to this PC, or \"{link}\", the link this PC made?": "هذا الكمبيوتر مرتبط في الاتجاهين. هل تريد إزالة \"{device}\" الذي ارتبط بهذا الكمبيوتر، أم \"{link}\" وهو الربط الذي أجراه هذا الكمبيوتر؟"
 }

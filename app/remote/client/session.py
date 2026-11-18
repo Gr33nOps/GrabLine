@@ -27,6 +27,7 @@ import queue
 import random
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -54,6 +55,8 @@ AUTH_ID = "auth-1"
 #: Messages handed to the GUI thread and not yet handled: above this the thread
 #: stops reading (TCP pushes back on the host) and gives up after ``PAUSE_LIMIT_S``.
 MESSAGE_BACKLOG_LIMIT = 256
+#: ... and the same in bytes (a frame may be 1 MiB): reading pauses at either.
+MESSAGE_BACKLOG_BYTES = 8 * 1024 * 1024
 PAUSE_LIMIT_S = 30.0
 
 #: Link states (``LinkInfo.state``); the first four are what the thread posts.
@@ -154,7 +157,8 @@ class LinkRunner:
         self._wake = threading.Event()
         self._out: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
         self._online = False
-        self._unhandled = 0
+        self._sizes: deque[int] = deque()  # bytes of each message posted and not yet handled
+        self._unhandled_bytes = 0
         self._unhandled_lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, name="grabline-link", daemon=True)
 
@@ -178,13 +182,18 @@ class LinkRunner:
         """The GUI thread handled one ``message`` event (see
         ``MESSAGE_BACKLOG_LIMIT``)."""
         with self._unhandled_lock:
-            if self._unhandled > 0:
-                self._unhandled -= 1
+            if self._sizes:
+                self._unhandled_bytes -= self._sizes.popleft()
 
     @property
     def unhandled(self) -> int:
         with self._unhandled_lock:
-            return self._unhandled
+            return len(self._sizes)
+
+    @property
+    def unhandled_bytes(self) -> int:
+        with self._unhandled_lock:
+            return self._unhandled_bytes
 
     def wake(self) -> None:
         """Try again now instead of waiting out the back-off."""
@@ -395,7 +404,10 @@ class LinkRunner:
                         return
                     continue
                 now = time.monotonic()
-                if self.unhandled >= MESSAGE_BACKLOG_LIMIT:
+                if (
+                    self.unhandled >= MESSAGE_BACKLOG_LIMIT
+                    or self.unhandled_bytes >= MESSAGE_BACKLOG_BYTES
+                ):
                     # The GUI is behind: read nothing more for now.
                     paused_since = paused_since if paused_since is not None else now
                     if now - paused_since > PAUSE_LIMIT_S:
@@ -403,9 +415,10 @@ class LinkRunner:
                     self._stop.wait(0.05)
                 else:
                     paused_since = None
-                    for message in connection.read(0.05):
+                    for message, size in connection.read_sized(0.05):
                         with self._unhandled_lock:
-                            self._unhandled += 1
+                            self._sizes.append(size)
+                            self._unhandled_bytes += size
                         self._post("message", message)
                 now = time.monotonic()
                 if now - last_ping >= PING_INTERVAL_S:

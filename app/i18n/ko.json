@@ -1015,5 +1015,8 @@
   "Update GrabLine on the other PC": "다른 PC의 GrabLine을 업데이트하세요",
   "Update GrabLine on this PC": "이 PC의 GrabLine을 업데이트하세요",
   "Also linked as {name}": "{name}(으)로도 연결됨",
-  "You're already linked to a PC with this ID. Remove that link first.": "이 ID의 PC에 이미 연결되어 있습니다. 먼저 그 연결을 제거하세요."
+  "You're already linked to a PC with this ID. Remove that link first.": "이 ID의 PC에 이미 연결되어 있습니다. 먼저 그 연결을 제거하세요.",
+  "Remove the device that linked to this PC": "이 PC에 연결해 온 기기 제거",
+  "Remove the link to that PC": "해당 PC로의 연결 제거",
+  "This PC is linked both ways. Remove \"{device}\", which linked to this PC, or \"{link}\", the link this PC made?": "이 PC는 양방향으로 연결되어 있습니다. 이 PC에 연결해 온 \"{device}\"와 이 PC가 만든 연결 \"{link}\" 중 무엇을 제거할까요?"
 }

@@ -444,16 +444,48 @@ def test_both_ways_prefers_the_live_link_and_falls_back_to_the_reported_list() -
     assert ("d:c1", 1) not in page._busy
 
 
-def test_removing_a_pc_linked_both_ways_ends_both_directions(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("side", "device_gone", "link_gone"),
+    [("device", True, False), ("link", False, True), (None, False, False)],
+)
+def test_removing_a_pc_linked_both_ways_removes_only_the_chosen_side(
+    monkeypatch: pytest.MonkeyPatch, side: str | None, device_gone: bool, link_gone: bool
 ) -> None:
     service, links, page = both_ways()
     select(page, row_names(page.pc_list)[0])
-    monkeypatch.setattr(page, "_confirm_remove", lambda _name: True)
+    asked: list[Any] = []
+
+    def choose(entry: Any) -> str | None:
+        asked.append((entry.device.name, entry.link.name))
+        return side
+
+    monkeypatch.setattr(page, "_choose_removal", choose)
+    monkeypatch.setattr(page, "_confirm_remove", lambda _name: pytest.fail("one question only"))
     page.remove_button.click()
-    assert ("remove_device", "c1") in service.calls
-    assert ("remove_link", "L1") in links.calls
-    assert page.pc_list.count() == 0
+    assert asked == [("DESKTOP", "desktop")], "both names are shown"
+    assert (("remove_device", "c1") in service.calls) is device_gone
+    assert (("remove_link", "L1") in links.calls) is link_gone
+
+
+def test_the_removal_question_names_both_and_offers_each_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _service, _links, page = both_ways()
+    select(page, row_names(page.pc_list)[0])
+    seen: dict[str, Any] = {}
+
+    def fake_exec(box: QMessageBox) -> int:
+        seen["text"] = box.text()
+        seen["buttons"] = [b.text() for b in box.buttons()]
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    page.remove_button.click()
+    assert "DESKTOP" in seen["text"] and "desktop" in seen["text"]
+    assert sorted(seen["buttons"]) == sorted(
+        ["Remove the device that linked to this PC", "Remove the link to that PC", "Cancel"]
+    )
+    assert page.pc_list.count() == 1, "cancelled: nothing was removed"
 
 
 def test_remove_confirmation_names_the_pc(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -872,3 +872,42 @@ def test_l3_the_runner_ignores_host_supplied_names_and_public_addresses(tmp_path
         assert runner._addresses == ["10.0.0.9", "[fe80::1]"], "nothing usable: keep what we had"
     finally:
         host.stop()
+
+
+def test_low2_the_runner_also_stops_reading_at_the_byte_limit(tmp_path: Path) -> None:
+    from app.remote.client.session import MESSAGE_BACKLOG_BYTES, MESSAGE_BACKLOG_LIMIT
+
+    holder: list[FakeHost] = []
+    pad = "x" * 600_000  # a large but legal frame
+
+    def script(conn: FakeConn) -> None:
+        conn.hello()
+        request = conn.recv()
+        assert request is not None
+        conn.send({"id": request["id"], "protocolVersion": 6, **_auth_ok(holder[0])})
+        for number in range(40):
+            conn.send({"type": "event", "event": "x", "seq": number, "pad": pad})
+        conn.recv(4.0)
+
+    host = FakeHost(tmp_path / "h", script)
+    holder.append(host)
+    collected = Collected()
+    runner = _runner(_record(host), collected)
+    runner.start()
+    try:
+        assert collected.wait_for(lambda: runner.online)
+        time.sleep(1.5)
+        posted = sum(1 for k, _ in collected.events if k == "message")
+        assert posted < MESSAGE_BACKLOG_LIMIT, "stopped by bytes, long before 256 messages"
+        assert runner.unhandled_bytes < MESSAGE_BACKLOG_BYTES + 700_000
+        assert runner.unhandled_bytes >= MESSAGE_BACKLOG_BYTES
+        for _ in range(posted):
+            runner.ack()
+        assert runner.unhandled == 0 and runner.unhandled_bytes == 0
+        assert collected.wait_for(
+            lambda: sum(1 for k, _ in collected.events if k == "message") > posted
+        )
+    finally:
+        runner.stop()
+        runner.join()
+        host.stop()

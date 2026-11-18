@@ -1015,5 +1015,8 @@
   "Update GrabLine on the other PC": "请在另一台电脑上更新 GrabLine",
   "Update GrabLine on this PC": "请在此电脑上更新 GrabLine",
   "Also linked as {name}": "也已关联为 {name}",
-  "You're already linked to a PC with this ID. Remove that link first.": "你已关联了具有此 ID 的电脑。请先移除该关联。"
+  "You're already linked to a PC with this ID. Remove that link first.": "你已关联了具有此 ID 的电脑。请先移除该关联。",
+  "Remove the device that linked to this PC": "移除关联到此电脑的设备",
+  "Remove the link to that PC": "移除到那台电脑的关联",
+  "This PC is linked both ways. Remove \"{device}\", which linked to this PC, or \"{link}\", the link this PC made?": "这台电脑已双向关联。要移除关联到此电脑的“{device}”，还是此电脑建立的关联“{link}”？"
 }

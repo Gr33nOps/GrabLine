@@ -59,14 +59,16 @@ def _is_private_or_link_local(ip: IPAddress) -> bool:
 
 def is_client_target(address: object) -> bool:
     """True for an address a link may connect to when the host itself supplied
-    it (``authOk.addresses``): an IP literal that is private, link-local or
-    loopback. Host names and public addresses are refused, so a host cannot
+    it (``authOk.addresses``): an IP literal (at most 64 characters, no zone id) that is
+    private or link-local. Host names, public addresses and loopback are refused, so a host cannot
     steer this PC to somewhere else on the network or the internet."""
+    if not isinstance(address, str) or len(address) > 64 or "%" in address:
+        return False  # no zone id, nothing long: it came from another machine
     parsed = parse(address)
     if parsed is None:
         return False
     ip = parsed[0]
-    return ip.is_loopback or _is_private_or_link_local(ip)
+    return not ip.is_loopback and _is_private_or_link_local(ip)
 
 
 def is_bindable(address: object, test_mode: bool = False) -> bool:

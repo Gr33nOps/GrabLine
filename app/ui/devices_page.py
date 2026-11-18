@@ -1289,14 +1289,53 @@ class DevicesPage(QWidget):
         box.exec()
         return box.clickedButton() is remove
 
+    def _choose_removal(self, entry: _Entry) -> str | None:
+        """For a PC linked both ways: which side to remove, ``device`` (the PC
+        that linked to this one), ``link`` (the link this PC made), or None."""
+        box = QMessageBox(self.window())
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(t("Remove"))
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText(
+            t(
+                'This PC is linked both ways. Remove "{device}", which linked to this PC, '
+                'or "{link}", the link this PC made?',
+                device=entry.device.name,
+                link=entry.link.name,
+            )
+        )
+        device = box.addButton(
+            t("Remove the device that linked to this PC"), QMessageBox.ButtonRole.DestructiveRole
+        )
+        link = box.addButton(
+            t("Remove the link to that PC"), QMessageBox.ButtonRole.DestructiveRole
+        )
+        cancel = box.addButton(t("Cancel"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is device:
+            return "device"
+        return "link" if clicked is link else None
+
     def _remove_selected(self) -> None:
         entry = self._entry(self._sel)
-        if entry is None or not self._confirm_remove(entry.name):
+        if entry is None:
             return
-        # A PC linked both ways is one row: removing it ends both directions.
-        if entry.device is not None:
+        if entry.device is not None and entry.link is not None:
+            # A PC linked both ways is one row but two relationships: remove
+            # exactly the one the person picks, never both silently.
+            side = self._choose_removal(entry)
+            if side is None:
+                return
+        elif self._confirm_remove(entry.name):
+            side = "device" if entry.device is not None else "link"
+        else:
+            return
+        if side == "device":
             self._service.remove_device(entry.device.device_id)
-        if entry.link is not None and self._links is not None:
+        elif self._links is not None:
             self._links.remove_link(entry.link.pc_id)
         self.refresh()
 

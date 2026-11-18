@@ -1015,5 +1015,8 @@
   "Update GrabLine on the other PC": "दूसरे पीसी पर GrabLine अपडेट करें",
   "Update GrabLine on this PC": "इस पीसी पर GrabLine अपडेट करें",
   "Also linked as {name}": "{name} के रूप में भी जुड़ा",
-  "You're already linked to a PC with this ID. Remove that link first.": "आप पहले से इस ID वाले पीसी से जुड़े हैं। पहले वह लिंक हटाएँ।"
+  "You're already linked to a PC with this ID. Remove that link first.": "आप पहले से इस ID वाले पीसी से जुड़े हैं। पहले वह लिंक हटाएँ।",
+  "Remove the device that linked to this PC": "इस पीसी से जुड़े डिवाइस को हटाएँ",
+  "Remove the link to that PC": "उस पीसी का लिंक हटाएँ",
+  "This PC is linked both ways. Remove \"{device}\", which linked to this PC, or \"{link}\", the link this PC made?": "यह पीसी दोनों दिशाओं में जुड़ा है। क्या \"{device}\" हटाएँ, जो इस पीसी से जुड़ा, या \"{link}\", जो इस पीसी ने बनाया लिंक है?"
 }
