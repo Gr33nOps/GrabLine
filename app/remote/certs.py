@@ -253,6 +253,13 @@ def _load_cert_pem(path: Path, key: ec.EllipticCurvePrivateKey, pc_id: str) -> b
     return cert.public_bytes(serialization.Encoding.PEM) if usable else None
 
 
+def write_private_file(path: Path, data: bytes) -> None:
+    """Write a secret (mode 0600 on POSIX) exactly as the PC key is written:
+    temp file in the same folder, fsync, ``os.replace``. Used for the per-link
+    device keys of ``app.remote.client``."""
+    _write_atomic(path, data, private=True)
+
+
 def _write_atomic(path: Path, data: bytes, *, private: bool) -> None:
     """Write ``data`` to ``path`` through a same-folder temp file and a rename.
 

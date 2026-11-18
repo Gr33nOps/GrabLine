@@ -78,9 +78,11 @@ class PhoneJob:
             return None
         return max(0.0, min(1.0, self.downloaded / self.total))
 
-    def actions(self) -> tuple[str, ...]:
+    def actions(self, *, movable: bool = True) -> tuple[str, ...]:
         """The commands that fit this job's state, in the order a user wants
-        them. The phone checks again; this only decides what the PC offers."""
+        them. The phone checks again; this only decides what the PC offers.
+        ``movable=False`` leaves out ``moveToPc`` (the downloads of a host PC
+        are already on a PC)."""
         status = self.status
         if status not in ("queued", "downloading", "paused", "waiting", *_FINAL):
             return ()
@@ -93,7 +95,7 @@ class PhoneJob:
         else:  # failed, cancelled
             base = ("retry", "remove")
         # A copy from a PC has no link to hand over, and nothing to move.
-        if self.kind != "transfer" and self.url:
+        if movable and self.kind != "transfer" and self.url:
             return (*base, "moveToPc")
         return base
 

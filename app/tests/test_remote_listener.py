@@ -61,6 +61,7 @@ class Gui(QObject):
         self.hold = False
         self.started: list[tuple[str, str, int]] = []
         self.pending: list[str] = []
+        self.kinds: list[str] = []
         self.finished: list[str] = []
         self.locked = 0
         self.states: list[bool] = []
@@ -91,8 +92,9 @@ class Gui(QObject):
     def on_started(self, uri: str, manual: str, expires: int) -> None:
         self.started.append((uri, manual, expires))
 
-    @Slot(str)
-    def on_pending(self, name: str) -> None:
+    @Slot(str, str)
+    def on_pending(self, name: str, kind: str) -> None:
+        self.kinds.append(kind)
         self.pending.append(name)
 
     @Slot(str)

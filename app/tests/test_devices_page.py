@@ -91,11 +91,11 @@ def texts(widget: Any) -> list[str]:
 def test_no_phones_shows_what_pairing_gives_you() -> None:
     service, page = make(devices=0, report=False, online=False)
     assert page.right_stack.currentIndex() == 0
-    assert page.empty_title.text() == "No phones paired yet"
+    assert page.empty_title.text() == "No phones or PCs yet"
     body = page.empty_body.text()
     assert "see and control its downloads" in body and "start downloads on this PC" in body
     assert page.device_list.isHidden() and not page.no_devices_label.isHidden()
-    assert page.pair_button.isEnabled() and page.pair_button.text() == "Pair a phone"
+    assert page.pair_button.isEnabled() and page.pair_button.text() == "Pair a phone or PC"
     page.pair_button.click()
     assert "start_pairing" in service.names()
     assert page.pairing_dialog is not None
@@ -109,7 +109,7 @@ def test_phones_are_listed_with_their_state() -> None:
     second = page.device_list.item(1)
     assert first.data(Qt.ItemDataRole.AccessibleTextRole) == "Pixel 8, Online"
     assert second.data(Qt.ItemDataRole.AccessibleTextRole) == "Galaxy S, Not connected yet"
-    assert page.device_list.accessibleName() == "Paired phones"
+    assert page.device_list.accessibleName() == "Phones"
     assert page.device_list.currentRow() == 0
     assert page.name_label.text() == "Pixel 8"
     assert page.state_label.text().startswith("Online  ·  Paired ")
@@ -565,7 +565,7 @@ def test_every_control_has_an_accessible_name_and_can_be_tabbed_to() -> None:
         assert control.focusPolicy() != Qt.FocusPolicy.NoFocus
     assert page.link_edit.accessibleName() == "Send a link to this phone"
     assert page.send_button.accessibleName() == "Send"
-    assert page.pair_button.accessibleName() == "Pair a phone"
+    assert page.pair_button.accessibleName() == "Pair a phone or PC"
 
 
 def test_retint_redraws_without_losing_the_selection() -> None:

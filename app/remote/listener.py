@@ -64,7 +64,7 @@ would run on the listener thread):
     supplies ``state``). ``unsubscribe`` and ``unpair`` never arrive.
 ``stateChanged(bool running)``, ``errorOccurred(str code)`` with
     ``portInUse``, ``noAddress`` or ``identity``
-``pairingStarted(str, str, int)``, ``pairingPending(str device_name)``,
+``pairingStarted(str, str, int)``, ``pairingPending(str name, str kind)`` (phone or pc),
 ``pairingLockedWarning()``, ``pairingFinished(str outcome)`` with
     ``approved``, ``denied``, ``expired``, ``locked``, ``cancelled``, ``failed``
 ``devicesChanged()``            a device was paired, removed or seen
@@ -415,7 +415,7 @@ class RemoteListener(QObject):
     stateChanged = Signal(bool)
     errorOccurred = Signal(str)
     pairingStarted = Signal(str, str, int)
-    pairingPending = Signal(str)
+    pairingPending = Signal(str, str)
     pairingLockedWarning = Signal()
     pairingFinished = Signal(str)
     devicesChanged = Signal()
@@ -473,6 +473,9 @@ class RemoteListener(QObject):
         self._pair_channel: _Channel | None = None
         self._lock_reported = False
         self._opening_pairing = False
+        #: ``phone`` or ``pc``: what the device waiting on the Allow prompt is
+        #: (set just before ``pairingPending`` is emitted).
+        self._pending_kind = "phone"
 
         self._tick_timer: QTimer | None = None
         self._refresh_timer: QTimer | None = None
@@ -545,6 +548,11 @@ class RemoteListener(QObject):
     @property
     def pc_name(self) -> str:
         return self._pc_name
+
+    @property
+    def pending_kind(self) -> str:
+        """What the device behind the current Allow prompt said it is."""
+        return self._pending_kind
 
     def bound_addresses(self) -> list[str]:
         """The local addresses listened on right now."""
@@ -1037,6 +1045,8 @@ class RemoteListener(QObject):
             public_key=fields["publicKey"],
             code_proof=fields["codeProof"],
             device_name=fields["deviceName"],
+            device_kind=fields["deviceKind"],
+            client_pc_id=fields["clientPcId"],
         )
         outcome = result.outcome
         if outcome is ProofOutcome.ACCEPTED:
@@ -1049,6 +1059,7 @@ class RemoteListener(QObject):
             channel.deadline = None  # the prompt's 60 s applies instead
             self._pair_channel = channel
             name = session.pending_device_name or ""
+            self._pending_kind = session.pending_device_kind
             self._send(
                 channel,
                 {
@@ -1057,7 +1068,7 @@ class RemoteListener(QObject):
                     "timeoutSeconds": APPROVAL_TIMEOUT_SECONDS,
                 },
             )
-            self.pairingPending.emit(name)
+            self.pairingPending.emit(name, self._pending_kind)
             return
         self._failures.fail(channel.peer)
         if outcome is ProofOutcome.BAD_CODE:

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from app.remote.devices import (
+    DEVICE_KINDS,
     NONCE_BYTES,
     Device,
     DeviceLimitError,
@@ -252,7 +253,7 @@ class PairingSession:
         self._manual_address = f"{_host_text(ordered[0])}:{port}"
         self._state = PairingState.OPEN
         self._wrong_proofs = 0
-        self._pending: tuple[str, bytes, str, bytes] | None = None
+        self._pending: tuple[str, bytes, str, bytes, str, str | None] | None = None
         self._pending_deadline = 0.0
 
     # ------------------------------------------------------------ display
@@ -271,6 +272,14 @@ class PairingSession:
     def attempts_left(self) -> int:
         with self._lock:
             return MAX_WRONG_PROOFS - self._wrong_proofs
+
+    @property
+    def pending_device_kind(self) -> str:
+        """``phone`` or ``pc``: what the waiting device said it is (section 21)."""
+        with self._lock:
+            if self._refresh() is not PairingState.AWAITING_APPROVAL or self._pending is None:
+                return "phone"
+            return self._pending[4]
 
     @property
     def pending_device_name(self) -> str | None:
@@ -324,7 +333,14 @@ class PairingSession:
     # ------------------------------------------------------------- proofs
 
     def submit_proof(
-        self, *, nonce: bytes, public_key: bytes, code_proof: bytes, device_name: str
+        self,
+        *,
+        nonce: bytes,
+        public_key: bytes,
+        code_proof: bytes,
+        device_name: str,
+        device_kind: str = "phone",
+        client_pc_id: str | None = None,
     ) -> ProofResult:
         """Handle one ``pair`` request (already decoded from base64url).
 
@@ -333,7 +349,9 @@ class PairingSession:
         and last the device limit. Never raises.
         """
         try:
-            return self._submit_proof(nonce, public_key, code_proof, device_name)
+            return self._submit_proof(
+                nonce, public_key, code_proof, device_name, device_kind, client_pc_id
+            )
         except Exception:
             # Fail closed: an unexpected error must not leave a usable code.
             with self._lock:
@@ -342,11 +360,18 @@ class PairingSession:
             return ProofResult(ProofOutcome.PAIRING_EXPIRED)
 
     def _submit_proof(
-        self, nonce: bytes, public_key: bytes, code_proof: bytes, device_name: str
+        self,
+        nonce: bytes,
+        public_key: bytes,
+        code_proof: bytes,
+        device_name: str,
+        device_kind: str,
+        client_pc_id: str | None = None,
     ) -> ProofResult:
         name = clean_device_name(device_name)
         shapes_ok = (
             name is not None
+            and device_kind in DEVICE_KINDS
             and isinstance(nonce, bytes | bytearray)
             and len(nonce) == NONCE_BYTES
             and isinstance(code_proof, bytes | bytearray)
@@ -388,7 +413,7 @@ class PairingSession:
             device_id = self._store.new_device_id()
             server_proof = compute_server_proof(code, nonce, self._pin, public_key, device_id)
             self._drop_code()
-            self._pending = (name, public_key, device_id, server_proof)
+            self._pending = (name, public_key, device_id, server_proof, device_kind, client_pc_id)
             self._pending_deadline = self._clock() + APPROVAL_TIMEOUT_SECONDS
             self._state = PairingState.AWAITING_APPROVAL
             return ProofResult(ProofOutcome.ACCEPTED)
@@ -406,10 +431,14 @@ class PairingSession:
         with self._lock:
             if self._refresh() is not PairingState.AWAITING_APPROVAL or self._pending is None:
                 return None
-            name, public_key, device_id, server_proof = self._pending
+            name, public_key, device_id, server_proof, kind, client_pc_id = self._pending
             try:
                 device = self._store.add(
-                    name if device_name is None else device_name, public_key, device_id=device_id
+                    name if device_name is None else device_name,
+                    public_key,
+                    device_id=device_id,
+                    kind=kind,
+                    client_pc_id=client_pc_id,
                 )
             except (DeviceLimitError, ValueError):
                 self._end(PairingState.USED)

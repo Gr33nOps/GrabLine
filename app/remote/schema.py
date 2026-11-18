@@ -423,6 +423,30 @@ def _outbox_ack(msg: dict[str, Any]) -> dict[str, Any]:
     return {"itemIds": list(dict.fromkeys(raw))}
 
 
+def _device_kind(msg: dict[str, Any]) -> str:
+    """Section 21 ``deviceKind``: ``phone`` (the default) or ``pc``. Anything
+    else, a non-string included, is ``badRequest``."""
+    value = msg.get("deviceKind")
+    if value is None:
+        return "phone"
+    if not isinstance(value, str) or value not in ("phone", "pc"):
+        raise _bad("deviceKind")
+    return value
+
+
+def _client_pc_id(msg: dict[str, Any]) -> str | None:
+    """Section 21 ``clientPcId``: the client PC's own pcId, 22 base64url
+    characters of 16 bytes. Absent or null is None; anything else malformed is
+    ``badRequest``."""
+    value = msg.get("clientPcId")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _DEVICE_ID_RE.fullmatch(value):
+        raise _bad("clientPcId")
+    b64url_decode(value, "clientPcId", exact=16)
+    return value
+
+
 def _pair(msg: dict[str, Any]) -> dict[str, Any]:
     return {
         "protocolVersion": _int(msg, "protocolVersion", 0, MAX_SAFE_INT, required=True),
@@ -430,6 +454,8 @@ def _pair(msg: dict[str, Any]) -> dict[str, Any]:
         "publicKey": b64url_decode(msg.get("publicKey"), "publicKey", exact=91),
         "codeProof": b64url_decode(msg.get("codeProof"), "codeProof", exact=32),
         "appVersion": _str(msg, "appVersion", 0, 32, required=False),
+        "deviceKind": _device_kind(msg),
+        "clientPcId": _client_pc_id(msg),
     }
 
 
@@ -439,6 +465,9 @@ def _auth(msg: dict[str, Any]) -> dict[str, Any]:
         "deviceId": _pattern(msg, "deviceId", _DEVICE_ID_RE, required=True),
         "signature": b64url_decode(msg.get("signature"), "signature", most=72),
         "appVersion": _str(msg, "appVersion", 0, 32, required=False),
+        # Checked, then ignored: the kind stored at pairing wins (section 21).
+        "deviceKind": _device_kind(msg),
+        "clientPcId": _client_pc_id(msg),  # checked, then ignored: the stored one never changes
     }
 
 

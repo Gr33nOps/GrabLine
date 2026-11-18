@@ -1,0 +1,16 @@
+{
+  "direction": "phone-to-pc",
+  "description": "deviceKind is neither phone nor pc.",
+  "state": "preauth",
+  "message": {
+    "id": "x-40",
+    "type": "pair",
+    "protocolVersion": 6,
+    "deviceName": "Pixel 8",
+    "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJKgUzqYhvEgwmzQQEvg2ssxBRuKPwgQnQocViZyaHoUo8afbboXhTc-SDGQtWKSeiZY0jKbSOS2iUuCG0VwXIQ",
+    "codeProof": "Smf4OozxeARyGSFxpYre8dXqDe8DFizLRu1JIcYkVaQ",
+    "appVersion": "1.0.0",
+    "deviceKind": "tablet"
+  },
+  "expectError": "badRequest"
+}

@@ -398,6 +398,8 @@ Common errors for every request: `badRequest`, `rateLimited`, `unsupported`, `in
 | `publicKey` | bytes | P-256 SubjectPublicKeyInfo DER, exactly 91 bytes, uncompressed point on the curve; anything else `badRequest` |
 | `codeProof` | bytes, 32 raw | Section 5.3 |
 | `appVersion` | string, at most 32, opt | For the device list only |
+| `deviceKind` | string, opt | `phone` (default) or `pc` (section 21). Anything else: `badRequest`. The kind is stored with the device and shown in the Allow prompt. |
+| `clientPcId` | string, 22, opt | Only for `deviceKind` `pc` (section 21): the client PC's own `pcId`. Not 22 base64url characters of 16 bytes: `badRequest`. Stored with the device; ignored for a phone. |
 
 | `pairPending` field | Type | Notes |
 | --- | --- | --- |
@@ -419,6 +421,8 @@ Check order on the PC: schema; session exists and not expired (`pairingExpired`)
 | `deviceId` | string, 22 | From `paired` |
 | `signature` | bytes, at most 72 raw | Section 6 |
 | `appVersion` | string, at most 32, opt | Stored with `lastSeen` |
+| `deviceKind` | string, opt | `phone` or `pc`, checked like in `pair` (`badRequest` otherwise) and then ignored: the kind stored at pairing wins (section 21) |
+| `clientPcId` | string, 22, opt | Checked like in `pair` and then ignored: the value stored at pairing never changes (section 21) |
 
 | `authOk` field | Type | Notes |
 | --- | --- | --- |
@@ -841,3 +845,62 @@ something.
 
 Fixtures (protocol/fixtures): `phoneJobs.request.json`, `phoneJobs.request.notShared.json`,
 `event.phone.command.json`, `phoneCommandResult.request.json`, and `authOk` with `phoneJobs` in `features`.
+
+## 21. Linking two PCs
+
+GrabLine on one PC can connect to GrabLine on another PC (for example a Windows desktop and a Linux laptop)
+the same way a phone does. The connecting PC (the **client PC**) is just another paired device of the other
+PC (the **host PC**): it pairs with the host's typed code (section 5.4), signs in with its own key (section 6)
+and uses the same messages as a phone. One link gives control both ways:
+
+- The client PC sees the host's downloads and controls them with `jobs`, `subscribe`, `control`, `download`,
+  `links`, `global` and `queues`, exactly as a phone does (sections 12 and 15).
+- The host PC sees the client PC's downloads and controls them through section 20 (`phoneJobs`,
+  `phone.command`, `phoneCommandResult`): the client PC reports its own downloads and runs the host's
+  commands. `moveToPc` from the host means "download this on the host instead".
+
+No message type is added and `PROTOCOL_VERSION` stays 6. Two optional fields are added.
+
+### `deviceKind`
+
+`pair` and `auth` take an optional `deviceKind`: `"phone"` (the default when absent) or `"pc"`. Anything
+else is `badRequest`. The host stores the kind from `pair` with the device and shows PCs and phones apart
+(icon and wording: "Allow LAPTOP (a PC) to control GrabLine?"). A `deviceKind` in `auth` that differs from
+the stored one is ignored (the stored kind wins). The limit of 8 paired devices counts PCs and phones together.
+
+### `clientPcId`
+
+`pair` and `auth` take an optional `clientPcId` for `deviceKind` `"pc"`: the client PC's own `pcId` (22 base64url
+characters of 16 bytes, the id of its data directory, the same one its listener sends as `pcId` in `hello` and
+`authOk`). The host validates the format (`badRequest` otherwise), stores it with the device and never changes it:
+a different value in a later `auth` is ignored. A phone has none (a value sent with `deviceKind` `phone` is
+validated and dropped). It lets the host's window tell that the PC which linked to it is the same PC it linked
+to (that PC's `pcId` is the link's `pcId`) and show it once. Names are never compared: two PCs may share a
+host name. A PC that sends none (an older build) is simply shown separately.
+
+### The client PC
+
+| Rule | Detail |
+| --- | --- |
+| Never listens | The client side only connects out. It lives in `app/remote/` (the only place allowed to touch sockets) and opens no listening socket. |
+| Pairing | Typed code only (no camera on a PC): address `host[:port]` and the 12-character code, normalised as in section 5.4. Trust on first use exactly as section 5.4: the candidate pin becomes the pin only after `serverProof` verifies; nothing is stored otherwise. |
+| Key | One ECDSA P-256 key per link, made for that pairing. Stored only in the client PC's data directory, private file permissions (as `certs.py` stores the PC key: mode 0600 on POSIX), never logged, deleted when the link is removed or the host says the pairing was removed. |
+| Stored per link | `pcId`, host name, pin, `deviceId`, addresses and port from `authOk` (and the last address that worked), key file name, `pairedAt`, `lastSeen`. |
+| Connecting | Like the phone (section 11): last good address first, then the others; back off up to 30 s while unreachable; a pin mismatch stops the link and shows "This PC's identity changed. Link it again" (no automatic retry). `unauthorized` on a pin-matched connection: delete the link and its key and show "This PC no longer accepts this one. Link it again". |
+| Features | It sends only what the host's `authOk.features` lists. Without `phoneJobs` the host can't see this PC's downloads; the client says so in the UI. |
+| Sharing setting | "Let linked PCs see and control downloads on this PC", on by default (the phone's setting, section 20). Off: `phoneJobs` with `shared: false` once per connection, every `phone.command` refused. |
+| Reports | Its own downloads as `phoneJobs` (newest 100, at most one list per second, section 20 object). `kind` from the job kind (`direct`, `video` for smart/hls, `torrent`, `cloud`). Names are never paths; URLs have `user:password@` removed. |
+| Commands from the host | `pause`, `resume`, `cancel`, `retry`, `remove`, `moveToPc` on its own jobs, checked against the job's state like its own window does. `moveToPc`: send the link to the host with `download` (unattended, quality `best`), and only after `queued` cancel the local job and delete its partial file; a finished file is kept. |
+| No new trust | A host PC's commands reach the client PC only over the client's own authenticated connection to that host, so only a PC the user linked from this PC can control it. |
+
+### Same rules as phones
+
+Everything in sections 7 to 9, 17 and 20 applies to client PCs unchanged: they are devices of the host, with
+the same rate limits, revocation (removing the device on the host closes it at once) and display rules
+(strings shown as plain text, no paths, nothing logged).
+
+
+Fixtures (protocol/fixtures): `pair.request.pc.json`, `auth.request.pc.json` (the proof and the signature are the
+ones of `pair.request.json` and `auth.request.json`: neither covers the name or the kind), and the invalid cases
+`invalid/pair.deviceKind.json`, `invalid/auth.deviceKind.json`, `invalid/pair.clientPcId.json` and
+`invalid/auth.clientPcId.json` (`badRequest`). The two PC fixtures carry a `clientPcId`.

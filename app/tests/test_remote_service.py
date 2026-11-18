@@ -55,7 +55,7 @@ class Env:
         self.started: list[tuple[str, str, int]] = []
         self.pending: list[str] = []
         self.service.pairingStarted.connect(lambda *a: self.started.append(a))
-        self.service.pairingPending.connect(self.pending.append)
+        self.service.pairingPending.connect(lambda name, _kind: self.pending.append(name))
         self.clients: list[Client] = []
         self.dest = tmp_path / "downloads"
         self.dest.mkdir()

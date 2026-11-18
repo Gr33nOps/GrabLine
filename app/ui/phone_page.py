@@ -1,5 +1,6 @@
-"""Settings -> Phone: turn the phone remote on or off and set its port, and the
-pairing dialog the Devices page opens.
+"""Settings -> Phones and PCs: turn the remote on or off, set its port, and choose
+whether linked PCs may see and control this PC's downloads; and the pairing
+dialog the Devices page opens.
 
 The page talks to ``app.remote.service.RemoteService`` only through its public
 API and Qt signals. The pairing code lives in the pairing dialog and nowhere
@@ -83,7 +84,7 @@ class PairingDialog(chrome.Dialog):
         self._active = False
         self._expires_at = 0
         self.setModal(False)
-        self.setWindowTitle(t("Pair a phone"))
+        self.setWindowTitle(t("Pair a phone or PC"))
         self.setMinimumWidth(340)
 
         layout = QVBoxLayout(self)
@@ -107,7 +108,10 @@ class PairingDialog(chrome.Dialog):
         layout.addWidget(self.qr_frame, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.manual_caption = _wrapping(
-            components.role_label(t("Can't scan? Type this into GrabLine on your phone:"), "muted")
+            components.role_label(
+                t("Can't scan, or linking a PC? Type this into GrabLine on the other device:"),
+                "muted",
+            )
         )
         layout.addWidget(self.manual_caption)
         self.manual_label = QLabel()
@@ -119,7 +123,7 @@ class PairingDialog(chrome.Dialog):
             | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
         self.manual_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.manual_label.setAccessibleName(t("Pair a phone"))
+        self.manual_label.setAccessibleName(t("Pair a phone or PC"))
         layout.addWidget(self.manual_label)
 
         self.countdown_label = components.role_label("", "strong", bold=True)
@@ -182,7 +186,7 @@ class PairingDialog(chrome.Dialog):
             return
         self._hide_code()
         if outcome == "approved":
-            self._set_status(t("Phone paired. It can now control GrabLine."))
+            self._set_status(t("Paired. It can now control GrabLine."))
         elif outcome == "denied":
             self._set_status(t("Pairing cancelled"))
         elif outcome == "expired":
@@ -247,8 +251,9 @@ class PairingDialog(chrome.Dialog):
 
 
 class PhonePage(QWidget):
-    """The Settings "Phone" page: the phone-remote switch and its port. Pairing
-    and the paired phones live on the Devices page (``app.ui.devices_page``)."""
+    """The Settings "Phones and PCs" page: the remote switch and its port, and
+    the sharing setting for linked PCs. Pairing, linking and the devices live on
+    the Devices page (``app.ui.devices_page``)."""
 
     def __init__(
         self,
@@ -256,9 +261,11 @@ class PhonePage(QWidget):
         parent: QWidget | None = None,
         *,
         open_devices: Callable[[], None] | None = None,
+        links: Any = None,
     ) -> None:
         super().__init__(parent)
         self._service = service
+        self._links = links
         self._error: str | None = None
         self._listening = False
 
@@ -271,19 +278,24 @@ class PhonePage(QWidget):
         layout.addWidget(
             _wrapping(
                 components.role_label(
-                    t("Control GrabLine from your Android phone on the same Wi-Fi."),
+                    t(
+                        "Control GrabLine from your Android phone or another PC "
+                        "on the same network."
+                    ),
                     "muted",
                 )
             )
         )
 
         self.devices_hint = _wrapping(
-            components.role_label(t("Paired phones are listed in Devices."), "muted")
+            components.role_label(t("Paired phones and PCs are listed in Devices."), "muted")
         )
         layout.addWidget(self.devices_hint)
         devices_row = QHBoxLayout()
-        self.devices_button = components.accent_button(t("Pair and manage phones in Devices"))
-        self.devices_button.setAccessibleName(t("Pair and manage phones in Devices"))
+        self.devices_button = components.accent_button(
+            t("Pair and manage phones and PCs in Devices")
+        )
+        self.devices_button.setAccessibleName(t("Pair and manage phones and PCs in Devices"))
         if open_devices is not None:
             self.devices_button.clicked.connect(lambda _checked=False: open_devices())
         else:
@@ -292,15 +304,23 @@ class PhonePage(QWidget):
         devices_row.addStretch(1)
         layout.addLayout(devices_row)
 
-        self.enabled_check = QCheckBox(t("Phone remote"))
-        self.enabled_check.setAccessibleName(t("Phone remote"))
+        self.enabled_check = QCheckBox(t("Allow phones and PCs to connect"))
+        self.enabled_check.setAccessibleName(t("Allow phones and PCs to connect"))
         self.enabled_check.setChecked(bool(service.enabled_setting()))
         self.enabled_check.clicked.connect(self._toggle_enabled)
         layout.addWidget(self.enabled_check)
 
         self.status_label = _wrapping(QLabel(""))
-        self.status_label.setAccessibleName(t("Phone remote"))
+        self.status_label.setAccessibleName(t("Allow phones and PCs to connect"))
         layout.addWidget(self.status_label)
+
+        self.share_check = QCheckBox(t("Let linked PCs see and control downloads on this PC"))
+        self.share_check.setAccessibleName(t("Let linked PCs see and control downloads on this PC"))
+        self.share_check.setVisible(links is not None)
+        if links is not None:
+            self.share_check.setChecked(bool(links.shared_setting()))
+            self.share_check.clicked.connect(self._toggle_share)
+        layout.addWidget(self.share_check)
 
         self.advanced_toggle = QToolButton()
         self.advanced_toggle.setText(t("Advanced"))
@@ -365,9 +385,9 @@ class PhonePage(QWidget):
         elif self._error == "noAddress":
             text = t("This PC isn't on a private network.")
         elif self._error is not None:
-            text = t("Phone remote could not start.")
+            text = t("Connections could not start.")
         elif not self._service.enabled_setting():
-            text = t("Phone remote is off.")
+            text = t("Phones and PCs can't connect while this is off.")
         elif self._listening:
             count = self._address_count()
             text = (
@@ -376,7 +396,7 @@ class PhonePage(QWidget):
                 else t("Listening on {count} addresses.", count=count)
             )
         else:
-            text = t("Nothing is listening until you pair a phone.")
+            text = t("Nothing is listening until you pair a phone or PC.")
         self.status_label.setText(text)
 
     def _on_state(self, running: bool) -> None:
@@ -395,6 +415,10 @@ class PhonePage(QWidget):
         self._error = None
         self._service.set_enabled(bool(checked))
         self._update_status()
+
+    def _toggle_share(self, checked: bool) -> None:
+        if self._links is not None:
+            self._links.set_shared(bool(checked))
 
     def _toggle_advanced(self, shown: bool) -> None:
         self.advanced_box.setVisible(shown)

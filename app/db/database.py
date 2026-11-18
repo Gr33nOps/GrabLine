@@ -128,7 +128,25 @@ CREATE TABLE IF NOT EXISTS remote_devices (
     name         TEXT NOT NULL,
     public_key   BLOB NOT NULL,
     created_at   INTEGER NOT NULL,
-    last_seen_at INTEGER NOT NULL
+    last_seen_at INTEGER NOT NULL,
+    kind         TEXT NOT NULL DEFAULT 'phone',
+    client_pc_id TEXT
+);
+
+-- Other PCs this PC linked to (app/remote/client). The device key itself is a
+-- private file in the data directory (``key_file``), never a column here; the
+-- pin is a public value. One row per host PC. Times are Unix seconds.
+CREATE TABLE IF NOT EXISTS remote_links (
+    pc_id        TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    pin          TEXT NOT NULL,
+    device_id    TEXT NOT NULL,
+    addresses    TEXT NOT NULL DEFAULT '[]',
+    port         INTEGER NOT NULL,
+    last_address TEXT,
+    key_file     TEXT NOT NULL,
+    paired_at    INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- Identity values of the phone listener (the stable pcId). Deliberately not
@@ -171,6 +189,12 @@ _HANDOFFS_MIGRATIONS = {
     "quality": "ALTER TABLE handoffs ADD COLUMN quality TEXT",
     "headers": "ALTER TABLE handoffs ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'",
     "options": "ALTER TABLE handoffs ADD COLUMN options TEXT NOT NULL DEFAULT '{}'",
+}
+
+
+_REMOTE_DEVICES_MIGRATIONS = {
+    "kind": "ALTER TABLE remote_devices ADD COLUMN kind TEXT NOT NULL DEFAULT 'phone'",
+    "client_pc_id": "ALTER TABLE remote_devices ADD COLUMN client_pc_id TEXT",
 }
 
 
@@ -255,12 +279,16 @@ class Database:
 
     def _migrate(self) -> None:
         """Add columns introduced after Phase 0 to databases created before them."""
-        for table, migrations in (("jobs", _JOBS_MIGRATIONS), ("handoffs", _HANDOFFS_MIGRATIONS)):
+        for table, migrations in (
+            ("jobs", _JOBS_MIGRATIONS),
+            ("handoffs", _HANDOFFS_MIGRATIONS),
+            ("remote_devices", _REMOTE_DEVICES_MIGRATIONS),
+        ):
             # PRAGMA cannot take a bound parameter, so the table name is
             # interpolated into the SQL. It is one of our own literals today;
             # pin it to an allowlist so it can never drift into an injection
             # sink if a caller ever passes the name in from elsewhere.
-            if table not in ("jobs", "handoffs"):
+            if table not in ("jobs", "handoffs", "remote_devices"):
                 raise ValueError(f"refusing to introspect unknown table {table!r}")
             existing = {
                 row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -814,40 +842,64 @@ class Database:
         created_at: int,
         *,
         limit: int,
+        kind: str = "phone",
+        client_pc_id: str | None = None,
     ) -> bool:
-        """Store a paired phone. False (nothing stored) when ``limit`` devices
-        already exist or the id is taken; the count and the insert are one
-        step under the lock, so two pairings cannot both take the last slot."""
+        """Store a paired phone or PC. False (nothing stored) when ``limit``
+        devices already exist or the id is taken; the count and the insert are
+        one step under the lock, so two pairings cannot both take the last slot."""
         with self._lock, self._conn:
             count = self._conn.execute("SELECT COUNT(*) FROM remote_devices").fetchone()[0]
             if int(count) >= limit:
                 return False
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO remote_devices "
-                "(device_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
-                (device_id, name, public_key, created_at, created_at),
+                "(device_id, name, public_key, created_at, last_seen_at, kind, client_pc_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (device_id, name, public_key, created_at, created_at, kind, client_pc_id),
             )
             return cur.rowcount == 1
 
-    def get_remote_device(self, device_id: str) -> tuple[str, str, bytes, int, int] | None:
+    def get_remote_device(
+        self, device_id: str
+    ) -> tuple[str, str, bytes, int, int, str, str | None] | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT device_id, name, public_key, created_at, last_seen_at "
-                "FROM remote_devices WHERE device_id = ?",
+                "SELECT device_id, name, public_key, created_at, last_seen_at, kind, "
+                "client_pc_id FROM remote_devices WHERE device_id = ?",
                 (device_id,),
             ).fetchone()
         if row is None:
             return None
-        return (str(row[0]), str(row[1]), bytes(row[2]), int(row[3]), int(row[4]))
+        return (
+            str(row[0]),
+            str(row[1]),
+            bytes(row[2]),
+            int(row[3]),
+            int(row[4]),
+            str(row[5]),
+            None if row[6] is None else str(row[6]),
+        )
 
-    def list_remote_devices(self) -> list[tuple[str, str, bytes, int, int]]:
-        """Paired phones, oldest pairing first."""
+    def list_remote_devices(self) -> list[tuple[str, str, bytes, int, int, str, str | None]]:
+        """Paired phones and PCs, oldest pairing first."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT device_id, name, public_key, created_at, last_seen_at "
-                "FROM remote_devices ORDER BY created_at, device_id"
+                "SELECT device_id, name, public_key, created_at, last_seen_at, kind, "
+                "client_pc_id FROM remote_devices ORDER BY created_at, device_id"
             ).fetchall()
-        return [(str(r[0]), str(r[1]), bytes(r[2]), int(r[3]), int(r[4])) for r in rows]
+        return [
+            (
+                str(r[0]),
+                str(r[1]),
+                bytes(r[2]),
+                int(r[3]),
+                int(r[4]),
+                str(r[5]),
+                None if r[6] is None else str(r[6]),
+            )
+            for r in rows
+        ]
 
     def touch_remote_device(self, device_id: str, last_seen_at: int) -> bool:
         with self._lock, self._conn:
@@ -867,6 +919,85 @@ class Database:
         with self._lock:
             row = self._conn.execute("SELECT COUNT(*) FROM remote_devices").fetchone()
         return int(row[0])
+
+    # ------------------------------------------------------ remote links
+
+    def upsert_remote_link(self, row: dict[str, Any]) -> None:
+        """Store (or replace) the link to one host PC. ``row`` has the
+        ``remote_links`` columns; ``addresses`` is a list of strings."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO remote_links (pc_id, name, pin, device_id, addresses, port, "
+                "last_address, key_file, paired_at, last_seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(pc_id) DO UPDATE SET name = excluded.name, pin = excluded.pin, "
+                "device_id = excluded.device_id, addresses = excluded.addresses, "
+                "port = excluded.port, last_address = excluded.last_address, "
+                "key_file = excluded.key_file, paired_at = excluded.paired_at, "
+                "last_seen_at = excluded.last_seen_at",
+                (
+                    row["pc_id"],
+                    row["name"],
+                    row["pin"],
+                    row["device_id"],
+                    json.dumps(list(row["addresses"])),
+                    int(row["port"]),
+                    row.get("last_address"),
+                    row["key_file"],
+                    int(row["paired_at"]),
+                    int(row.get("last_seen_at", 0)),
+                ),
+            )
+
+    def update_remote_link(self, pc_id: str, **changes: Any) -> bool:
+        """Change some columns of one link (``name``, ``addresses``, ``port``,
+        ``last_address``, ``last_seen_at``). Returns whether it exists."""
+        allowed = {"name", "addresses", "port", "last_address", "last_seen_at"}
+        if not changes or not set(changes) <= allowed:
+            raise ValueError("unknown link column")
+        values: list[Any] = []
+        for column, value in changes.items():
+            values.append(json.dumps(list(value)) if column == "addresses" else value)
+        assignments = ", ".join(f"{column} = ?" for column in changes)
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                f"UPDATE remote_links SET {assignments} WHERE pc_id = ?",
+                (*values, pc_id),
+            )
+            return cur.rowcount == 1
+
+    def list_remote_links(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT pc_id, name, pin, device_id, addresses, port, last_address, key_file, "
+                "paired_at, last_seen_at FROM remote_links ORDER BY paired_at, pc_id"
+            ).fetchall()
+        links: list[dict[str, Any]] = []
+        for r in rows:
+            try:
+                addresses = [str(a) for a in json.loads(r[4])]
+            except (TypeError, ValueError):
+                addresses = []
+            links.append(
+                {
+                    "pc_id": str(r[0]),
+                    "name": str(r[1]),
+                    "pin": str(r[2]),
+                    "device_id": str(r[3]),
+                    "addresses": addresses,
+                    "port": int(r[5]),
+                    "last_address": None if r[6] is None else str(r[6]),
+                    "key_file": str(r[7]),
+                    "paired_at": int(r[8]),
+                    "last_seen_at": int(r[9]),
+                }
+            )
+        return links
+
+    def delete_remote_link(self, pc_id: str) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM remote_links WHERE pc_id = ?", (pc_id,))
+            return cur.rowcount == 1
 
     def get_remote_meta(self, key: str) -> str | None:
         with self._lock:

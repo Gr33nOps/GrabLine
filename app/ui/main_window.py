@@ -249,6 +249,8 @@ class MainWindow(QMainWindow):
         # Before the shell, because the sidebar only offers Devices with it.
         self._remote_adder: remote_add.UnattendedAdder | None = None
         self._remote_service: Any = None
+        #: This PC's links to other PCs (the client side, PROTOCOL.md section 21).
+        self._link_service: Any = None
         self._start_remote_service()
 
         # Shell: a 48px icon rail on the left, the stacked content on the right.
@@ -735,12 +737,13 @@ class MainWindow(QMainWindow):
             self._on_settings_applied,
             remote_service=self._remote_service,
             open_devices=lambda: self._switch_view("devices"),
+            link_service=self._link_service,
         )
 
     def _make_devices_page(self) -> QWidget:
         from app.ui.devices_page import DevicesPage
 
-        page = DevicesPage(self._remote_service)
+        page = DevicesPage(self._remote_service, links=self._link_service)
         page.status.connect(lambda text: self.statusBar().showMessage(text, 6000))
         self._devices_page = page
         return page
@@ -1021,6 +1024,8 @@ class MainWindow(QMainWindow):
         if self._remote_service is not None:
             # Close phone connections first so no request reaches a dying window.
             self._remote_service.shutdown()
+        if self._link_service is not None:
+            self._link_service.shutdown()
         self._dashboard_view.shutdown()
         for timer in (self._timer, self._handoff_timer, self._rss_timer, self._watch_timer):
             timer.stop()
@@ -1112,12 +1117,26 @@ class MainWindow(QMainWindow):
             log.exception("phone remote unavailable")
             return
         self._remote_service = service
+        # Links to other PCs: each one connects out, so nothing listens here.
+        try:
+            from app.remote.client.service import LinkService
+
+            links = LinkService(self.manager, self)
+            links.start()
+        except Exception:
+            log.exception("PC links unavailable")
+            return
+        self._link_service = links
 
     def _add_send_to_phone_menu(self, menu: QMenu) -> dict[QAction, str | None]:
         """A "Send to phone" submenu: one entry per paired phone plus "Any
         phone". Returns action -> device id (None = any phone)."""
         service = self._remote_service
-        phones = service.store.list() if service is not None else []
+        phones = (
+            [d for d in service.store.list() if getattr(d, "kind", "phone") == "phone"]
+            if service is not None
+            else []
+        )
         send_menu = menu.addMenu(t("Send to phone"))
         send_menu.setEnabled(bool(phones))
         actions: dict[QAction, str | None] = {}

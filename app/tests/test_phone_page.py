@@ -52,13 +52,13 @@ def test_settings_page_keeps_only_the_switch_port_and_a_link_to_devices(
     # No second copy of the phone list or the Pair button.
     assert not hasattr(page, "pair_button") and not hasattr(page, "devices_box")
     assert [b.text() for b in page.findChildren(QPushButton)] == [
-        "Pair and manage phones in Devices"
+        "Pair and manage phones and PCs in Devices"
     ]
     texts = [label.text() for label in page.findChildren(QLabel)]
-    assert "Paired phones are listed in Devices." in texts
+    assert "Paired phones and PCs are listed in Devices." in texts
     assert "Pixel 8" not in texts
     button = page.devices_button
-    assert button.accessibleName() == "Pair and manage phones in Devices"
+    assert button.accessibleName() == "Pair and manage phones and PCs in Devices"
     button.click()
     assert opened == ["devices"]
     assert "start_pairing" not in service.names()
@@ -102,7 +102,7 @@ def test_phone_intro_does_not_repeat_the_status_line(service: FakeService) -> No
     page = PhonePage(service)
     texts = [label.text() for label in page.findChildren(QLabel)]
     intro = [text for text in texts if text.startswith("Control GrabLine")]
-    assert intro == ["Control GrabLine from your Android phone on the same Wi-Fi."]
+    assert intro == ["Control GrabLine from your Android phone or another PC on the same network."]
 
 
 def test_settings_view_hosts_phone_page(
@@ -122,9 +122,9 @@ def test_settings_view_hosts_phone_page(
             open_devices=lambda: opened.append("d"),
         )
         titles = [view._list.item(i).text() for i in range(view._list.count())]
-        assert "Phone" in titles
+        assert "Phones and PCs" in titles
         # Second section, right after General, so it is easy to find.
-        assert titles.index("Phone") == 1
+        assert titles.index("Phones and PCs") == 1
         assert titles[-1] == "About"
         view._list.setCurrentRow(1)  # sections are built when first opened
         phone = view.findChild(PhonePage)
@@ -264,9 +264,9 @@ def _allow_prompt(page: DevicesPage) -> tuple[QMessageBox, QPushButton, QPushBut
 def test_pending_opens_allow_prompt_and_allow_approves(service: FakeService) -> None:
     page = DevicesPage(service)
     page.pair_button.click()
-    service.pairingPending.emit("Pixel 8")
+    service.pairingPending.emit("Pixel 8", "phone")
     box, allow, _deny = _allow_prompt(page)
-    assert box.windowTitle() == "Pair a phone"
+    assert box.windowTitle() == "Pair a phone or PC"
     assert box.text() == 'Allow "Pixel 8" to control GrabLine?'
     allow.click()
     assert "approve_pairing" in service.names()
@@ -277,7 +277,7 @@ def test_pending_opens_allow_prompt_and_allow_approves(service: FakeService) -> 
     service.pairingFinished.emit("approved")
     dialog = page.pairing_dialog
     assert dialog is not None
-    assert "paired" in dialog.status_label.text()
+    assert "Paired" in dialog.status_label.text()
     assert dialog.qr_label.pixmap().isNull()
     assert _names(page) == ["Pixel 8", "Galaxy S", "Pixel 8"]
 
@@ -285,7 +285,7 @@ def test_pending_opens_allow_prompt_and_allow_approves(service: FakeService) -> 
 def test_deny_and_escape_deny(service: FakeService) -> None:
     page = DevicesPage(service)
     page.pair_button.click()
-    service.pairingPending.emit("Pixel 8")
+    service.pairingPending.emit("Pixel 8", "phone")
     _box, _allow, deny = _allow_prompt(page)
     deny.click()
     assert "deny_pairing" in service.names()
@@ -296,7 +296,7 @@ def test_deny_and_escape_deny(service: FakeService) -> None:
     assert dialog.status_label.text() == "Pairing cancelled"
 
     service.calls.clear()
-    service.pairingPending.emit("Pixel 8")
+    service.pairingPending.emit("Pixel 8", "phone")
     box, _allow, _deny = _allow_prompt(page)
     box.reject()
     assert service.names() == ["deny_pairing"]
@@ -305,7 +305,7 @@ def test_deny_and_escape_deny(service: FakeService) -> None:
 def test_prompt_closes_when_pairing_ends_without_answer(service: FakeService) -> None:
     page = DevicesPage(service)
     page.pair_button.click()
-    service.pairingPending.emit("Pixel 8")
+    service.pairingPending.emit("Pixel 8", "phone")
     assert page.allow_box is not None
     service.pairingFinished.emit("failed")
     assert page.allow_box is None
